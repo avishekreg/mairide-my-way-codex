@@ -17,25 +17,29 @@ export type ResLike = {
   json: (payload: any) => void;
 };
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let supabaseAdmin: any = null;
 
-if (!supabaseUrl || !supabaseServiceRoleKey) {
-  console.warn(
-    "Supabase env vars are incomplete. Set VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
-  );
-}
+function getSupabaseAdmin(): any {
+  if (supabaseAdmin) return supabaseAdmin;
 
-export const supabaseAdmin = createClient(
-  supabaseUrl || "https://invalid-project.supabase.co",
-  supabaseServiceRoleKey || "invalid-service-role-key",
-  {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    throw new Error(
+      "Supabase env vars are incomplete. Set VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+    );
+  }
+
+  supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-  }
-);
+  });
+
+  return supabaseAdmin;
+}
 
 export async function verifyTokenFromHeader(authHeader?: string) {
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -43,7 +47,7 @@ export async function verifyTokenFromHeader(authHeader?: string) {
   }
 
   const accessToken = authHeader.split("Bearer ")[1];
-  const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
+  const { data, error } = await getSupabaseAdmin().auth.getUser(accessToken);
 
   if (error || !data.user) {
     throw Object.assign(new Error("Unauthorized"), { status: 401 });
@@ -53,7 +57,7 @@ export async function verifyTokenFromHeader(authHeader?: string) {
 }
 
 export async function getUserProfile(uid: string) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from("users")
     .select("*")
     .eq("id", uid)
@@ -64,7 +68,7 @@ export async function getUserProfile(uid: string) {
 }
 
 async function findAuthUser(uid: string, email?: string | null) {
-  const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+  const { data, error } = await getSupabaseAdmin().auth.admin.listUsers({
     page: 1,
     perPage: 1000,
   });
@@ -153,17 +157,17 @@ export async function requireSuperAdmin(req: ReqLike, res: ResLike) {
         configuredSuperAdminEmail &&
         requestedDevEmail === configuredSuperAdminEmail
       ) {
-        const { data: devProfile, error: devProfileError } = await supabaseAdmin
+        const { data: devProfile, error: devProfileError } = await getSupabaseAdmin()
           .from("users")
           .select("*")
           .eq("email", requestedDevEmail)
           .maybeSingle();
 
-        if (devProfileError || !devProfile || devProfile.role !== "admin") {
+        if (devProfileError || !devProfile || (devProfile as any).role !== "admin") {
           throw authError;
         }
 
-        user = { id: devProfile.id, email: requestedDevEmail };
+        user = { id: (devProfile as any).id, email: requestedDevEmail };
         profile = devProfile;
       } else {
         throw authError;
@@ -204,7 +208,7 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
   }
 
   try {
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
       email,
       password,
       email_confirm: true,
@@ -228,7 +232,7 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
       forcePasswordChange: true,
     });
 
-    const { error: profileError } = await supabaseAdmin.from("users").upsert(row, {
+    const { error: profileError } = await getSupabaseAdmin().from("users").upsert(row, {
       onConflict: "id",
     });
 
@@ -259,17 +263,17 @@ export async function handleAdminUpdatePassword(req: ReqLike, res: ResLike) {
       throw new Error("No matching authentication account was found for this user. Ask the user to sign up once with their email, then retry the reset.");
     }
 
-    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(authUser.id, {
+    const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(authUser.id, {
       password: newPassword,
     });
     if (authError) throw authError;
 
     const mergedData = {
-      ...(profile?.data || {}),
+      ...(((profile as any)?.data) || {}),
       forcePasswordChange: true,
     };
 
-    const { error: updateError } = await supabaseAdmin
+    const { error: updateError } = await getSupabaseAdmin()
       .from("users")
       .update({
         force_password_change: true,
@@ -299,7 +303,7 @@ export async function handleAdminGenerateResetLink(req: ReqLike, res: ResLike) {
       process.env.VITE_APP_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined);
 
-    const { data, error } = await supabaseAdmin.auth.admin.generateLink({
+    const { data, error } = await getSupabaseAdmin().auth.admin.generateLink({
       type: "recovery",
       email,
       options: redirectTo ? { redirectTo } : undefined,
@@ -329,18 +333,18 @@ export async function handleUserChangePassword(req: ReqLike, res: ResLike) {
       ? req.headers.authorization[0]
       : req.headers.authorization;
     const user = await verifyTokenFromHeader(authHeader);
-    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+    const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(user.id, {
       password: newPassword,
     });
     if (authError) throw authError;
 
     const profile = await getUserProfile(user.id);
     const mergedData = {
-      ...(profile?.data || {}),
+      ...(((profile as any)?.data) || {}),
       forcePasswordChange: false,
     };
 
-    const { error: updateError } = await supabaseAdmin
+    const { error: updateError } = await getSupabaseAdmin()
       .from("users")
       .update({
         force_password_change: false,
