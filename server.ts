@@ -4,7 +4,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import {
   handleAdminCreateUser,
+  handleAdminGetConfig,
   handleAdminGenerateResetLink,
+  handleAdminSaveConfig,
   handleAdminUpdatePassword,
   handleHealth,
   handleSendEmailOtp,
@@ -28,6 +30,10 @@ async function startServer() {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminCreateUser(req, res);
   });
+  app.get("/api/admin/config", async (req, res) => {
+    if (!(await requireSuperAdmin(req, res))) return;
+    return handleAdminGetConfig(req, res);
+  });
   app.post("/api/admin/update-password", async (req, res) => {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminUpdatePassword(req, res);
@@ -35,6 +41,10 @@ async function startServer() {
   app.post("/api/admin/generate-reset-link", async (req, res) => {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminGenerateResetLink(req, res);
+  });
+  app.post("/api/admin/save-config", async (req, res) => {
+    if (!(await requireSuperAdmin(req, res))) return;
+    return handleAdminSaveConfig(req, res);
   });
   app.post("/api/user/change-password", handleUserChangePassword);
   app.post("/api/auth/send-otp", handleSendOtp);

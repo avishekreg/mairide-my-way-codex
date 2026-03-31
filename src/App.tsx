@@ -5873,28 +5873,51 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
 };
 
 const AdminConfigView = () => {
-  const { config, loading } = useAppConfig();
   const [formData, setFormData] = useState<Partial<AppConfig>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [loadingConfig, setLoadingConfig] = useState(true);
   const [uploadingQR, setUploadingQR] = useState(false);
 
   useEffect(() => {
-    if (config) setFormData(config);
-  }, [config]);
+    const loadConfig = async () => {
+      try {
+        const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
+        const response = await axios.get('/api/admin/config', { headers });
+        if (response.data?.config) {
+          setFormData(response.data.config);
+        } else {
+          setFormData({});
+        }
+      } catch (error: any) {
+        console.error('Error loading configuration:', error);
+        alert(error.response?.data?.error || error.message || "Failed to load configuration.");
+      } finally {
+        setLoadingConfig(false);
+      }
+    };
+
+    void loadConfig();
+  }, []);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      const configRef = doc(db, 'app_config', 'global');
-      await setDoc(configRef, {
+      const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
+      const response = await axios.post('/api/admin/save-config', {
         ...formData,
         updatedAt: new Date().toISOString(),
         updatedBy: auth.currentUser?.email || 'admin'
-      }, { merge: true });
+      }, {
+        headers
+      });
+      if (response.data?.config) {
+        setFormData(response.data.config);
+      }
       alert("Configuration saved successfully!");
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'app_config/global');
+    } catch (error: any) {
+      console.error('Error saving configuration:', error);
+      alert(error.response?.data?.error || error.message || "Failed to save configuration.");
     } finally {
       setIsSaving(false);
     }
@@ -5923,7 +5946,7 @@ const AdminConfigView = () => {
     }
   };
 
-  if (loading) return <div className="p-20 text-center font-bold">Loading configuration...</div>;
+  if (loadingConfig) return <div className="p-20 text-center font-bold">Loading configuration...</div>;
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">

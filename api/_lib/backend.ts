@@ -206,6 +206,32 @@ export async function handleHealth(_req: ReqLike, res: ResLike) {
   res.status(200).json({ status: "ok", backend: "supabase" });
 }
 
+export async function handleAdminGetConfig(_req: ReqLike, res: ResLike) {
+  try {
+    const { data, error } = await getSupabaseAdmin()
+      .from("app_config")
+      .select("*")
+      .eq("id", "global")
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const config = data
+      ? {
+          id: data.id,
+          ...((data.data as Record<string, any>) || {}),
+          createdAt: data.created_at,
+          updatedAt: data.updated_at,
+        }
+      : null;
+
+    res.status(200).json({ config });
+  } catch (error: any) {
+    console.error("Error fetching configuration:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch configuration" });
+  }
+}
+
 export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
   const { email, password, displayName, phoneNumber, role, adminRole } = req.body || {};
 
@@ -324,6 +350,49 @@ export async function handleAdminGenerateResetLink(req: ReqLike, res: ResLike) {
   } catch (error: any) {
     console.error("Error generating reset link:", error);
     res.status(500).json({ error: error.message || "Failed to generate reset link" });
+  }
+}
+
+export async function handleAdminSaveConfig(req: ReqLike, res: ResLike) {
+  const payload = req.body || {};
+
+  try {
+    const now = new Date().toISOString();
+    const updatedBy =
+      req.user?.email ||
+      req.profile?.email ||
+      payload.updatedBy ||
+      process.env.VITE_SUPER_ADMIN_EMAIL ||
+      "admin";
+
+    const configData = {
+      ...payload,
+      updatedAt: now,
+      updatedBy,
+    };
+
+    const row = {
+      id: "global",
+      updated_at: now,
+      data: configData,
+    };
+
+    const { error } = await getSupabaseAdmin().from("app_config").upsert(row, {
+      onConflict: "id",
+    });
+
+    if (error) throw error;
+
+    res.status(200).json({
+      message: "Configuration saved successfully",
+      config: {
+        id: "global",
+        ...configData,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error saving configuration:", error);
+    res.status(500).json({ error: error.message || "Failed to save configuration" });
   }
 }
 
