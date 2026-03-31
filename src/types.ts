@@ -33,6 +33,11 @@ export interface UserProfile {
     balance: number; // MaiCoins
     pendingBalance: number; // Coins from referrals not yet "ready"
   };
+  reviewStats?: {
+    averageRating: number;
+    ratingCount: number;
+    lastReviewAt?: string;
+  };
   location?: {
     lat: number;
     lng: number;
@@ -200,6 +205,16 @@ export interface Booking {
   rideEndOtpVerifiedAt?: string;
   rideStartedAt?: string;
   rideEndedAt?: string;
+  consumerReview?: {
+    rating: number;
+    comment?: string;
+    createdAt: string;
+  };
+  driverReview?: {
+    rating: number;
+    comment?: string;
+    createdAt: string;
+  };
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'negotiating' | 'rejected';
   createdAt: string;
 }

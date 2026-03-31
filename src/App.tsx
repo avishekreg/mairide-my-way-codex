@@ -540,6 +540,35 @@ const getAdminRequestHeaders = async (adminEmail?: string | null) => {
   };
 };
 
+const getResolvedUserRating = (user?: UserProfile | null) => {
+  const aggregateRating = user?.reviewStats?.averageRating;
+  if (typeof aggregateRating === 'number' && user?.reviewStats?.ratingCount) {
+    return Number(aggregateRating.toFixed(1));
+  }
+  if (typeof user?.driverDetails?.rating === 'number') {
+    return Number(user.driverDetails.rating.toFixed(1));
+  }
+  return 5.0;
+};
+
+const hasSubmittedBookingReview = (booking: Booking, reviewerRole: 'consumer' | 'driver') =>
+  reviewerRole === 'consumer' ? !!booking.consumerReview : !!booking.driverReview;
+
+const submitBookingReview = async (bookingId: string, rating: number, comment: string) => {
+  const token = await getAccessToken();
+  const response = await axios.post(
+    '/api/bookings/submit-review',
+    { bookingId, rating, comment },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  return response.data;
+};
+
 const LoadingScreen = () => (
   <div className="fixed inset-0 bg-mairide-bg flex flex-col items-center justify-center z-50">
     <motion.div
@@ -2354,6 +2383,102 @@ const PaymentProofModal = ({
   );
 };
 
+const RideReviewModal = ({
+  booking,
+  reviewerRole,
+  onClose,
+  onSubmit,
+  isSubmitting,
+}: {
+  booking: Booking;
+  reviewerRole: 'consumer' | 'driver';
+  onClose: () => void;
+  onSubmit: (payload: { rating: number; comment: string }) => Promise<void>;
+  isSubmitting: boolean;
+}) => {
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const counterpartLabel = reviewerRole === 'consumer' ? booking.driverName : booking.consumerName;
+  const title = reviewerRole === 'consumer' ? 'Rate Your Driver' : 'Rate Your Traveler';
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rating) return;
+    await onSubmit({ rating, comment: comment.trim() });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="w-full max-w-lg rounded-[36px] bg-white p-8 shadow-2xl"
+      >
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Post-Ride Review</p>
+            <h3 className="mt-2 text-3xl font-black tracking-tight text-mairide-primary">{title}</h3>
+            <p className="mt-2 text-sm text-mairide-secondary">
+              Share quick feedback about <span className="font-bold text-mairide-primary">{counterpartLabel}</span>.
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-2xl bg-mairide-bg p-2 text-mairide-secondary hover:text-mairide-primary">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-mairide-secondary">Rating</p>
+            <div className="flex items-center gap-2">
+              {Array.from({ length: 5 }, (_, index) => {
+                const star = index + 1;
+                const active = rating >= star;
+                return (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() => setRating(star)}
+                    className="rounded-2xl p-2 transition-transform hover:scale-105"
+                  >
+                    <Star
+                      className={cn(
+                        'h-8 w-8',
+                        active ? 'fill-mairide-accent text-mairide-accent' : 'fill-transparent text-mairide-secondary/30'
+                      )}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-3 block text-xs font-bold uppercase tracking-widest text-mairide-secondary">
+              Review Comment (Optional)
+            </label>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              rows={4}
+              placeholder="What went well, and what should improve?"
+              className="w-full rounded-3xl border border-mairide-secondary bg-mairide-bg px-5 py-4 outline-none focus:border-mairide-accent"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={!rating || isSubmitting}
+            className="w-full rounded-3xl bg-mairide-primary py-4 text-lg font-bold text-white disabled:opacity-50"
+          >
+            {isSubmitting ? 'Submitting review...' : 'Submit Review'}
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
 const TravelerDashboardSummary = ({
   bookings,
   onAcceptCounter,
@@ -2605,6 +2730,8 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
   const [bookings, setBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [paymentBooking, setPaymentBooking] = useState<Booking | null>(null);
+  const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
   useEffect(() => {
     const q = query(
@@ -2712,6 +2839,22 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${bookingId}`);
+    }
+  };
+
+  const handleSubmitReview = async ({ rating, comment }: { rating: number; comment: string }) => {
+    if (!reviewBooking) return;
+
+    setIsSubmittingReview(true);
+    try {
+      await submitBookingReview(reviewBooking.id, rating, comment);
+      alert('Your ride review has been submitted successfully.');
+      setReviewBooking(null);
+    } catch (error: any) {
+      console.error('Error submitting ride review:', error);
+      alert(error.response?.data?.error || error.message || 'Failed to submit ride review.');
+    } finally {
+      setIsSubmittingReview(false);
     }
   };
 
@@ -2913,6 +3056,38 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                   </p>
                 </div>
               )}
+
+              {booking.status === 'completed' && (
+                <div className="mt-4 rounded-2xl border border-mairide-secondary bg-mairide-bg p-5">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Post-Ride Review</p>
+                      {booking.consumerReview ? (
+                        <>
+                          <p className="mt-2 text-sm font-bold text-mairide-primary">
+                            You rated {booking.driverName} {booking.consumerReview.rating}/5
+                          </p>
+                          {booking.consumerReview.comment && (
+                            <p className="mt-1 text-sm italic text-mairide-secondary">"{booking.consumerReview.comment}"</p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="mt-2 text-sm text-mairide-secondary">
+                          Rate your driver now so future travelers can trust the platform more easily.
+                        </p>
+                      )}
+                    </div>
+                    {!booking.consumerReview && (
+                      <button
+                        onClick={() => setReviewBooking(booking)}
+                        className="rounded-2xl bg-mairide-primary px-6 py-3 text-sm font-bold text-white"
+                      >
+                        Rate Driver
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           ))
         ) : (
@@ -2929,6 +3104,15 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
           config={config}
           onClose={() => setPaymentBooking(null)}
           onSubmit={(payload) => submitTravelerPaymentProof(paymentBooking, payload)}
+        />
+      )}
+      {reviewBooking && (
+        <RideReviewModal
+          booking={reviewBooking}
+          reviewerRole="consumer"
+          onClose={() => setReviewBooking(null)}
+          onSubmit={handleSubmitReview}
+          isSubmitting={isSubmittingReview}
         />
       )}
     </div>
@@ -3044,6 +3228,8 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loadingRides, setLoadingRides] = useState(true);
   const [loadingBookings, setLoadingBookings] = useState(true);
+  const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
   useEffect(() => {
     const ridesQuery = query(collection(db, 'rides'), where('driverId', '==', profile.uid));
@@ -3096,6 +3282,22 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
       maicoins: Math.round(monthMaicoins.reduce((sum, booking) => sum + (booking.driverMaiCoinsUsed || 0), 0)),
     };
   });
+
+  const handleSubmitReview = async ({ rating, comment }: { rating: number; comment: string }) => {
+    if (!reviewBooking) return;
+
+    setIsSubmittingReview(true);
+    try {
+      await submitBookingReview(reviewBooking.id, rating, comment);
+      alert('Your traveler review has been submitted successfully.');
+      setReviewBooking(null);
+    } catch (error: any) {
+      console.error('Error submitting traveler review:', error);
+      alert(error.response?.data?.error || error.message || 'Failed to submit traveler review.');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto p-8">
@@ -3151,6 +3353,47 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
       </div>
 
       <div className="space-y-4">
+        <h2 className="text-xl font-bold text-mairide-primary">Completed Trips & Traveler Reviews</h2>
+        {completedTrips.length ? (
+          completedTrips.map((booking) => (
+            <div key={booking.id} className="bg-white rounded-3xl border border-mairide-secondary p-6 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-lg font-bold text-mairide-primary">{booking.origin} → {booking.destination}</p>
+                  <p className="text-sm text-mairide-secondary">Traveler: {booking.consumerName}</p>
+                  <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary mt-2">
+                    Completed {booking.rideEndedAt ? new Date(booking.rideEndedAt).toLocaleString() : new Date(booking.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="md:text-right">
+                  <p className="text-lg font-black text-mairide-accent">{formatCurrency(booking.fare || 0)}</p>
+                  {booking.driverReview ? (
+                    <div className="mt-2 inline-flex items-center rounded-full bg-green-50 px-4 py-2 text-xs font-bold text-green-700">
+                      Rated traveler {booking.driverReview.rating}/5
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setReviewBooking(booking)}
+                      className="mt-2 rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white"
+                    >
+                      Rate Traveler
+                    </button>
+                  )}
+                </div>
+              </div>
+              {booking.driverReview?.comment && (
+                <p className="mt-3 text-sm italic text-mairide-secondary">"{booking.driverReview.comment}"</p>
+              )}
+            </div>
+          ))
+        ) : (
+          <div className="rounded-3xl border border-dashed border-mairide-secondary bg-white py-12 text-center">
+            <p className="text-mairide-secondary">Completed rides will appear here for traveler reviews.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-8 space-y-4">
         <h2 className="text-xl font-bold text-mairide-primary">All Ride Offers</h2>
         {rides.length ? (
           rides.map((ride) => (
@@ -3182,6 +3425,15 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
           </div>
         )}
       </div>
+      {reviewBooking && (
+        <RideReviewModal
+          booking={reviewBooking}
+          reviewerRole="driver"
+          onClose={() => setReviewBooking(null)}
+          onSubmit={handleSubmitReview}
+          isSubmitting={isSubmittingReview}
+        />
+      )}
     </div>
   );
 };
@@ -4157,7 +4409,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
                         <h3 className="font-bold text-mairide-primary">{ride.driverName}</h3>
                         <div className="flex items-center text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-bold">
                           <Star className="w-3 h-3 mr-1 fill-current" />
-                          {ride.rating}
+                          {Number(ride.driverRating ?? ride.rating ?? 5).toFixed(1)}
                         </div>
                       </div>
                       <div className="flex items-center text-sm text-mairide-secondary space-x-2">
@@ -4407,7 +4659,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       await addDoc(collection(db, 'rides'), {
         driverId: profile.uid,
         driverName: profile.displayName,
-        driverRating: profile.driverDetails?.rating || 5.0,
+        driverRating: getResolvedUserRating(profile),
         origin: newRide.origin,
         destination: newRide.destination,
         originLocation: originLocation || userLocation,
@@ -4675,7 +4927,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             <div className="bg-white p-6 rounded-3xl border border-mairide-secondary shadow-sm">
               <p className="text-sm text-mairide-secondary mb-1">Rating</p>
               <div className="flex items-center space-x-2">
-                <h3 className="text-2xl font-black text-mairide-primary">{profile.driverDetails?.rating}</h3>
+                <h3 className="text-2xl font-black text-mairide-primary">{getResolvedUserRating(profile).toFixed(1)}</h3>
                 <Star className="w-5 h-5 text-mairide-accent fill-current" />
               </div>
             </div>
