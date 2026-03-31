@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import dotenv from "dotenv";
 import {
   handleAdminCreateUser,
   handleAdminGetConfig,
@@ -18,6 +19,11 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config();
+  dotenv.config({ path: ".env.local", override: true });
+}
 
 async function startServer() {
   const app = express();
