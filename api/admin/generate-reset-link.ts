@@ -1,4 +1,4 @@
-import { handleAdminGenerateResetLink, requireSuperAdmin } from "../../src/server/backend";
+import { handleAdminGenerateResetLink, requireSuperAdmin } from "../../src/server/backend.ts";
 
 export default async function handler(req: any, res: any) {
   if (!(await requireSuperAdmin(req, res))) return;
