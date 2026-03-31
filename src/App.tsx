@@ -6474,6 +6474,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'config' | 'analytics' | 'security' | 'map'>('revenue');
+  const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   if (loadError || authFailure) {
     return (
@@ -6581,12 +6582,63 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (!('geolocation' in navigator)) return;
+
+    let isMounted = true;
+    const syncLocation = (latitude: number, longitude: number) => {
+      const nextLocation = { lat: latitude, lng: longitude };
+      if (isMounted) {
+        setAdminLocation(nextLocation);
+      }
+
+      updateDoc(doc(db, 'users', profile.uid), {
+        location: {
+          ...nextLocation,
+          lastUpdated: new Date().toISOString(),
+        },
+      }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        syncLocation(position.coords.latitude, position.coords.longitude);
+      },
+      (error) => console.error('Admin geolocation error:', error),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        syncLocation(position.coords.latitude, position.coords.longitude);
+      },
+      (error) => console.error('Admin geolocation watch error:', error),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }
+    );
+
+    return () => {
+      isMounted = false;
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [profile.uid]);
+
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
+  const usersWithLocation = users.filter(
+    u => u.location && typeof u.location.lat === 'number' && typeof u.location.lng === 'number'
+  );
+  const adminMapCenter = adminLocation
+    || (usersWithLocation.length
+      ? {
+          lat: usersWithLocation.reduce((sum, user) => sum + user.location!.lat, 0) / usersWithLocation.length,
+          lng: usersWithLocation.reduce((sum, user) => sum + user.location!.lng, 0) / usersWithLocation.length,
+        }
+      : { lat: 22.5937, lng: 78.9629 });
+  const adminMapZoom = adminLocation ? 13 : usersWithLocation.length ? 5 : 4;
 
   const handleVerifyDriver = async (userId: string, status: 'approved' | 'rejected') => {
     if (!selectedDriver || selectedDriver.verificationStatus !== 'pending') {
@@ -6874,8 +6926,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             {GOOGLE_MAPS_API_KEY && isLoaded && window.google ? (
               <GoogleMap
                 mapContainerStyle={{ width: '100%', height: '100%' }}
-                center={{ lat: 26.1433, lng: 91.7385 }}
-                zoom={12}
+                center={adminMapCenter}
+                zoom={adminMapZoom}
                 options={{
                   styles: [
                     { "featureType": "poi", "stylers": [{ "visibility": "off" }] },
@@ -6883,7 +6935,17 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   ]
                 }}
               >
-                {users.filter(u => u.location && typeof u.location.lat === 'number' && typeof u.location.lng === 'number').map(user => (
+                {adminLocation && (
+                  <Marker
+                    position={adminLocation}
+                    icon={{
+                      url: 'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png',
+                      scaledSize: new window.google.maps.Size(30, 30)
+                    }}
+                    title="Super Admin Current Location"
+                  />
+                )}
+                {usersWithLocation.map(user => (
                   <Marker
                     key={user.uid}
                     position={{ lat: user.location!.lat, lng: user.location!.lng }}
