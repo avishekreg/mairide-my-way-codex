@@ -1,9 +1,15 @@
 import axios from "axios";
-import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 
-dotenv.config();
-dotenv.config({ path: ".env.local", override: true });
+if (!process.env.VERCEL && process.env.NODE_ENV !== "production") {
+  try {
+    const dotenv = await import("dotenv");
+    dotenv.config();
+    dotenv.config({ path: ".env.local", override: true });
+  } catch {
+    // Local env loading is best-effort only.
+  }
+}
 
 export type ReqLike = {
   body?: any;

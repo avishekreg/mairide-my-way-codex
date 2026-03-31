@@ -1,5 +1,3 @@
-import { handleHealth } from "./_lib/backend.ts";
-
 export default async function handler(req: any, res: any) {
-  return handleHealth(req, res);
+  return res.status(200).json({ status: "ok", backend: "supabase" });
 }
