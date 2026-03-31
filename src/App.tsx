@@ -876,32 +876,23 @@ const AuthPage = ({
     try {
       let existingProfile: UserProfile | null = null;
 
-      // We need to be authenticated to query users.
-      let tempAuthUsed = false;
-      if (!auth.currentUser) {
-        try {
-          await signInAnonymously(auth);
-          tempAuthUsed = true;
-        } catch (authError: any) {
-          console.error("Temp Auth Error:", authError);
-        }
-      }
-
       if (isPhone) {
+        let tempAuthUsed = false;
+        if (!auth.currentUser) {
+          try {
+            await signInAnonymously(auth);
+            tempAuthUsed = true;
+          } catch (authError: any) {
+            console.error("Temp Auth Error:", authError);
+          }
+        }
+
         const q = query(collection(db, 'users'), where('phoneNumber', '==', username));
         const snap = await getDocs(q);
         if (!snap.empty) {
           existingProfile = snap.docs[0].data() as UserProfile;
         }
-      } else if (isEmail) {
-        const q = query(collection(db, 'users'), where('email', '==', username));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          existingProfile = snap.docs[0].data() as UserProfile;
-        }
-      }
 
-      if (isPhone) {
         if (!existingProfile && username.toLowerCase() !== SUPER_ADMIN_EMAIL) {
           if (tempAuthUsed) await signOut(auth);
           throw new Error("NOT_REGISTERED");
@@ -923,13 +914,7 @@ const AuthPage = ({
         }
       } else {
         // Email/Password Login
-        if (tempAuthUsed) await signOut(auth);
-        const result = await signInWithEmailAndPassword(auth, existingProfile?.email || username, password);
-        if (existingProfile?.role === 'driver') {
-          setRole('driver');
-        } else if (existingProfile?.role === 'consumer') {
-          setRole('consumer');
-        }
+        const result = await signInWithEmailAndPassword(auth, username.trim(), password);
         await handleProfileSetup(result.user, undefined, undefined, false);
       }
     } catch (error: any) {
