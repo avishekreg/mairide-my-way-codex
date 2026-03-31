@@ -12,7 +12,7 @@ import {
   handleUserChangePassword,
   handleVerifyOtp,
   requireSuperAdmin,
-} from "./src/server/backend";
+} from "./api/_lib/backend.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
