@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+@theme {
+  --color-mairide-bg: #F4F7F8;
+  --color-mairide-secondary: #6F8090;
+  --color-mairide-primary: #1F2D38;
+  --color-mairide-accent: #E97A2E;
+}

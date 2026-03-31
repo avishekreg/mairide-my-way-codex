@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "avishekreg@gmail.com" && request.auth.token.email_verified == true));
+    }
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !('field' in request.resource.data) || 
+             (request.resource.data[field] is string && 
+              request.resource.data[field].size() >= minLen && 
+              request.resource.data[field].size() <= maxLen);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return data.email is string &&
+             data.displayName is string &&
+             data.role in ['consumer', 'driver', 'admin'] &&
+             data.status in ['active', 'inactive'] &&
+             data.onboardingComplete is bool;
+    }
+
+    match /users/{userId} {
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated();
+      allow create: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data);
+      allow update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /rides/{rideId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.driverId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isAuthenticated() && (resource.data.consumerId == request.auth.uid || resource.data.driverId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.consumerId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.consumerId == request.auth.uid || resource.data.driverId == request.auth.uid || isAdmin());
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid && request.resource.data.status == 'completed'); 
+      allow update: if isAdmin();
+    }
+
+    match /referrals/{referralId} {
+      allow read: if isAuthenticated() && (resource.data.referrerId == request.auth.uid || resource.data.referredId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.referredId == request.auth.uid; // Only the referred user can create the referral record during signup
+      allow update: if isAdmin();
+    }
+
+    match /support_tickets/{ticketId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /_connection_test_/{docId} {
+      allow read: if true;
+    }
+
+    match /app_config/{configId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,225 @@
+{
+  "entities": {
+    "AppConfig": {
+      "title": "App Configuration",
+      "description": "Global application variables and API keys",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "upiId": { "type": "string" },
+        "qrCodeUrl": { "type": "string" },
+        "maintenanceFeeBase": { "type": "number" },
+        "gstRate": { "type": "number" },
+        "referralRewardTier1": { "type": "number" },
+        "referralRewardTier2": { "type": "number" },
+        "paymentGatewayUrl": { "type": "string" },
+        "paymentGatewayApiKey": { "type": "string" },
+        "smsApiUrl": { "type": "string" },
+        "smsApiKey": { "type": "string" },
+        "emailApiUrl": { "type": "string" },
+        "emailApiKey": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["upiId", "maintenanceFeeBase", "gstRate", "referralRewardTier1", "referralRewardTier2"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile for both consumers and drivers",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["consumer", "driver", "admin"] },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "phoneNumber": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "onboardingComplete": { "type": "boolean" },
+        "referralCode": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "referralPath": { "type": "array", "items": { "type": "string" } },
+        "wallet": {
+          "type": "object",
+          "properties": {
+            "balance": { "type": "number" },
+            "pendingBalance": { "type": "number" }
+          }
+        },
+        "driverDetails": {
+          "type": "object",
+          "properties": {
+            "aadhaarNumber": { "type": "string" },
+            "aadhaarFrontPhoto": { "type": "string" },
+            "aadhaarBackPhoto": { "type": "string" },
+            "aadhaarGeoTag": { "type": "object" },
+            "dlNumber": { "type": "string" },
+            "dlFrontPhoto": { "type": "string" },
+            "dlBackPhoto": { "type": "string" },
+            "dlGeoTag": { "type": "object" },
+            "selfiePhoto": { "type": "string" },
+            "selfieGeoTag": { "type": "object" },
+            "vehicleMake": { "type": "string" },
+            "vehicleModel": { "type": "string" },
+            "vehicleColor": { "type": "string" },
+            "vehicleCapacity": { "type": "number" },
+            "vehicleRegNumber": { "type": "string" },
+            "vehiclePhoto": { "type": "string" },
+            "rcPhoto": { "type": "string" },
+            "rcGeoTag": { "type": "object" },
+            "isOnline": { "type": "boolean" },
+            "rating": { "type": "number" },
+            "totalEarnings": { "type": "number" }
+          }
+        }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A financial transaction in the system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["referral_bonus", "referral_tier2", "maintenance_fee_payment", "fintech_payment", "wallet_topup"] },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["INR", "MAICOIN"] },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "description": { "type": "string" },
+        "relatedId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "metadata": { "type": "object" }
+      },
+      "required": ["userId", "type", "amount", "currency", "status"]
+    },
+    "Referral": {
+      "title": "Referral",
+      "description": "Tracking of a referral relationship",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "referrerId": { "type": "string" },
+        "referredId": { "type": "string" },
+        "tier": { "type": "integer", "enum": [1, 2] },
+        "status": { "type": "string", "enum": ["joined", "ride_started", "fee_paid"] },
+        "rewardAmount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["referrerId", "referredId", "tier", "status"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "A support query or complaint from a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "subject": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "in-progress", "resolved", "closed"] },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "responses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "senderId": { "type": "string" },
+              "senderName": { "type": "string" },
+              "message": { "type": "string" },
+              "createdAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      },
+      "required": ["userId", "subject", "message", "status"]
+    },
+    "Ride": {
+      "title": "Ride",
+      "description": "A ride offer created by a driver on an empty leg journey",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "origin": { "type": "string" },
+        "destination": { "type": "string" },
+        "departureTime": { "type": "string", "format": "date-time" },
+        "price": { "type": "number" },
+        "seatsAvailable": { "type": "number" },
+        "status": { "type": "string", "enum": ["available", "full", "completed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["driverId", "origin", "destination", "price", "status"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A booking made by a consumer for a specific ride",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "rideId": { "type": "string" },
+        "consumerId": { "type": "string" },
+        "consumerName": { "type": "string" },
+        "consumerPhone": { "type": "string" },
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "driverPhone": { "type": "string" },
+        "origin": { "type": "string" },
+        "destination": { "type": "string" },
+        "fare": { "type": "number" },
+        "seatsBooked": { "type": "number" },
+        "totalPrice": { "type": "number" },
+        "serviceFee": { "type": "number" },
+        "gstAmount": { "type": "number" },
+        "maiCoinsUsed": { "type": "number" },
+        "driverFeePaid": { "type": "boolean" },
+        "driverMaiCoinsUsed": { "type": "number" },
+        "feePaid": { "type": "boolean" },
+        "paymentStatus": { "type": "string", "enum": ["pending", "paid", "failed"] },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "completed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["rideId", "consumerId", "driverId", "status"]
+    }
+  },
+  "firestore": {
+    "/app_config/{configId}": {
+      "schema": "AppConfig",
+      "description": "Global application configuration"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/rides/{rideId}": {
+      "schema": "Ride",
+      "description": "Ride offers"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Ride bookings"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Financial transactions"
+    },
+    "/referrals/{referralId}": {
+      "schema": "Referral",
+      "description": "Referral relationships"
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Support queries and complaints"
+    },
+    "/_connection_test_/{docId}": {
+      "schema": "object",
+      "description": "Used for testing Firestore connectivity"
+    }
+  }
+}

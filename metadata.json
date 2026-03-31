@@ -1,0 +1,8 @@
+{
+  "name": "MaiRide my way",
+  "description": "A long-distance cab aggregator for empty-leg journeys, offering discounted rides for travelers and extra earnings for drivers.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
