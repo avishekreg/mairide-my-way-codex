@@ -6130,6 +6130,17 @@ const AdminConfigView = () => {
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [uploadingQR, setUploadingQR] = useState(false);
 
+  const saveConfig = async (payload: Partial<AppConfig>) => {
+    const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
+    const response = await axios.post('/api/admin/save-config', payload, {
+      headers
+    });
+    if (response.data?.config) {
+      setFormData(response.data.config);
+    }
+    return response.data?.config;
+  };
+
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -6155,17 +6166,11 @@ const AdminConfigView = () => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
-      const response = await axios.post('/api/admin/save-config', {
+      await saveConfig({
         ...formData,
         updatedAt: new Date().toISOString(),
         updatedBy: auth.currentUser?.email || 'admin'
-      }, {
-        headers
       });
-      if (response.data?.config) {
-        setFormData(response.data.config);
-      }
       alert("Configuration saved successfully!");
     } catch (error: any) {
       console.error('Error saving configuration:', error);
@@ -6183,13 +6188,30 @@ const AdminConfigView = () => {
     try {
       const reader = new FileReader();
       reader.onload = async (event) => {
-        const base64 = event.target?.result as string;
-        const path = `config/qr_code_${Date.now()}`;
-        const storageReference = storageRef(storage, path);
-        await uploadString(storageReference, base64, 'data_url');
-        const url = await getDownloadURL(storageReference);
-        setFormData(prev => ({ ...prev, qrCodeUrl: url }));
+        try {
+          const base64 = event.target?.result as string;
+          const path = `config/qr_code_${Date.now()}`;
+          const storageReference = storageRef(storage, path);
+          await uploadString(storageReference, base64, 'data_url');
+          const url = await getDownloadURL(storageReference);
+          const nextPayload = { ...formData, qrCodeUrl: url };
+          setFormData(nextPayload);
+          await saveConfig({
+            ...nextPayload,
+            updatedAt: new Date().toISOString(),
+            updatedBy: auth.currentUser?.email || 'admin'
+          });
+          alert('QR code uploaded and saved successfully!');
+        } catch (error: any) {
+          console.error("QR Upload error:", error);
+          alert(error.response?.data?.error || error.message || "Failed to upload and save QR code.");
+        } finally {
+          setUploadingQR(false);
+        }
+      };
+      reader.onerror = () => {
         setUploadingQR(false);
+        alert('Failed to read the selected QR image.');
       };
       reader.readAsDataURL(file);
     } catch (error) {
