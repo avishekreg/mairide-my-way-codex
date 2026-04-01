@@ -743,6 +743,20 @@ const AuthPage = ({
       if (data.Status === 'Success') {
         setEmailSessionId(data.Details);
         setStep('email-otp');
+      } else if (data.Code === 'EMAIL_OTP_UNAVAILABLE') {
+        const phoneOtpResponse = await fetch('/api/auth/send-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phoneNumber }),
+        });
+        const phoneOtpData = await phoneOtpResponse.json();
+        if (phoneOtpData.Status === 'Success') {
+          setSessionId(phoneOtpData.Details);
+          setStep('otp');
+          alert('Email OTP is unavailable right now. We have sent an OTP to your phone instead so you can continue signup.');
+        } else {
+          throw new Error(phoneOtpData.Details || 'Failed to send phone OTP');
+        }
       } else {
         throw new Error(data.Details || 'Failed to send Email OTP');
       }

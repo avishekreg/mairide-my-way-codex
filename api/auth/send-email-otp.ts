@@ -23,7 +23,19 @@ export default async function handler(req: any, res: any) {
     );
 
     const rawText = await response.text();
-    const payload = rawText ? JSON.parse(rawText) : {};
+    const contentType = response.headers.get("content-type") || "";
+    const isJson = contentType.includes("application/json");
+    const payload = isJson && rawText ? JSON.parse(rawText) : null;
+
+    if (!isJson) {
+      return res.status(503).json({
+        Status: "Error",
+        Code: "EMAIL_OTP_UNAVAILABLE",
+        Details:
+          "Email OTP service is currently unavailable for this account. Please continue with phone OTP verification.",
+        providerStatus: response.status,
+      });
+    }
 
     if (!response.ok) {
       return res.status(response.status).json(payload);
@@ -34,7 +46,9 @@ export default async function handler(req: any, res: any) {
     console.error("2Factor Email OTP Error:", error);
     return res.status(500).json({
       Status: "Error",
-      Details: error?.message || "Failed to send Email OTP",
+      Code: "EMAIL_OTP_UNAVAILABLE",
+      Details:
+        error?.message || "Email OTP service is currently unavailable. Please continue with phone OTP verification.",
     });
   }
 }
