@@ -900,6 +900,7 @@ const AuthPage = ({
           displayName,
           phoneNumber,
           role: role || 'consumer',
+          referralCodeInput,
           consents: {
             truthfulInformationAccepted: truthDeclarationAccepted,
             termsAccepted,
@@ -1091,10 +1092,6 @@ const AuthPage = ({
           };
           
           await setDoc(docRef, newProfile);
-
-          if (isSignUp && (!newProfile.referralCode || !newProfile.wallet)) {
-            await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined);
-          }
           
           if (oldUid !== user.uid && !oldUid.startsWith('manual_')) {
             await deleteDoc(doc(db, 'users', oldUid));
@@ -1138,9 +1135,6 @@ const AuthPage = ({
         const existingProfile = docSnap.data() as UserProfile;
         if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL && existingProfile.role !== 'admin') {
           await updateDoc(docRef, { role: 'admin', onboardingComplete: true });
-        }
-        if (isSignUp && (!existingProfile.referralCode || !existingProfile.wallet)) {
-          await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined);
         }
       }
     } catch (error: any) {
