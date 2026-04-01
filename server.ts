@@ -5,16 +5,18 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import submitReviewHandler from "./api/bookings/submit-review.ts";
 import {
+  handleSendEmailOtp,
+  handleSendOtp,
+  handleVerifyOtp,
+} from "./api/_lib/otp.ts";
+import {
   handleAdminCreateUser,
   handleAdminGetConfig,
   handleAdminGenerateResetLink,
   handleAdminSaveConfig,
   handleAdminUpdatePassword,
   handleHealth,
-  handleSendEmailOtp,
-  handleSendOtp,
   handleUserChangePassword,
-  handleVerifyOtp,
   requireSuperAdmin,
 } from "./api/_lib/backend.ts";
 
