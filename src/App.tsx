@@ -748,7 +748,11 @@ const AuthPage = ({
       }
     } catch (error: any) {
       console.error("Email OTP Send Error:", error);
-      alert(error.message || "Failed to send Email OTP. Please check the email address.");
+      const message =
+        error.message === 'The string did not match the expected pattern.'
+          ? 'Failed to send Email OTP. Please check the email format and try again.'
+          : error.message || "Failed to send Email OTP. Please check the email address.";
+      alert(message);
     } finally {
       setIsLoading(false);
     }
@@ -796,7 +800,11 @@ const AuthPage = ({
       }
     } catch (error: any) {
       console.error("OTP Send Error:", error);
-      alert(error.message || "Failed to send OTP. Please check the phone number format (e.g., 919876543210).");
+      const message =
+        error.message === 'The string did not match the expected pattern.'
+          ? 'Failed to send OTP. Please enter the mobile number in digits only, for example 919876543210.'
+          : error.message || "Failed to send OTP. Please check the phone number format (e.g., 919876543210).";
+      alert(message);
     } finally {
       setIsLoading(false);
     }

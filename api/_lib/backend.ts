@@ -429,15 +429,20 @@ export async function handleUserChangePassword(req: ReqLike, res: ResLike) {
 export async function handleSendOtp(req: ReqLike, res: ResLike) {
   const { phoneNumber } = req.body || {};
   const apiKey = process.env.TWO_FACTOR_API_KEY;
+  const normalizedPhone = String(phoneNumber || "").replace(/[^\d]/g, "");
+
+  if (!normalizedPhone) {
+    return res.status(400).json({ Status: "Error", Details: "A valid phone number is required." });
+  }
 
   if (!apiKey) {
-    console.log(`[DEV] Mock SMS OTP sent to ${phoneNumber}: 123456`);
+    console.log(`[DEV] Mock SMS OTP sent to ${normalizedPhone}: 123456`);
     return res.status(200).json({ Status: "Success", Details: "mock_sms_session_id" });
   }
 
   try {
     const response = await axios.get(
-      `https://2factor.in/API/V1/${apiKey}/SMS/${phoneNumber}/AUTOGEN2`
+      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/AUTOGEN2`
     );
     res.status(200).json(response.data);
   } catch (error: any) {
@@ -452,15 +457,20 @@ export async function handleSendOtp(req: ReqLike, res: ResLike) {
 export async function handleSendEmailOtp(req: ReqLike, res: ResLike) {
   const { email } = req.body || {};
   const apiKey = process.env.TWO_FACTOR_API_KEY;
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    return res.status(400).json({ Status: "Error", Details: "A valid email address is required." });
+  }
 
   if (!apiKey) {
-    console.log(`[DEV] Mock Email OTP sent to ${email}: 123456`);
+    console.log(`[DEV] Mock Email OTP sent to ${normalizedEmail}: 123456`);
     return res.status(200).json({ Status: "Success", Details: "mock_email_session_id" });
   }
 
   try {
     const response = await axios.get(
-      `https://2factor.in/API/V1/${apiKey}/EMAIL/${email}/AUTOGEN`
+      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/EMAIL/${encodeURIComponent(normalizedEmail)}/AUTOGEN`
     );
     res.status(200).json(response.data);
   } catch (error: any) {
@@ -475,9 +485,11 @@ export async function handleSendEmailOtp(req: ReqLike, res: ResLike) {
 export async function handleVerifyOtp(req: ReqLike, res: ResLike) {
   const { sessionId, otp } = req.body || {};
   const apiKey = process.env.TWO_FACTOR_API_KEY;
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedOtp = String(otp || "").trim();
 
-  if (!apiKey || sessionId?.startsWith("mock_")) {
-    if (otp === "123456") {
+  if (!apiKey || normalizedSessionId.startsWith("mock_")) {
+    if (normalizedOtp === "123456") {
       return res.status(200).json({ Status: "Success", Details: "OTP Matched" });
     }
     return res.status(400).json({ Status: "Error", Details: "Invalid OTP" });
@@ -485,7 +497,7 @@ export async function handleVerifyOtp(req: ReqLike, res: ResLike) {
 
   try {
     const response = await axios.get(
-      `https://2factor.in/API/V1/${apiKey}/SMS/VERIFY/${sessionId}/${otp}`
+      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`
     );
     res.status(200).json(response.data);
   } catch (error: any) {
