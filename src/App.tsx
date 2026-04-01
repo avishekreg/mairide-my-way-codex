@@ -18,7 +18,6 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
   signInAnonymously,
-  createUserWithEmailAndPassword,
   signInWithEmailAndPassword
 } from 'firebase/auth';
 import { 
@@ -892,11 +891,39 @@ const AuthPage = ({
 
   const completeEmailPasswordSignUp = async () => {
     try {
-      const result = await createUserWithEmailAndPassword(auth, email, password);
+      const signupResponse = await fetch('/api/auth/complete-signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          displayName,
+          phoneNumber,
+          role: role || 'consumer',
+          consents: {
+            truthfulInformationAccepted: truthDeclarationAccepted,
+            termsAccepted,
+            marketingOptIn,
+            acceptedAt: new Date().toISOString(),
+            disclosureVersion: CONSENT_VERSION,
+            channels: {
+              email: marketingOptIn,
+              sms: marketingOptIn,
+              whatsapp: marketingOptIn,
+            },
+          },
+        }),
+      });
+      const signupData = await signupResponse.json();
+      if (!signupResponse.ok) {
+        throw new Error(signupData.error || 'Failed to complete sign up.');
+      }
+
+      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
       await handleProfileSetup(result.user, phoneNumber, displayName, true);
     } catch (error: any) {
       console.error("Complete Sign Up Error:", error);
-      if (error.code === 'auth/email-already-in-use') {
+      if (error.code === 'auth/email-already-in-use' || /already (registered|exists|been registered)/i.test(error.message || '')) {
         alert("This email is already registered. Please login instead.");
         setAuthMode('login');
       } else {
@@ -1064,6 +1091,10 @@ const AuthPage = ({
           };
           
           await setDoc(docRef, newProfile);
+
+          if (isSignUp && (!newProfile.referralCode || !newProfile.wallet)) {
+            await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined);
+          }
           
           if (oldUid !== user.uid && !oldUid.startsWith('manual_')) {
             await deleteDoc(doc(db, 'users', oldUid));
@@ -1107,6 +1138,9 @@ const AuthPage = ({
         const existingProfile = docSnap.data() as UserProfile;
         if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL && existingProfile.role !== 'admin') {
           await updateDoc(docRef, { role: 'admin', onboardingComplete: true });
+        }
+        if (isSignUp && (!existingProfile.referralCode || !existingProfile.wallet)) {
+          await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined);
         }
       }
     } catch (error: any) {
