@@ -735,6 +735,26 @@ interface AuthPageProps {
   setReferralCodeInput: (val: string) => void;
 }
 
+const normalizePhoneForAuth = (value: string) => String(value || '').replace(/[^\d]/g, '');
+
+const buildPhoneVariants = (value: string) => {
+  const digits = normalizePhoneForAuth(value);
+  const variants = new Set<string>();
+
+  if (!digits) return [];
+
+  variants.add(digits);
+  variants.add(`+${digits}`);
+
+  if (digits.length > 10) {
+    const last10 = digits.slice(-10);
+    variants.add(last10);
+    variants.add(`+${last10}`);
+  }
+
+  return Array.from(variants);
+};
+
 const AuthPage = ({ 
   user, 
   authMode, 
@@ -996,21 +1016,27 @@ const AuthPage = ({
       let existingProfile: UserProfile | null = null;
 
       if (isPhone) {
-        const q = query(collection(db, 'users'), where('phoneNumber', '==', username));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          existingProfile = snap.docs[0].data() as UserProfile;
+        const normalizedLoginPhone = normalizePhoneForAuth(username);
+        const phoneCandidates = buildPhoneVariants(username);
+
+        for (const candidate of phoneCandidates) {
+          const q = query(collection(db, 'users'), where('phoneNumber', '==', candidate));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            existingProfile = snap.docs[0].data() as UserProfile;
+            break;
+          }
         }
 
-        if (!existingProfile && username.toLowerCase() !== SUPER_ADMIN_EMAIL) {
+        if (!existingProfile && normalizedLoginPhone.toLowerCase() !== SUPER_ADMIN_EMAIL) {
           throw new Error("NOT_REGISTERED");
         }
         // Trigger Phone OTP Login
-        setPhoneNumber(username);
+        setPhoneNumber(normalizedLoginPhone);
         const response = await fetch('/api/auth?action=send-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phoneNumber: username }),
+          body: JSON.stringify({ phoneNumber: normalizedLoginPhone }),
         });
         const data = await parseApiResponse(response, 'Failed to send OTP');
         if (data.Status === 'Success') {
