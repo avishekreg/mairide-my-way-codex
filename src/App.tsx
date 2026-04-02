@@ -1017,20 +1017,10 @@ const AuthPage = ({
 
       if (isPhone) {
         const normalizedLoginPhone = normalizePhoneForAuth(username);
-        const phoneCandidates = buildPhoneVariants(username);
-
-        for (const candidate of phoneCandidates) {
-          const q = query(collection(db, 'users'), where('phoneNumber', '==', candidate));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            existingProfile = snap.docs[0].data() as UserProfile;
-            break;
-          }
+        if (!normalizedLoginPhone) {
+          throw new Error("Please enter a valid phone number.");
         }
 
-        if (!existingProfile && normalizedLoginPhone.toLowerCase() !== SUPER_ADMIN_EMAIL) {
-          throw new Error("NOT_REGISTERED");
-        }
         // Trigger Phone OTP Login
         setPhoneNumber(normalizedLoginPhone);
         const response = await fetch('/api/auth?action=send-otp', {
@@ -1100,6 +1090,7 @@ const AuthPage = ({
 
       if (!docSnap.exists()) {
         const targetPhone = user.phoneNumber || phone || '';
+        const phoneCandidates = buildPhoneVariants(targetPhone);
         const targetEmail = user.email || '';
 
         // Check for existing profile by email or phone
@@ -1111,10 +1102,15 @@ const AuthPage = ({
           if (!emailSnap.empty) existingProfile = emailSnap.docs[0].data() as UserProfile;
         }
 
-        if (!existingProfile && targetPhone) {
-          const qPhone = query(collection(db, 'users'), where('phoneNumber', '==', targetPhone));
-          const phoneSnap = await getDocs(qPhone);
-          if (!phoneSnap.empty) existingProfile = phoneSnap.docs[0].data() as UserProfile;
+        if (!existingProfile && phoneCandidates.length) {
+          for (const candidate of phoneCandidates) {
+            const qPhone = query(collection(db, 'users'), where('phoneNumber', '==', candidate));
+            const phoneSnap = await getDocs(qPhone);
+            if (!phoneSnap.empty) {
+              existingProfile = phoneSnap.docs[0].data() as UserProfile;
+              break;
+            }
+          }
         }
 
         if (!existingProfile && !isSignUp && user.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) {
