@@ -996,16 +996,6 @@ const AuthPage = ({
       let existingProfile: UserProfile | null = null;
 
       if (isPhone) {
-        let tempAuthUsed = false;
-        if (!auth.currentUser) {
-          try {
-            await signInAnonymously(auth);
-            tempAuthUsed = true;
-          } catch (authError: any) {
-            console.error("Temp Auth Error:", authError);
-          }
-        }
-
         const q = query(collection(db, 'users'), where('phoneNumber', '==', username));
         const snap = await getDocs(q);
         if (!snap.empty) {
@@ -1013,7 +1003,6 @@ const AuthPage = ({
         }
 
         if (!existingProfile && username.toLowerCase() !== SUPER_ADMIN_EMAIL) {
-          if (tempAuthUsed) await signOut(auth);
           throw new Error("NOT_REGISTERED");
         }
         // Trigger Phone OTP Login
@@ -1027,7 +1016,6 @@ const AuthPage = ({
         if (data.Status === 'Success') {
           setSessionId(data.Details);
           setStep('otp');
-          if (tempAuthUsed) await signOut(auth);
         } else {
           throw new Error(data.Details || 'Failed to send OTP');
         }
