@@ -621,7 +621,9 @@ const LoadingScreen = () => (
         <h1 className="text-4xl font-black text-mairide-primary mt-4 tracking-tighter">
           {BRAND_NAME}
         </h1>
-        <p className="text-[10px] text-mairide-secondary mt-2 opacity-50">{APP_VERSION}</p>
+        <p className="text-[10px] text-mairide-secondary mt-2 opacity-50">
+          {APP_VERSION} | All rights reserved MaiRide
+        </p>
       </div>
     </motion.div>
   </div>
@@ -630,8 +632,8 @@ const LoadingScreen = () => (
 const AppFooter = () => (
   <footer className="px-4 pb-6">
     <div className="max-w-7xl mx-auto flex justify-center">
-      <p className="text-[11px] text-mairide-secondary/80 tracking-wide">
-        Release {APP_VERSION}
+      <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
+        Release {APP_VERSION} | Copyright {new Date().getFullYear()} MaiRide. All rights reserved.
       </p>
     </div>
   </footer>
