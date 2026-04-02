@@ -6891,6 +6891,7 @@ const ForcePasswordChangeModal = ({ profile }: { profile: UserProfile }) => {
 
 const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const effectiveAdminRole = profile.adminRole || 'super_admin';
+  type UsersInsightView = 'drivers' | 'travelers' | 'onlineDrivers' | 'onlineTravelers' | 'activeTrips' | 'openOffers' | null;
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
@@ -6980,6 +6981,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'consumer' | 'driver' | 'admin'>('all');
+  const [usersInsightView, setUsersInsightView] = useState<UsersInsightView>(null);
   const selectedDriverMarkers = buildVerificationMarkers(selectedDriver?.driverDetails);
 
   useEffect(() => {
@@ -7065,13 +7067,150 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const pendingVerificationDrivers = users.filter(
     (u) => u.role === 'driver' && u.onboardingComplete && u.verificationStatus === 'pending'
   );
+  const activityWindowMs = 15 * 60 * 1000;
+  const isRecentlyActive = (user: UserProfile) => {
+    if (!user.location?.lastUpdated) return false;
+    const lastUpdated = new Date(user.location.lastUpdated).getTime();
+    return !Number.isNaN(lastUpdated) && Date.now() - lastUpdated <= activityWindowMs;
+  };
+  const isUserCurrentlyOnline = (user: UserProfile) => (
+    user.status === 'active' && (
+      (user.role === 'driver' && Boolean(user.driverDetails?.isOnline))
+      || isRecentlyActive(user)
+    )
+  );
+  const registeredDrivers = users.filter((u) => u.role === 'driver');
+  const registeredTravelers = users.filter((u) => u.role === 'consumer');
+  const onlineDrivers = registeredDrivers.filter((u) => isUserCurrentlyOnline(u));
+  const onlineTravelers = registeredTravelers.filter((u) => isUserCurrentlyOnline(u));
+  const openRideOffers = rides.filter((ride) => ride.status === 'available');
+  const activeTrips = bookings.filter((booking) =>
+    booking.status === 'confirmed'
+    || booking.rideLifecycleStatus === 'awaiting_start_otp'
+    || booking.rideLifecycleStatus === 'in_progress'
+  );
   const getUserRideOffers = (userId: string) =>
     rides.filter((ride) => ride.driverId === userId);
+  const getActiveRideOffers = (userId: string) =>
+    rides.filter((ride) => ride.driverId === userId && ride.status === 'available');
   const getUserRideBookings = (userId: string, role: UserProfile['role']) =>
     bookings.filter((booking) => role === 'driver' ? booking.driverId === userId : booking.consumerId === userId);
+  const getActiveUserTrips = (userId: string, role: UserProfile['role']) =>
+    bookings.filter((booking) =>
+      (role === 'driver' ? booking.driverId === userId : booking.consumerId === userId)
+      && (
+        booking.status === 'confirmed'
+        || booking.rideLifecycleStatus === 'awaiting_start_otp'
+        || booking.rideLifecycleStatus === 'in_progress'
+      )
+    );
   const usersWithLocation = users.filter(
     u => u.location && typeof u.location.lat === 'number' && typeof u.location.lng === 'number'
   );
+  const userCards = [
+    {
+      id: 'drivers' as UsersInsightView,
+      label: 'Registered Drivers',
+      value: registeredDrivers.length,
+      icon: Car,
+      color: 'bg-orange-50 text-orange-600',
+      helper: 'All drivers on the platform',
+    },
+    {
+      id: 'travelers' as UsersInsightView,
+      label: 'Registered Travelers',
+      value: registeredTravelers.length,
+      icon: Users,
+      color: 'bg-blue-50 text-blue-600',
+      helper: 'All travelers on the platform',
+    },
+    {
+      id: 'onlineDrivers' as UsersInsightView,
+      label: 'Logged-in Drivers',
+      value: onlineDrivers.length,
+      icon: Navigation,
+      color: 'bg-emerald-50 text-emerald-600',
+      helper: 'Online or recently active drivers',
+    },
+    {
+      id: 'onlineTravelers' as UsersInsightView,
+      label: 'Logged-in Travelers',
+      value: onlineTravelers.length,
+      icon: UserIcon,
+      color: 'bg-cyan-50 text-cyan-600',
+      helper: 'Online or recently active travelers',
+    },
+    {
+      id: 'activeTrips' as UsersInsightView,
+      label: 'Active Trips',
+      value: activeTrips.length,
+      icon: Clock,
+      color: 'bg-purple-50 text-purple-600',
+      helper: 'Bookings currently in motion',
+    },
+    {
+      id: 'openOffers' as UsersInsightView,
+      label: 'Open Ride Offers',
+      value: openRideOffers.length,
+      icon: PlusCircle,
+      color: 'bg-amber-50 text-amber-600',
+      helper: 'Offers available for travelers to book',
+    },
+  ];
+  const usersInsightContent = (() => {
+    switch (usersInsightView) {
+      case 'drivers':
+        return {
+          title: 'Registered Drivers',
+          description: 'All drivers currently registered on the platform.',
+          users: registeredDrivers,
+          rides: [] as Ride[],
+          trips: [] as Booking[],
+        };
+      case 'travelers':
+        return {
+          title: 'Registered Travelers',
+          description: 'All travelers currently registered on the platform.',
+          users: registeredTravelers,
+          rides: [] as Ride[],
+          trips: [] as Booking[],
+        };
+      case 'onlineDrivers':
+        return {
+          title: 'Logged-in Drivers',
+          description: 'Drivers currently online or recently active on the system.',
+          users: onlineDrivers,
+          rides: [] as Ride[],
+          trips: [] as Booking[],
+        };
+      case 'onlineTravelers':
+        return {
+          title: 'Logged-in Travelers',
+          description: 'Travelers currently online or recently active on the system.',
+          users: onlineTravelers,
+          rides: [] as Ride[],
+          trips: [] as Booking[],
+        };
+      case 'activeTrips':
+        return {
+          title: 'Active Trips',
+          description: 'Trips that are currently confirmed, awaiting OTP, or in progress.',
+          users: [] as UserProfile[],
+          rides: [] as Ride[],
+          trips: activeTrips as Booking[],
+        };
+      case 'openOffers':
+        return {
+          title: 'Open Ride Offers',
+          description: 'Ride offers that are still available for travelers to book.',
+          users: [] as UserProfile[],
+          rides: openRideOffers,
+          trips: [] as Booking[],
+        };
+      default:
+        return null;
+    }
+  })();
   const adminMapCenter = adminLocation
     || (usersWithLocation.length
       ? {
@@ -7423,7 +7562,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   <span className="text-xs font-bold text-mairide-primary">Traveler</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <img src="https://maps.google.com/mapfiles/ms/icons/car.png" className="w-4 h-4" alt="car" />
+                  <Car className="w-4 h-4 text-mairide-accent" />
                   <span className="text-xs font-bold text-mairide-primary">Driver</span>
                 </div>
               </div>
@@ -7434,22 +7573,148 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         {activeTab === 'users' && (
           <div className="space-y-8">
             {/* Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {[
-                { label: 'Total Users', value: users.length, icon: Users, color: 'bg-blue-50 text-blue-600' },
-                { label: 'Drivers', value: users.filter(u => u.role === 'driver').length, icon: Car, color: 'bg-orange-50 text-orange-600' },
-                { label: 'Active Now', value: users.filter(u => u.status === 'active').length, icon: CheckCircle2, color: 'bg-green-50 text-green-600' },
-                { label: 'Admins', value: users.filter(u => u.role === 'admin').length, icon: Shield, color: 'bg-purple-50 text-purple-600' }
-              ].map((stat, idx) => (
-                <div key={idx} className="bg-white p-6 rounded-[32px] border border-mairide-secondary shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {userCards.map((stat) => (
+                <button
+                  key={stat.id}
+                  type="button"
+                  onClick={() => setUsersInsightView(usersInsightView === stat.id ? null : stat.id)}
+                  className={cn(
+                    "bg-white p-6 rounded-[32px] border border-mairide-secondary shadow-sm text-left transition-all hover:-translate-y-1 hover:shadow-lg",
+                    usersInsightView === stat.id && "ring-2 ring-mairide-accent shadow-lg"
+                  )}
+                >
                   <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center mb-4", stat.color)}>
                     <stat.icon className="w-6 h-6" />
                   </div>
                   <p className="text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-1">{stat.label}</p>
                   <p className="text-3xl font-black text-mairide-primary tracking-tighter">{stat.value}</p>
-                </div>
+                  <p className="text-xs text-mairide-secondary mt-2">{stat.helper}</p>
+                </button>
               ))}
             </div>
+
+            {usersInsightContent && (
+              <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-sm p-8 space-y-6">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div>
+                    <h3 className="text-2xl font-bold text-mairide-primary">{usersInsightContent.title}</h3>
+                    <p className="text-sm text-mairide-secondary">{usersInsightContent.description}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setUsersInsightView(null)}
+                    className="self-start md:self-auto px-4 py-2 bg-mairide-bg text-mairide-primary rounded-xl text-sm font-bold"
+                  >
+                    Clear view
+                  </button>
+                </div>
+
+                {usersInsightContent.users.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {usersInsightContent.users.map((user) => (
+                      <button
+                        key={user.uid}
+                        type="button"
+                        onClick={() => user.role === 'driver' ? setSelectedDriver(user) : setSelectedUser(user)}
+                        className="text-left p-5 bg-mairide-bg rounded-[28px] border border-mairide-secondary hover:shadow-md transition-all"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-14 h-14 rounded-2xl bg-white border border-mairide-secondary overflow-hidden flex items-center justify-center">
+                            {getResolvedUserPhoto(user) ? (
+                              <img src={getResolvedUserPhoto(user)} alt={user.displayName} className="w-full h-full object-cover" />
+                            ) : (
+                              <UserIcon className="w-6 h-6 text-mairide-secondary" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-mairide-primary truncate">{user.displayName}</p>
+                            <p className="text-xs text-mairide-secondary truncate">{user.email}</p>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent mt-1">
+                              {user.role === 'driver' ? `${getActiveRideOffers(user.uid).length} open offers` : `${getActiveUserTrips(user.uid, user.role).length} active trips`}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {usersInsightContent.rides.length > 0 && (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    {usersInsightContent.rides.map((ride) => (
+                      <div key={ride.id} className="p-5 bg-mairide-bg rounded-[28px] border border-mairide-secondary">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-bold text-mairide-primary">{ride.origin}</p>
+                            <p className="text-[10px] text-mairide-secondary uppercase tracking-widest my-1">to</p>
+                            <p className="text-sm font-bold text-mairide-primary">{ride.destination}</p>
+                          </div>
+                          <span className="px-3 py-1 rounded-full bg-green-100 text-green-600 text-[10px] font-bold uppercase">
+                            {ride.status}
+                          </span>
+                        </div>
+                        <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <p className="text-mairide-secondary">Driver</p>
+                            <p className="font-bold text-mairide-primary">{ride.driverName}</p>
+                          </div>
+                          <div>
+                            <p className="text-mairide-secondary">Seats</p>
+                            <p className="font-bold text-mairide-primary">{ride.seatsAvailable}</p>
+                          </div>
+                          <div>
+                            <p className="text-mairide-secondary">Fare</p>
+                            <p className="font-bold text-mairide-primary">{formatCurrency(ride.price)}</p>
+                          </div>
+                          <div>
+                            <p className="text-mairide-secondary">Departure</p>
+                            <p className="font-bold text-mairide-primary">{new Date(ride.departureTime).toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {usersInsightContent.trips.length > 0 && (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    {usersInsightContent.trips.map((booking) => (
+                      <div key={booking.id} className="p-5 bg-mairide-bg rounded-[28px] border border-mairide-secondary">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-bold text-mairide-primary">{booking.origin}</p>
+                            <p className="text-[10px] text-mairide-secondary uppercase tracking-widest my-1">to</p>
+                            <p className="text-sm font-bold text-mairide-primary">{booking.destination}</p>
+                          </div>
+                          <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-600 text-[10px] font-bold uppercase">
+                            {booking.rideLifecycleStatus || booking.status}
+                          </span>
+                        </div>
+                        <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <p className="text-mairide-secondary">Traveler</p>
+                            <p className="font-bold text-mairide-primary">{booking.consumerName}</p>
+                          </div>
+                          <div>
+                            <p className="text-mairide-secondary">Driver</p>
+                            <p className="font-bold text-mairide-primary">{booking.driverName}</p>
+                          </div>
+                          <div>
+                            <p className="text-mairide-secondary">Value</p>
+                            <p className="font-bold text-mairide-primary">{formatCurrency(booking.totalPrice)}</p>
+                          </div>
+                          <div>
+                            <p className="text-mairide-secondary">Created</p>
+                            <p className="font-bold text-mairide-primary">{new Date(booking.createdAt).toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* User Management Table */}
             <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-sm overflow-hidden">
@@ -7505,6 +7770,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     <tr className="bg-mairide-bg text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">
                       <th className="px-8 py-4">User</th>
                       <th className="px-8 py-4">Role</th>
+                      <th className="px-8 py-4">Activity</th>
                       <th className="px-8 py-4">MaiCoins</th>
                       <th className="px-8 py-4">Status</th>
                       <th className="px-8 py-4">Actions</th>
@@ -7548,6 +7814,29 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                             <option value="driver">Driver</option>
                             <option value="admin">Admin</option>
                           </select>
+                        </td>
+                        <td className="px-8 py-6">
+                          <div className="min-w-[170px]">
+                            {user.role === 'driver' ? (
+                              <>
+                                <p className="font-black text-mairide-primary tracking-tight">
+                                  {getActiveRideOffers(user.uid).length} <span className="text-[10px] font-bold text-mairide-accent uppercase">open offers</span>
+                                </p>
+                                <p className="text-[10px] text-mairide-secondary mt-1">
+                                  {getActiveUserTrips(user.uid, user.role).length} active trips · {isUserCurrentlyOnline(user) ? 'online now' : 'offline'}
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="font-black text-mairide-primary tracking-tight">
+                                  {getActiveUserTrips(user.uid, user.role).length} <span className="text-[10px] font-bold text-mairide-accent uppercase">active trips</span>
+                                </p>
+                                <p className="text-[10px] text-mairide-secondary mt-1">
+                                  {getUserRideBookings(user.uid, user.role).length} total rides · {isUserCurrentlyOnline(user) ? 'online now' : 'offline'}
+                                </p>
+                              </>
+                            )}
+                          </div>
                         </td>
                         <td className="px-8 py-6">
                           <div className="min-w-[140px]">
