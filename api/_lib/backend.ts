@@ -64,19 +64,33 @@ export async function getUserProfile(uid: string) {
 }
 
 async function findAuthUser(uid: string, email?: string | null) {
-  const { data, error } = await getSupabaseAdmin().auth.admin.listUsers({
-    page: 1,
-    perPage: 1000,
-  });
+  const supabaseAdmin = getSupabaseAdmin();
 
-  if (error) throw error;
+  const directLookup = await supabaseAdmin.auth.admin.getUserById(uid);
+  if (directLookup.data?.user) {
+    return directLookup.data.user;
+  }
 
-  const users = data?.users || [];
-  return (
-    users.find((user) => user.id === uid) ||
-    (email ? users.find((user) => user.email?.toLowerCase() === email.toLowerCase()) : null) ||
-    null
-  );
+  if (!email) return null;
+
+  let page = 1;
+  while (page <= 5) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage: 1000,
+    });
+
+    if (error) throw error;
+
+    const users = data?.users || [];
+    const matched = users.find((user) => user.email?.toLowerCase() === email.toLowerCase());
+    if (matched) return matched;
+
+    if (users.length < 1000) break;
+    page += 1;
+  }
+
+  return null;
 }
 
 function buildUserRow(input: {
@@ -290,20 +304,22 @@ export async function handleAdminUpdatePassword(req: ReqLike, res: ResLike) {
     });
     if (authError) throw authError;
 
-    const mergedData = {
-      ...(((profile as any)?.data) || {}),
-      forcePasswordChange: true,
-    };
+    if (profile) {
+      const mergedData = {
+        ...(((profile as any)?.data) || {}),
+        forcePasswordChange: true,
+      };
 
-    const { error: updateError } = await getSupabaseAdmin()
-      .from("users")
-      .update({
-        force_password_change: true,
-        data: mergedData,
-      })
-      .eq("id", uid);
+      const { error: updateError } = await getSupabaseAdmin()
+        .from("users")
+        .update({
+          force_password_change: true,
+          data: mergedData,
+        })
+        .eq("id", uid);
 
-    if (updateError) throw updateError;
+      if (updateError) throw updateError;
+    }
 
     res.status(200).json({ message: "Password updated successfully" });
   } catch (error: any) {
@@ -328,19 +344,20 @@ export async function handleAdminDeleteUser(req: ReqLike, res: ResLike) {
     const authUser = await findAuthUser(uid, profile?.email);
     const supabaseAdmin = getSupabaseAdmin();
 
-    const cleanupDeletes = [
-      supabaseAdmin.from("support_tickets").delete().or(`user_id.eq.${uid},data->>userId.eq.${uid}`),
-      supabaseAdmin.from("transactions").delete().or(`user_id.eq.${uid},data->>userId.eq.${uid}`),
-      supabaseAdmin.from("referrals").delete().or(`referrer_id.eq.${uid},referred_id.eq.${uid},data->>referrerId.eq.${uid},data->>referredId.eq.${uid}`),
-      supabaseAdmin.from("bookings").delete().or(`consumer_id.eq.${uid},driver_id.eq.${uid},data->>consumerId.eq.${uid},data->>driverId.eq.${uid}`),
-      supabaseAdmin.from("rides").delete().or(`driver_id.eq.${uid},data->>driverId.eq.${uid}`),
-      supabaseAdmin.from("users").delete().eq("id", uid),
+    const cleanupSteps = [
+      () => supabaseAdmin.from("support_tickets").delete().eq("user_id", uid),
+      () => supabaseAdmin.from("transactions").delete().eq("user_id", uid),
+      () => supabaseAdmin.from("referrals").delete().eq("referrer_id", uid),
+      () => supabaseAdmin.from("referrals").delete().eq("referred_id", uid),
+      () => supabaseAdmin.from("bookings").delete().eq("consumer_id", uid),
+      () => supabaseAdmin.from("bookings").delete().eq("driver_id", uid),
+      () => supabaseAdmin.from("rides").delete().eq("driver_id", uid),
+      () => supabaseAdmin.from("users").delete().eq("id", uid),
     ];
 
-    const cleanupResults = await Promise.all(cleanupDeletes);
-    const failedCleanup = cleanupResults.find((result) => result.error);
-    if (failedCleanup?.error) {
-      throw failedCleanup.error;
+    for (const runStep of cleanupSteps) {
+      const { error } = await runStep();
+      if (error) throw error;
     }
 
     if (authUser?.id) {
