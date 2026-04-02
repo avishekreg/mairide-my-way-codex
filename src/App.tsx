@@ -1459,6 +1459,48 @@ const AuthPage = ({
                 </button>
               </div>
             )
+          ) : step === 'otp' ? (
+            <div className="space-y-4">
+              <div className="text-center mb-4">
+                <p className="text-sm text-mairide-secondary">Enter the 6-digit OTP sent to your phone</p>
+                <p className="font-bold text-mairide-primary">{phoneNumber || username}</p>
+              </div>
+              <input 
+                type="text" 
+                placeholder="6-digit Login OTP"
+                className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center tracking-[0.5em] font-bold"
+                value={otp}
+                maxLength={6}
+                onChange={(e) => setOtp(e.target.value)}
+              />
+              <button
+                onClick={handleVerifyOtp}
+                disabled={isLoading || otp.length !== 6}
+                className="w-full bg-mairide-accent hover:bg-mairide-primary text-white py-4 rounded-2xl font-bold transition-all disabled:opacity-50"
+              >
+                {isLoading ? "Verifying..." : "Verify & Login"}
+              </button>
+              <button
+                onClick={async () => {
+                  setOtp('');
+                  await handleSendOtp();
+                }}
+                disabled={isLoading}
+                className="w-full bg-mairide-bg text-mairide-primary py-3 rounded-2xl font-bold transition-all hover:bg-mairide-secondary disabled:opacity-50"
+              >
+                {isLoading ? "Please wait..." : "Resend Login OTP"}
+              </button>
+              <button
+                onClick={() => {
+                  setStep('phone');
+                  setOtp('');
+                  setSessionId('');
+                }}
+                className="w-full text-xs text-mairide-secondary hover:text-mairide-accent font-medium"
+              >
+                Change Login Method
+              </button>
+            </div>
           ) : (
             <div className="space-y-4">
               <input 
@@ -1466,7 +1508,14 @@ const AuthPage = ({
                 placeholder="Email or Phone Number"
                 className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  if (step !== 'phone') {
+                    setStep('phone');
+                    setOtp('');
+                    setSessionId('');
+                  }
+                }}
               />
               {!/^\+?[\d\s-]{10,}$/.test(username) && (
                 <input 
