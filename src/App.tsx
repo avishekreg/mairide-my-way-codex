@@ -670,7 +670,7 @@ const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile 
                 <p className="text-sm font-semibold text-mairide-primary">{profile?.displayName}</p>
                 <p className="text-xs text-mairide-secondary capitalize">{profile?.role}</p>
               </div>
-              <img src={user.photoURL || undefined} alt="Profile" className="w-8 h-8 rounded-full border border-mairide-secondary" />
+                <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="w-8 h-8 rounded-full border border-mairide-secondary" />
               <button onClick={onLogout} className="p-2 text-mairide-secondary hover:text-red-600 transition-colors">
                 <LogOut className="w-5 h-5" />
               </button>
@@ -703,7 +703,7 @@ const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile 
                 {profile?.role === 'driver' ? 'My Rides' : 'My Bookings'}
               </button>
               <div className="pt-4 border-t border-gray-100 mt-4 flex items-center space-x-3">
-                <img src={user.photoURL || undefined} alt="Profile" className="w-10 h-10 rounded-full" />
+                <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="w-10 h-10 rounded-full" />
                 <div>
                   <p className="font-semibold text-gray-900">{profile?.displayName}</p>
                   <p className="text-xs text-gray-500 capitalize">{profile?.role}</p>
@@ -737,6 +737,83 @@ interface AuthPageProps {
 
 const normalizePhoneForAuth = (value: string) => String(value || '').replace(/[^\d]/g, '');
 const PHONE_LOGIN_PROFILE_KEY = 'mairide_phone_profile_uid';
+const PHONE_LOGIN_NUMBER_KEY = 'mairide_phone_login_number';
+
+const sanitizeDisplayName = (value: string) =>
+  String(value || '')
+    .replace(/[^a-zA-Z\s.'-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trimStart()
+    .slice(0, 80);
+
+const normalizeEmailValue = (value: string) => String(value || '').trim().toLowerCase();
+
+const isValidEmailValue = (value: string) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(normalizeEmailValue(value));
+
+const sanitizeIndianPhoneDigits = (value: string) => {
+  const digits = String(value || '').replace(/[^\d]/g, '');
+  if (!digits) return '';
+  if (digits.length <= 10) return digits;
+  if (digits.startsWith('91')) return digits.slice(-10);
+  return digits.slice(0, 10);
+};
+
+const toIndianPhoneStorage = (value: string) => {
+  const digits = sanitizeIndianPhoneDigits(value);
+  return digits.length === 10 ? `+91${digits}` : '';
+};
+
+const formatPhoneForDisplay = (value?: string) => {
+  const digits = sanitizeIndianPhoneDigits(value || '');
+  if (!digits) return 'Not provided';
+  return `+91 ${digits}`;
+};
+
+const sanitizeAadhaarDigits = (value: string) => String(value || '').replace(/[^\d]/g, '').slice(0, 12);
+
+const splitAadhaarDigits = (value: string) => {
+  const digits = sanitizeAadhaarDigits(value);
+  return [digits.slice(0, 4), digits.slice(4, 8), digits.slice(8, 12)];
+};
+
+const formatAadhaarForDisplay = (value?: string) => {
+  const [a = '', b = '', c = ''] = splitAadhaarDigits(value || '');
+  return [a, b, c].filter(Boolean).join(' ') || 'Not provided';
+};
+
+const sanitizeLicenseOrVehicleCode = (value: string, maxLength = 20) =>
+  String(value || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9/\-\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trimStart()
+    .slice(0, maxLength);
+
+const IndianPhoneInput = ({
+  value,
+  onChange,
+  placeholder = 'Enter 10-digit mobile number',
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) => (
+  <div className="flex items-center bg-mairide-bg border border-mairide-secondary rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-mairide-accent">
+    <span className="px-4 py-4 text-sm font-bold text-mairide-primary border-r border-mairide-secondary bg-white/50">+91</span>
+    <input
+      type="tel"
+      inputMode="numeric"
+      autoComplete="tel-national"
+      pattern="[0-9]{10}"
+      maxLength={10}
+      className="w-full px-4 py-4 bg-transparent outline-none text-mairide-primary"
+      value={sanitizeIndianPhoneDigits(value)}
+      onChange={(e) => onChange(sanitizeIndianPhoneDigits(e.target.value))}
+      placeholder={placeholder}
+    />
+  </div>
+);
 
 const buildPhoneVariants = (value: string) => {
   const digits = normalizePhoneForAuth(value);
@@ -754,6 +831,51 @@ const buildPhoneVariants = (value: string) => {
   }
 
   return Array.from(variants);
+};
+
+const maskPhoneNumber = (value: string) => {
+  const digits = normalizePhoneForAuth(value);
+  if (!digits) return '';
+  if (digits.length <= 4) return digits;
+  return `${digits[0]}${'*'.repeat(Math.max(digits.length - 4, 0))}${digits.slice(-3)}`;
+};
+
+const findUserProfileByPhone = async (value: string) => {
+  const loginDigits = normalizePhoneForAuth(value);
+  const loginTail = loginDigits.slice(-10);
+  const usersSnapshot = await getDocs(query(collection(db, 'users')));
+  const matchedDoc = usersSnapshot.docs.find((snapshotDoc) => {
+    const rawUser = snapshotDoc.data() as UserProfile & {
+      data?: { phoneNumber?: string; uid?: string };
+      phone_number?: string;
+    };
+    const storedPhoneDigits = normalizePhoneForAuth(
+      rawUser.phoneNumber
+      || rawUser.phone_number
+      || rawUser.data?.phoneNumber
+      || ''
+    );
+    if (!storedPhoneDigits) return false;
+    return (
+      storedPhoneDigits === loginDigits
+      || storedPhoneDigits === loginTail
+      || storedPhoneDigits.endsWith(loginTail)
+      || loginDigits.endsWith(storedPhoneDigits)
+    );
+  });
+
+  if (!matchedDoc) return null;
+
+  const matchedUser = matchedDoc.data() as UserProfile & {
+    data?: { phoneNumber?: string; uid?: string };
+    phone_number?: string;
+  };
+
+  return {
+    ...matchedUser,
+    uid: matchedUser.uid || matchedUser.data?.uid || matchedDoc.id,
+    phoneNumber: matchedUser.phoneNumber || matchedUser.phone_number || matchedUser.data?.phoneNumber || '',
+  } as UserProfile;
 };
 
 const AuthPage = ({ 
@@ -781,6 +903,42 @@ const AuthPage = ({
   const [truthDeclarationAccepted, setTruthDeclarationAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [marketingOptIn, setMarketingOptIn] = useState(true);
+  const maskedOtpPhone = maskPhoneNumber(phoneNumber || username);
+  const normalizedSignupPhone = toIndianPhoneStorage(phoneNumber);
+  const normalizedSignupEmail = normalizeEmailValue(email);
+
+  const postAuthAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
+    const primaryResponse = await fetch(`/api/auth?action=${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (primaryResponse.status !== 404 || !fallbackPath) {
+      return primaryResponse;
+    }
+
+    return fetch(fallbackPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  };
+
+  const resolvePhoneLoginClientSide = async (value: string) => {
+    const matchedUser = await findUserProfileByPhone(value);
+
+    if (matchedUser) {
+      return {
+        uid: matchedUser.uid,
+        role: matchedUser.role,
+        email: matchedUser.email || '',
+        phoneNumber: matchedUser.phoneNumber || '',
+      };
+    }
+
+    throw new Error("NOT_REGISTERED");
+  };
 
   // Pre-fill if user changes (e.g. after Google login)
   useEffect(() => {
@@ -794,24 +952,16 @@ const AuthPage = ({
   }, [user]);
 
   const handleSendEmailOtp = async () => {
-    if (!email) return;
+    if (!normalizedSignupEmail || !isValidEmailValue(normalizedSignupEmail)) return;
     setIsLoading(true);
     try {
-      const response = await fetch('/api/auth?action=send-email-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
+      const response = await postAuthAction('send-email-otp', { email: normalizedSignupEmail }, '/api/auth/send-email-otp');
       const data = await parseApiResponse(response, 'Failed to send Email OTP');
       if (data.Status === 'Success') {
         setEmailSessionId(data.Details);
         setStep('email-otp');
       } else if (data.Code === 'EMAIL_OTP_UNAVAILABLE') {
-        const phoneOtpResponse = await fetch('/api/auth?action=send-otp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phoneNumber }),
-        });
+        const phoneOtpResponse = await postAuthAction('send-otp', { phoneNumber: normalizedSignupPhone }, '/api/auth/send-otp');
         const phoneOtpData = await parseApiResponse(phoneOtpResponse, 'Failed to send phone OTP');
         if (phoneOtpData.Status === 'Success') {
           setSessionId(phoneOtpData.Details);
@@ -839,11 +989,7 @@ const AuthPage = ({
     if (!otp || !emailSessionId) return;
     setIsLoading(true);
     try {
-      const response = await fetch('/api/auth?action=verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: emailSessionId, otp }),
-      });
+      const response = await postAuthAction('verify-otp', { sessionId: emailSessionId, otp }, '/api/auth/verify-otp');
       const data = await parseApiResponse(response, 'Failed to verify Email OTP');
       if (data.Status === 'Success' && data.Details === 'OTP Matched') {
         setOtp(''); // Clear OTP for next step
@@ -860,14 +1006,10 @@ const AuthPage = ({
   };
 
   const handleSendOtp = async () => {
-    if (!phoneNumber) return;
+    if (!normalizedSignupPhone) return;
     setIsLoading(true);
     try {
-      const response = await fetch('/api/auth?action=send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber }),
-      });
+      const response = await postAuthAction('send-otp', { phoneNumber: normalizedSignupPhone }, '/api/auth/send-otp');
       const data = await parseApiResponse(response, 'Failed to send OTP');
       if (data.Status === 'Success') {
         setSessionId(data.Details);
@@ -892,25 +1034,27 @@ const AuthPage = ({
     setIsLoading(true);
     setNotRegisteredError(false);
     try {
-      const response = await fetch('/api/auth?action=verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, otp }),
-      });
+      const response = await postAuthAction('verify-otp', { sessionId, otp }, '/api/auth/verify-otp');
       const data = await parseApiResponse(response, 'Failed to verify OTP');
       if (data.Status === 'Success' && data.Details === 'OTP Matched') {
         setOtp('');
         if (!user && authMode === 'signup' && email && password && displayName) {
           await completeEmailPasswordSignUp();
         } else if (authMode === 'login') {
-          const resolveResponse = await fetch('/api/auth?action=resolve-phone-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phoneNumber: phoneNumber || username }),
-          });
-          const existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
+          let existingProfile: { uid: string; role: string; email: string; phoneNumber: string };
+          try {
+            const resolveResponse = await postAuthAction('resolve-phone-login', { phoneNumber: phoneNumber || username }, '/api/auth/resolve-phone-login');
+            existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
+          } catch (error: any) {
+            if (/HTTP 404/.test(error?.message || '')) {
+              existingProfile = await resolvePhoneLoginClientSide(phoneNumber || username);
+            } else {
+              throw error;
+            }
+          }
 
           sessionStorage.setItem(PHONE_LOGIN_PROFILE_KEY, existingProfile.uid);
+          sessionStorage.setItem(PHONE_LOGIN_NUMBER_KEY, normalizePhoneForAuth(phoneNumber || username));
 
           if (!auth.currentUser || !auth.currentUser.isAnonymous) {
             try {
@@ -956,8 +1100,16 @@ const AuthPage = ({
   };
 
   const handleEmailPasswordSignUp = async () => {
-    if (!email || (!user && !password) || !phoneNumber || !displayName) {
+    if (!normalizedSignupEmail || (!user && !password) || !normalizedSignupPhone || !displayName.trim()) {
       alert("Please fill all fields");
+      return;
+    }
+    if (!isValidEmailValue(normalizedSignupEmail)) {
+      alert("Please enter a valid email address.");
+      return;
+    }
+    if (!normalizedSignupPhone) {
+      alert("Please enter a valid 10-digit Indian mobile number.");
       return;
     }
     if (!truthDeclarationAccepted || !termsAccepted) {
@@ -977,14 +1129,11 @@ const AuthPage = ({
 
   const completeEmailPasswordSignUp = async () => {
     try {
-      const signupResponse = await fetch('/api/auth?action=complete-signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
+      const signupResponse = await postAuthAction('complete-signup', {
+          email: normalizedSignupEmail,
           password,
-          displayName,
-          phoneNumber,
+          displayName: sanitizeDisplayName(displayName),
+          phoneNumber: normalizedSignupPhone,
           role: role || 'consumer',
           referralCodeInput,
           consents: {
@@ -999,12 +1148,11 @@ const AuthPage = ({
               whatsapp: marketingOptIn,
             },
           },
-        }),
-      });
+      }, '/api/auth/complete-signup');
       await parseApiResponse(signupResponse, 'Failed to complete sign up');
 
-      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
-      await handleProfileSetup(result.user, phoneNumber, displayName, true);
+      const result = await signInWithEmailAndPassword(auth, normalizedSignupEmail, password);
+      await handleProfileSetup(result.user, normalizedSignupPhone, sanitizeDisplayName(displayName), true);
     } catch (error: any) {
       console.error("Complete Sign Up Error:", error);
       if (error.code === 'auth/email-already-in-use' || /already (registered|exists|been registered)/i.test(error.message || '')) {
@@ -1018,16 +1166,17 @@ const AuthPage = ({
   };
 
   const handleLogin = async () => {
-    const isPhone = /^\+?[\d\s-]{10,}$/.test(username);
-    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username);
+    const normalizedUsername = username.trim();
+    const isPhone = /^\+?[\d\s-]{10,}$/.test(normalizedUsername);
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedUsername);
 
     if (isPhone) {
-      if (!username) {
+      if (!normalizedUsername) {
         alert("Please enter phone number");
         return;
       }
     } else {
-      if (!username || !password) {
+      if (!normalizedUsername || !password) {
         alert("Please enter email and password");
         return;
       }
@@ -1039,18 +1188,15 @@ const AuthPage = ({
       let existingProfile: UserProfile | null = null;
 
       if (isPhone) {
-        const normalizedLoginPhone = normalizePhoneForAuth(username);
+        const normalizedLoginPhone = normalizePhoneForAuth(normalizedUsername);
         if (!normalizedLoginPhone) {
           throw new Error("Please enter a valid phone number.");
         }
 
         // Trigger Phone OTP Login
         setPhoneNumber(normalizedLoginPhone);
-        const response = await fetch('/api/auth?action=send-otp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phoneNumber: normalizedLoginPhone }),
-        });
+        sessionStorage.setItem(PHONE_LOGIN_NUMBER_KEY, normalizedLoginPhone);
+        const response = await postAuthAction('send-otp', { phoneNumber: normalizedLoginPhone }, '/api/auth/send-otp');
         const data = await parseApiResponse(response, 'Failed to send OTP');
         if (data.Status === 'Success') {
           setSessionId(data.Details);
@@ -1060,7 +1206,7 @@ const AuthPage = ({
         }
       } else {
         // Email/Password Login
-        const result = await signInWithEmailAndPassword(auth, username.trim(), password);
+        const result = await signInWithEmailAndPassword(auth, normalizeEmailValue(normalizedUsername), password);
         await handleProfileSetup(result.user, undefined, undefined, false);
       }
     } catch (error: any) {
@@ -1347,21 +1493,20 @@ const AuthPage = ({
                   placeholder="Full Name"
                   className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
                   value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
+                  onChange={(e) => setDisplayName(sanitizeDisplayName(e.target.value))}
+                  autoComplete="name"
                 />
                 <input 
                   type="email" 
                   placeholder="Email Address"
                   className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => setEmail(normalizeEmailValue(e.target.value))}
+                  autoComplete="email"
                 />
-                <input 
-                  type="tel" 
-                  placeholder="Phone Number (e.g. +91...)"
-                  className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                <IndianPhoneInput
                   value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  onChange={setPhoneNumber}
                 />
                 
                 {!user && (
@@ -1371,6 +1516,7 @@ const AuthPage = ({
                     className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    minLength={6}
                   />
                 )}
                 <input 
@@ -1378,7 +1524,7 @@ const AuthPage = ({
                   placeholder="Referral Code (Optional)"
                   className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
                   value={referralCodeInput}
-                  onChange={(e) => setReferralCodeInput(e.target.value)}
+                  onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase().replace(/\s+/g, '').slice(0, 20))}
                 />
                 <label className="flex items-start gap-3 rounded-2xl border border-mairide-secondary bg-mairide-bg/60 px-4 py-4 text-left">
                   <input
@@ -1423,14 +1569,17 @@ const AuthPage = ({
               </div>
             ) : step === 'email-otp' ? (
               <div className="space-y-4">
-                <div className="text-center mb-4">
-                  <p className="text-sm text-mairide-secondary">Enter the 6-digit OTP sent to your email</p>
-                  <p className="font-bold text-mairide-primary">{email}</p>
+                <div className="rounded-[28px] border border-mairide-secondary bg-mairide-bg/70 px-5 py-4 text-left">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">Email verification</p>
+                  <p className="mt-2 text-sm text-mairide-secondary">Enter the 6-digit verification code sent to your email address.</p>
+                  <p className="mt-3 text-base font-semibold text-mairide-primary break-all">{email}</p>
                 </div>
                 <input 
                   type="text" 
-                  placeholder="6-digit Email OTP"
-                  className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center tracking-[0.5em] font-bold"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="Enter 6-digit code"
+                  className="w-full px-5 py-4 bg-mairide-bg border border-mairide-secondary rounded-[28px] outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center text-xl tracking-[0.18em] font-semibold"
                   value={otp}
                   maxLength={6}
                   onChange={(e) => setOtp(e.target.value)}
@@ -1461,14 +1610,17 @@ const AuthPage = ({
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="text-center mb-4">
-                  <p className="text-sm text-mairide-secondary">Enter the 6-digit OTP sent to your phone</p>
-                  <p className="font-bold text-mairide-primary">{phoneNumber}</p>
+                <div className="rounded-[28px] border border-mairide-secondary bg-mairide-bg/70 px-5 py-4 text-left">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">Phone verification</p>
+                  <p className="mt-2 text-sm text-mairide-secondary">Enter the 6-digit verification code sent to your mobile number.</p>
+                  <p className="mt-3 text-base font-semibold text-mairide-primary">{maskedOtpPhone}</p>
                 </div>
                 <input 
                   type="text" 
-                  placeholder="6-digit Phone OTP"
-                  className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center tracking-[0.5em] font-bold"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="Enter 6-digit code"
+                  className="w-full px-5 py-4 bg-mairide-bg border border-mairide-secondary rounded-[28px] outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center text-xl tracking-[0.18em] font-semibold"
                   value={otp}
                   maxLength={6}
                   onChange={(e) => setOtp(e.target.value)}
@@ -1500,14 +1652,17 @@ const AuthPage = ({
             )
           ) : step === 'otp' ? (
             <div className="space-y-4">
-              <div className="text-center mb-4">
-                <p className="text-sm text-mairide-secondary">Enter the 6-digit OTP sent to your phone</p>
-                <p className="font-bold text-mairide-primary">{phoneNumber || username}</p>
+              <div className="rounded-[28px] border border-mairide-secondary bg-mairide-bg/70 px-5 py-4 text-left">
+                <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">Phone login verification</p>
+                <p className="mt-2 text-sm text-mairide-secondary">Enter the 6-digit login code sent to your registered mobile number.</p>
+                <p className="mt-3 text-base font-semibold text-mairide-primary">{maskedOtpPhone}</p>
               </div>
               <input 
                 type="text" 
-                placeholder="6-digit Login OTP"
-                className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center tracking-[0.5em] font-bold"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="Enter 6-digit code"
+                className="w-full px-5 py-4 bg-mairide-bg border border-mairide-secondary rounded-[28px] outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center text-xl tracking-[0.18em] font-semibold"
                 value={otp}
                 maxLength={6}
                 onChange={(e) => setOtp(e.target.value)}
@@ -1956,6 +2111,16 @@ const DriverOnboarding = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [capturingField, setCapturingField] = useState<string | null>(null);
   const verificationMarkers = buildVerificationMarkers(formData as any);
+  const aadhaarSegments = splitAadhaarDigits(formData.aadhaarNumber);
+
+  const updateAadhaarSegment = (index: number, value: string) => {
+    const nextSegments = [...aadhaarSegments];
+    nextSegments[index] = String(value || '').replace(/[^\d]/g, '').slice(0, 4);
+    setFormData(prev => ({
+      ...prev,
+      aadhaarNumber: nextSegments.join(''),
+    }));
+  };
 
   const getCurrentLocation = (): Promise<{ lat: number, lng: number, timestamp: number }> => {
     return new Promise((resolve, reject) => {
@@ -2155,13 +2320,22 @@ const DriverOnboarding = ({
           <div className="space-y-6">
             <div>
               <label className="block text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-2 ml-2">Aadhaar Number</label>
-              <input 
-                type="text" 
-                placeholder="12-digit Aadhaar Number"
-                className="w-full p-5 bg-mairide-bg border-none rounded-3xl focus:ring-2 focus:ring-mairide-accent outline-none text-mairide-primary font-medium"
-                value={formData.aadhaarNumber}
-                onChange={e => setFormData({ ...formData, aadhaarNumber: e.target.value })}
-              />
+              <div className="grid grid-cols-3 gap-3">
+                {aadhaarSegments.map((segment, index) => (
+                  <input 
+                    key={index}
+                    type="text" 
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    placeholder="0000"
+                    maxLength={4}
+                    className="w-full p-5 bg-mairide-bg border-none rounded-3xl focus:ring-2 focus:ring-mairide-accent outline-none text-mairide-primary font-medium text-center tracking-[0.18em]"
+                    value={segment}
+                    onChange={e => updateAadhaarSegment(index, e.target.value)}
+                  />
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-mairide-secondary">Use the exact 12-digit Aadhaar number, captured in 3 clean blocks of 4 digits each.</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -2213,7 +2387,7 @@ const DriverOnboarding = ({
                 placeholder="DL Number"
                 className="w-full p-5 bg-mairide-bg border-none rounded-3xl focus:ring-2 focus:ring-mairide-accent outline-none text-mairide-primary font-medium"
                 value={formData.dlNumber}
-                onChange={e => setFormData({ ...formData, dlNumber: e.target.value })}
+                onChange={e => setFormData({ ...formData, dlNumber: sanitizeLicenseOrVehicleCode(e.target.value, 20) })}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -2267,7 +2441,7 @@ const DriverOnboarding = ({
                   placeholder="e.g. Maruti"
                   className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none text-sm"
                   value={formData.vehicleMake}
-                  onChange={e => setFormData({ ...formData, vehicleMake: e.target.value })}
+                  onChange={e => setFormData({ ...formData, vehicleMake: sanitizeDisplayName(e.target.value) })}
                 />
               </div>
               <div>
@@ -2277,7 +2451,7 @@ const DriverOnboarding = ({
                   placeholder="e.g. Swift"
                   className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none text-sm"
                   value={formData.vehicleModel}
-                  onChange={e => setFormData({ ...formData, vehicleModel: e.target.value })}
+                  onChange={e => setFormData({ ...formData, vehicleModel: sanitizeLicenseOrVehicleCode(e.target.value, 30) })}
                 />
               </div>
             </div>
@@ -2289,7 +2463,7 @@ const DriverOnboarding = ({
                   placeholder="e.g. White"
                   className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none text-sm"
                   value={formData.vehicleColor}
-                  onChange={e => setFormData({ ...formData, vehicleColor: e.target.value })}
+                  onChange={e => setFormData({ ...formData, vehicleColor: sanitizeDisplayName(e.target.value) })}
                 />
               </div>
               <div>
@@ -2304,13 +2478,13 @@ const DriverOnboarding = ({
             </div>
             <div>
               <label className="block text-[10px] font-bold text-mairide-secondary uppercase mb-1 ml-2">Registration Number</label>
-              <input 
-                type="text" 
-                placeholder="e.g. DL 01 AB 1234"
-                className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none text-sm"
-                value={formData.vehicleRegNumber}
-                onChange={e => setFormData({ ...formData, vehicleRegNumber: e.target.value })}
-              />
+                <input 
+                  type="text" 
+                  placeholder="e.g. DL 01 AB 1234"
+                  className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none text-sm"
+                  value={formData.vehicleRegNumber}
+                  onChange={e => setFormData({ ...formData, vehicleRegNumber: sanitizeLicenseOrVehicleCode(e.target.value, 18) })}
+                />
             </div>
             <div>
               <label className="block text-[10px] font-bold text-mairide-secondary uppercase mb-1 ml-2">Insurance Status</label>
@@ -2337,7 +2511,7 @@ const DriverOnboarding = ({
                     placeholder="e.g. ICICI Lombard"
                     className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none text-sm"
                     value={formData.insuranceProvider}
-                    onChange={e => setFormData({ ...formData, insuranceProvider: e.target.value })}
+                    onChange={e => setFormData({ ...formData, insuranceProvider: sanitizeDisplayName(e.target.value) })}
                   />
                 </div>
                 <div>
@@ -2937,6 +3111,241 @@ const DriverDashboardSummary = ({
           </div>
         ))}
       </div>
+    </div>
+  );
+};
+
+const ProfileInfoCard = ({
+  label,
+  value,
+  subValue,
+}: {
+  label: string;
+  value: React.ReactNode;
+  subValue?: React.ReactNode;
+}) => (
+  <div className="bg-mairide-bg p-5 rounded-3xl border border-mairide-secondary/40">
+    <p className="text-[10px] font-bold text-mairide-secondary uppercase tracking-widest mb-2">{label}</p>
+    <div className="text-lg font-bold text-mairide-primary break-words">{value}</div>
+    {subValue ? <p className="text-xs text-mairide-secondary mt-2">{subValue}</p> : null}
+  </div>
+);
+
+const ViewOnlyDocumentCard = ({
+  title,
+  imageUrl,
+}: {
+  title: string;
+  imageUrl?: string;
+}) => (
+  <div className="space-y-3">
+    <p className="text-[10px] font-bold text-mairide-secondary uppercase tracking-widest text-center">{title}</p>
+    <div className="aspect-[4/3] bg-mairide-bg rounded-3xl overflow-hidden border border-mairide-secondary relative group">
+      {imageUrl ? (
+        <>
+          <img src={imageUrl} className="w-full h-full object-cover" alt={title} />
+          <a
+            href={imageUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold"
+          >
+            View Full Size
+          </a>
+        </>
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-center p-6">
+          <div>
+            <Camera className="w-8 h-8 text-mairide-secondary mx-auto mb-2" />
+            <p className="text-xs font-bold text-mairide-secondary">No file uploaded</p>
+          </div>
+        </div>
+      )}
+    </div>
+    <p className="text-[11px] text-mairide-secondary text-center">
+      This document is view-only. Contact MaiRide support if any corrections are required.
+    </p>
+  </div>
+);
+
+const UserSelfProfilePanel = ({ profile }: { profile: UserProfile }) => {
+  const [displayName, setDisplayName] = useState(profile.displayName || '');
+  const [phoneNumber, setPhoneNumber] = useState(profile.phoneNumber || '');
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(profile.displayName || '');
+    setPhoneNumber(profile.phoneNumber || '');
+  }, [profile.displayName, profile.phoneNumber]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const normalizedEmail = normalizeEmailValue(profile.email);
+    const normalizedPhone = toIndianPhoneStorage(phoneNumber);
+    if (!isValidEmailValue(normalizedEmail)) {
+      alert('A valid email address is required on this account.');
+      return;
+    }
+    if (phoneNumber && !normalizedPhone) {
+      alert('Please enter a valid 10-digit Indian mobile number.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await updateDoc(doc(db, 'users', profile.uid), {
+        displayName: sanitizeDisplayName(displayName),
+        email: normalizedEmail,
+        phoneNumber: normalizedPhone,
+      });
+      alert('Profile details updated successfully.');
+      setIsEditing(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-xl p-8">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-8">
+          <div className="flex items-center gap-5">
+            <div className="w-24 h-24 rounded-[32px] bg-mairide-bg border border-mairide-secondary overflow-hidden flex items-center justify-center">
+              {getResolvedUserPhoto(profile) ? (
+                <img src={getResolvedUserPhoto(profile)} alt={profile.displayName} className="w-full h-full object-cover" />
+              ) : (
+                <UserIcon className="w-10 h-10 text-mairide-secondary" />
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-mairide-secondary uppercase tracking-widest mb-2">Account Profile</p>
+              <h2 className="text-3xl font-black tracking-tight text-mairide-primary">{profile.displayName}</h2>
+              <p className="text-sm text-mairide-secondary break-all mt-1">{profile.email}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="px-3 py-1 rounded-full bg-green-50 text-green-700 text-[10px] font-bold uppercase tracking-widest">
+                  {profile.status}
+                </span>
+                <span className="px-3 py-1 rounded-full bg-mairide-bg text-mairide-primary text-[10px] font-bold uppercase tracking-widest">
+                  {profile.role === 'consumer' ? 'Traveler' : profile.role}
+                </span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsEditing((current) => !current)}
+            className="px-6 py-3 rounded-2xl bg-mairide-primary text-white font-bold hover:scale-[1.02] transition-transform"
+          >
+            {isEditing ? 'Close Edit Mode' : 'Edit Basic Details'}
+          </button>
+        </div>
+      </div>
+
+      {isEditing && (
+        <form onSubmit={handleSave} className="bg-white rounded-[40px] border border-mairide-secondary shadow-xl p-8 space-y-6">
+          <h3 className="text-xl font-bold text-mairide-primary">Update Basic Details</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Full Name</label>
+              <input
+                type="text"
+                className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent"
+                value={displayName}
+                onChange={(e) => setDisplayName(sanitizeDisplayName(e.target.value))}
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Phone Number</label>
+              <IndianPhoneInput value={phoneNumber} onChange={setPhoneNumber} />
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="w-full md:w-auto px-8 py-4 rounded-2xl bg-mairide-accent text-white font-bold hover:scale-[1.02] transition-transform disabled:opacity-60"
+          >
+            {isSaving ? 'Saving...' : 'Save Profile Changes'}
+          </button>
+        </form>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        <ProfileInfoCard label="Email" value={profile.email} />
+        <ProfileInfoCard label="Phone Number" value={formatPhoneForDisplay(profile.phoneNumber)} />
+        <ProfileInfoCard
+          label="MaiCoins Wallet"
+          value={
+            <>
+              {profile.wallet?.balance || 0} <span className="text-xs font-bold text-mairide-accent">MC</span>
+            </>
+          }
+          subValue={`Pending: ${profile.wallet?.pendingBalance || 0} MC`}
+        />
+        <ProfileInfoCard
+          label="Ratings"
+          value={typeof profile.reviewStats?.averageRating === 'number' ? profile.reviewStats.averageRating.toFixed(1) : getResolvedUserRating(profile).toFixed(1)}
+          subValue={`${profile.reviewStats?.ratingCount || 0} reviews recorded`}
+        />
+      </div>
+
+      {profile.consents && (
+        <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-xl p-8">
+          <h3 className="text-xl font-bold text-mairide-primary mb-6">Consents & Account Declarations</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <ProfileInfoCard
+              label="Truth Declaration"
+              value={profile.consents.truthfulInformationAccepted ? 'Accepted' : 'Not recorded'}
+              subValue={`Accepted at ${new Date(profile.consents.acceptedAt).toLocaleString()}`}
+            />
+            <ProfileInfoCard
+              label="Terms & Marketing"
+              value={profile.consents.termsAccepted ? 'Terms accepted' : 'Terms missing'}
+              subValue={`Marketing opt-in: ${profile.consents.marketingOptIn ? 'Enabled' : 'Disabled'}`}
+            />
+          </div>
+        </div>
+      )}
+
+      {profile.role === 'driver' && profile.driverDetails && (
+        <>
+          <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-xl p-8">
+            <h3 className="text-xl font-bold text-mairide-primary mb-6">Driver Verification Summary</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+              <ProfileInfoCard label="Aadhaar Number" value={formatAadhaarForDisplay(profile.driverDetails.aadhaarNumber)} />
+              <ProfileInfoCard label="DL Number" value={profile.driverDetails.dlNumber || 'Not provided'} />
+              <ProfileInfoCard label="Vehicle" value={`${profile.driverDetails.vehicleMake} ${profile.driverDetails.vehicleModel}`.trim() || 'Not provided'} />
+              <ProfileInfoCard label="Registration" value={profile.driverDetails.vehicleRegNumber || 'Not provided'} />
+              <ProfileInfoCard label="Insurance Status" value={profile.driverDetails.insuranceStatus || 'Not captured'} />
+              <ProfileInfoCard label="Insurance Provider" value={profile.driverDetails.insuranceProvider || 'Not provided'} />
+              <ProfileInfoCard label="Insurance Expiry" value={profile.driverDetails.insuranceExpiryDate || 'Not provided'} />
+              <ProfileInfoCard label="Verification Status" value={profile.verificationStatus || 'pending'} />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-xl p-8">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-mairide-primary">Uploaded Documents</h3>
+                <p className="text-sm text-mairide-secondary">Your verification files are visible here for reference. They cannot be edited or deleted from this screen.</p>
+              </div>
+              <span className="px-4 py-2 rounded-full bg-mairide-bg text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                View Only
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <ViewOnlyDocumentCard title="Selfie" imageUrl={profile.driverDetails.selfiePhoto} />
+              <ViewOnlyDocumentCard title="Vehicle Photo" imageUrl={profile.driverDetails.vehiclePhoto} />
+              <ViewOnlyDocumentCard title="Aadhaar Front" imageUrl={profile.driverDetails.aadhaarFrontPhoto} />
+              <ViewOnlyDocumentCard title="Aadhaar Back" imageUrl={profile.driverDetails.aadhaarBackPhoto} />
+              <ViewOnlyDocumentCard title="DL Front" imageUrl={profile.driverDetails.dlFrontPhoto} />
+              <ViewOnlyDocumentCard title="DL Back" imageUrl={profile.driverDetails.dlBackPhoto} />
+              <ViewOnlyDocumentCard title="RC Photo" imageUrl={profile.driverDetails.rcPhoto} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -3962,7 +4371,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [rides, setRides] = useState<any[]>([]);
   const [dashboardBookings, setDashboardBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'search' | 'history' | 'wallet' | 'support'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'history' | 'wallet' | 'support' | 'profile'>('search');
   const [paymentBooking, setPaymentBooking] = useState<Booking | null>(null);
 
   if (loadError || authFailure) {
@@ -4379,6 +4788,16 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           <LifeBuoy className="w-4 h-4" />
           <span>Support</span>
         </button>
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={cn(
+            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
+            activeTab === 'profile' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
+          )}
+        >
+          <UserIcon className="w-4 h-4" />
+          <span>Profile</span>
+        </button>
       </div>
 
       {activeTab === 'search' && (
@@ -4770,6 +5189,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       {activeTab === 'history' && <MyBookings profile={profile} />}
       {activeTab === 'wallet' && <WalletDashboard profile={profile} />}
       {activeTab === 'support' && <SupportSystem profile={profile} />}
+      {activeTab === 'profile' && <UserSelfProfilePanel profile={profile} />}
       {paymentBooking && (
         <PaymentProofModal
           booking={paymentBooking}
@@ -4788,7 +5208,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [isOnline, setIsOnline] = useState(profile.driverDetails?.isOnline || false);
   const [newRide, setNewRide] = useState({ origin: '', destination: '', price: '', seats: '4' });
   const [showOfferForm, setShowOfferForm] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'requests' | 'history' | 'wallet' | 'support'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'requests' | 'history' | 'wallet' | 'support' | 'profile'>('dashboard');
 
   if (loadError || authFailure) {
     return (
@@ -5130,6 +5550,16 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           <LifeBuoy className="w-4 h-4" />
           <span>Support</span>
         </button>
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={cn(
+            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
+            activeTab === 'profile' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
+          )}
+        >
+          <UserIcon className="w-4 h-4" />
+          <span>Profile</span>
+        </button>
       </div>
 
       {activeTab === 'dashboard' && (
@@ -5431,6 +5861,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       {activeTab === 'history' && <DriverHistory profile={profile} />}
       {activeTab === 'wallet' && <WalletDashboard profile={profile} />}
       {activeTab === 'support' && <SupportSystem profile={profile} />}
+      {activeTab === 'profile' && <UserSelfProfilePanel profile={profile} />}
       {paymentRequest && (
         <PaymentProofModal
           booking={paymentRequest}
@@ -7168,6 +7599,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   }, [profile.uid]);
 
   const filteredUsers = users.filter(user => {
+    if (user.uid === profile.uid) return false;
     const matchesSearch = user.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
@@ -7213,6 +7645,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         || booking.rideLifecycleStatus === 'in_progress'
       )
     );
+  const adminSelfProfile = users.find((user) => user.uid === profile.uid) || profile;
+  const adminUserTrips = getUserRideBookings(adminSelfProfile.uid, adminSelfProfile.role);
+  const adminOpenOffers = adminSelfProfile.role === 'driver' ? getActiveRideOffers(adminSelfProfile.uid).length : 0;
+  const adminActiveTrips = getActiveUserTrips(adminSelfProfile.uid, adminSelfProfile.role).length;
   const usersWithLocation = users.filter(
     u => u.location && typeof u.location.lat === 'number' && typeof u.location.lng === 'number'
   );
@@ -7379,10 +7815,19 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+    const normalizedPhone = editingUser.phoneNumber ? toIndianPhoneStorage(editingUser.phoneNumber) : '';
+    if (editingUser.phoneNumber && !normalizedPhone) {
+      setAdminNotice({
+        title: 'Invalid mobile number',
+        message: 'Please enter a valid 10-digit Indian mobile number.',
+        tone: 'info',
+      });
+      return;
+    }
     try {
       await updateDoc(doc(db, 'users', editingUser.uid), {
-        displayName: editingUser.displayName,
-        phoneNumber: editingUser.phoneNumber || '',
+        displayName: sanitizeDisplayName(editingUser.displayName),
+        phoneNumber: normalizedPhone,
         role: editingUser.role,
         status: editingUser.status
       });
@@ -7402,7 +7847,9 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUser.email || !newUser.displayName || !newUser.password) {
+    const normalizedEmail = normalizeEmailValue(newUser.email);
+    const normalizedPhone = newUser.phoneNumber ? toIndianPhoneStorage(newUser.phoneNumber) : '';
+    if (!normalizedEmail || !newUser.displayName || !newUser.password) {
       setAdminNotice({
         title: 'Missing details',
         message: 'Please complete all required fields, including the temporary password.',
@@ -7410,9 +7857,25 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       });
       return;
     }
+    if (!isValidEmailValue(normalizedEmail)) {
+      setAdminNotice({
+        title: 'Invalid email',
+        message: 'Please enter a valid email address with a proper domain.',
+        tone: 'info',
+      });
+      return;
+    }
+    if (newUser.phoneNumber && !normalizedPhone) {
+      setAdminNotice({
+        title: 'Invalid mobile number',
+        message: 'Please enter a valid 10-digit Indian mobile number.',
+        tone: 'info',
+      });
+      return;
+    }
 
     // Check for duplicate email
-    const duplicateCheck = users.find(u => u.email === newUser.email);
+    const duplicateCheck = users.find(u => normalizeEmailValue(u.email) === normalizedEmail);
     if (duplicateCheck) {
       setAdminNotice({
         title: 'User already exists',
@@ -7429,10 +7892,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
       // 2. Call Backend API to create user in Auth and Firestore
       const response = await axios.post('/api/admin/create-user', {
-        email: newUser.email,
+        email: normalizedEmail,
         password: newUser.password,
-        displayName: newUser.displayName,
-        phoneNumber: newUser.phoneNumber,
+        displayName: sanitizeDisplayName(newUser.displayName),
+        phoneNumber: normalizedPhone,
         role: newUser.role,
         adminRole: newUser.role === 'admin' ? newUser.adminRole : undefined
       }, {
@@ -8114,30 +8577,119 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         {activeTab === 'security' && <AdminSecurityView />}
 
         {activeTab === 'profile' && (
-          <div className="max-w-2xl mx-auto bg-white rounded-[40px] border border-mairide-secondary p-12 shadow-sm text-center">
-            <div className="w-32 h-32 bg-mairide-bg rounded-full flex items-center justify-center mx-auto mb-8 border-4 border-white shadow-xl">
-              <UserIcon className="w-16 h-16 text-mairide-secondary" />
-            </div>
-            <h2 className="text-3xl font-bold text-mairide-primary mb-2">{auth.currentUser?.displayName || 'Admin User'}</h2>
-            <p className="text-mairide-secondary mb-8">{auth.currentUser?.email}</p>
-            
-            <div className="grid grid-cols-2 gap-4 mb-12">
-              <div className="bg-mairide-bg p-6 rounded-3xl text-center">
-                <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Role</p>
-                <p className="text-lg font-bold text-mairide-primary">Super Admin</p>
-              </div>
-              <div className="bg-mairide-bg p-6 rounded-3xl text-center">
-                <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Status</p>
-                <p className="text-lg font-bold text-green-600">Active</p>
+          <div className="space-y-8">
+            <div className="bg-white rounded-[40px] border border-mairide-secondary p-8 md:p-10 shadow-sm">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
+                <div className="flex items-center gap-5">
+                  <div className="w-24 h-24 rounded-[28px] bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center shadow-sm">
+                    {getResolvedUserPhoto(adminSelfProfile) ? (
+                      <img src={getResolvedUserPhoto(adminSelfProfile)} alt={adminSelfProfile.displayName} className="w-full h-full object-cover" />
+                    ) : (
+                      <UserIcon className="w-10 h-10 text-mairide-secondary" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-mairide-secondary">Admin profile</p>
+                    <h2 className="mt-2 text-3xl font-bold text-mairide-primary">{adminSelfProfile.displayName || auth.currentUser?.displayName || 'Admin User'}</h2>
+                    <p className="mt-1 text-sm text-mairide-secondary break-all">{adminSelfProfile.email || auth.currentUser?.email}</p>
+                    <p className="mt-3 inline-flex items-center rounded-full bg-green-100 px-4 py-1 text-[10px] font-bold uppercase tracking-widest text-green-600">
+                      {adminSelfProfile.status}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-[280px]">
+                  <button
+                    onClick={() => setEditingUser(adminSelfProfile)}
+                    className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-5 py-4 text-left font-bold text-mairide-primary hover:border-mairide-accent transition-colors"
+                  >
+                    Edit profile
+                  </button>
+                  <button
+                    onClick={() => setResetPasswordUser(adminSelfProfile)}
+                    className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-5 py-4 text-left font-bold text-mairide-primary hover:border-mairide-accent transition-colors"
+                  >
+                    Set temporary password
+                  </button>
+                  <button
+                    onClick={() => handleGenerateResetLink(adminSelfProfile)}
+                    disabled={isGeneratingResetLink === adminSelfProfile.uid}
+                    className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-5 py-4 text-left font-bold text-mairide-primary hover:border-mairide-accent transition-colors disabled:opacity-50"
+                  >
+                    {isGeneratingResetLink === adminSelfProfile.uid ? 'Generating link...' : 'Copy reset link'}
+                  </button>
+                  <button 
+                    onClick={() => signOut(auth)}
+                    className="rounded-2xl bg-red-600 px-5 py-4 text-left font-bold text-white hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20"
+                  >
+                    Sign out
+                  </button>
+                </div>
               </div>
             </div>
 
-            <button 
-              onClick={() => signOut(auth)}
-              className="w-full bg-red-600 text-white py-5 rounded-3xl font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20"
-            >
-              Sign Out
-            </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+              <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Role</p>
+                <p className="mt-3 text-2xl font-black tracking-tight text-mairide-primary capitalize">{adminSelfProfile.adminRole || 'super_admin'}</p>
+              </div>
+              <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">MaiCoins</p>
+                <p className="mt-3 text-2xl font-black tracking-tight text-mairide-primary">{adminSelfProfile.wallet?.balance || 0} <span className="text-xs font-bold text-mairide-accent">MC</span></p>
+                <p className="mt-2 text-xs text-mairide-secondary">Pending: {adminSelfProfile.wallet?.pendingBalance || 0} MC</p>
+              </div>
+              <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Account activity</p>
+                <p className="mt-3 text-2xl font-black tracking-tight text-mairide-primary">{adminActiveTrips}</p>
+                <p className="mt-2 text-xs text-mairide-secondary">{adminUserTrips.length} total bookings tracked</p>
+              </div>
+              <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Open offers</p>
+                <p className="mt-3 text-2xl font-black tracking-tight text-mairide-primary">{adminOpenOffers}</p>
+                <p className="mt-2 text-xs text-mairide-secondary">{isUserCurrentlyOnline(adminSelfProfile) ? 'Online now' : 'Offline currently'}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-mairide-primary">Account details</h3>
+                <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Email</p>
+                    <p className="mt-2 text-sm font-bold text-mairide-primary break-all">{adminSelfProfile.email}</p>
+                  </div>
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Phone</p>
+                    <p className="mt-2 text-sm font-bold text-mairide-primary">{formatPhoneForDisplay(adminSelfProfile.phoneNumber)}</p>
+                  </div>
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Status</p>
+                    <p className="mt-2 text-sm font-bold text-mairide-primary capitalize">{adminSelfProfile.status}</p>
+                  </div>
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Password state</p>
+                    <p className="mt-2 text-sm font-bold text-mairide-primary">{adminSelfProfile.forcePasswordChange ? 'Reset required' : 'Normal access'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-mairide-primary">Consent and audit</h3>
+                <div className="mt-5 space-y-4">
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Created</p>
+                    <p className="mt-2 text-sm font-bold text-mairide-primary">{adminSelfProfile.createdAt ? new Date(adminSelfProfile.createdAt).toLocaleString() : 'Not available'}</p>
+                  </div>
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Marketing consent</p>
+                    <p className="mt-2 text-sm font-bold text-mairide-primary">{adminSelfProfile.consents?.marketingOptIn ? 'Opted in' : 'Not opted in'}</p>
+                  </div>
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Truth declaration</p>
+                    <p className="mt-2 text-sm font-bold text-mairide-primary">{adminSelfProfile.consents?.truthfulInformationAccepted ? 'Accepted' : 'Not recorded'}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           )}
           </div>
@@ -8253,7 +8805,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     type="text" 
                     className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none"
                     value={newUser.displayName}
-                    onChange={e => setNewUser({ ...newUser, displayName: e.target.value })}
+                    onChange={e => setNewUser({ ...newUser, displayName: sanitizeDisplayName(e.target.value) })}
                     required
                   />
                 </div>
@@ -8263,18 +8815,15 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     type="email" 
                     className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none"
                     value={newUser.email}
-                    onChange={e => setNewUser({ ...newUser, email: e.target.value })}
+                    onChange={e => setNewUser({ ...newUser, email: normalizeEmailValue(e.target.value) })}
                     required
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Mobile Number</label>
-                  <input 
-                    type="tel" 
-                    className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none"
+                  <IndianPhoneInput
                     value={newUser.phoneNumber}
-                    onChange={e => setNewUser({ ...newUser, phoneNumber: e.target.value })}
-                    placeholder="+91 1234567890"
+                    onChange={(value) => setNewUser({ ...newUser, phoneNumber: value })}
                   />
                 </div>
                 <div>
@@ -8285,6 +8834,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     value={newUser.password}
                     onChange={e => setNewUser({ ...newUser, password: e.target.value })}
                     placeholder="Min 6 characters"
+                    minLength={6}
                     required
                   />
                 </div>
@@ -8350,18 +8900,15 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     type="text" 
                     className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none"
                     value={editingUser.displayName}
-                    onChange={e => setEditingUser({ ...editingUser, displayName: e.target.value })}
+                    onChange={e => setEditingUser({ ...editingUser, displayName: sanitizeDisplayName(e.target.value) })}
                     required
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Mobile Number</label>
-                  <input 
-                    type="tel" 
-                    className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none"
+                  <IndianPhoneInput
                     value={editingUser.phoneNumber || ''}
-                    onChange={e => setEditingUser({ ...editingUser, phoneNumber: e.target.value })}
-                    placeholder="+91 1234567890"
+                    onChange={(value) => setEditingUser({ ...editingUser, phoneNumber: value })}
                   />
                 </div>
                 <div>
@@ -8512,7 +9059,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                       </div>
                       <div className="bg-mairide-bg p-6 rounded-3xl">
                         <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Phone Number</p>
-                        <p className="text-lg font-bold text-mairide-primary">{selectedDriver.phoneNumber || 'Not provided'}</p>
+                        <p className="text-lg font-bold text-mairide-primary">{formatPhoneForDisplay(selectedDriver.phoneNumber)}</p>
                       </div>
                     </div>
                   </div>
@@ -8526,7 +9073,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   </h3>
                   <div className="bg-mairide-bg p-6 rounded-3xl mb-6">
                     <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Aadhaar Number</p>
-                    <p className="text-xl font-bold text-mairide-primary tracking-widest">{selectedDriver.driverDetails?.aadhaarNumber}</p>
+                    <p className="text-xl font-bold text-mairide-primary tracking-widest">{formatAadhaarForDisplay(selectedDriver.driverDetails?.aadhaarNumber)}</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
@@ -8879,7 +9426,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   </div>
                   <div className="bg-mairide-bg p-6 rounded-3xl">
                     <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Phone</p>
-                    <p className="text-lg font-bold text-mairide-primary">{selectedUser.phoneNumber || 'Not provided'}</p>
+                    <p className="text-lg font-bold text-mairide-primary">{formatPhoneForDisplay(selectedUser.phoneNumber)}</p>
                   </div>
                   <div className="bg-mairide-bg p-6 rounded-3xl">
                     <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Status</p>
@@ -9118,12 +9665,16 @@ const App = () => {
 
       if (u) {
         const mappedPhoneProfileId = u.isAnonymous ? sessionStorage.getItem(PHONE_LOGIN_PROFILE_KEY) : null;
+        const pendingPhoneLogin = u.isAnonymous ? sessionStorage.getItem(PHONE_LOGIN_NUMBER_KEY) : null;
         const profileDocId = mappedPhoneProfileId || u.uid;
 
         // Listen to profile changes
         unsubProfile = onSnapshot(doc(db, 'users', profileDocId), async (snapshot) => {
           if (snapshot.exists()) {
             setProfile(snapshot.data() as UserProfile);
+            if (u.isAnonymous) {
+              sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
+            }
             setLoading(false);
           } else if (u.email && !u.isAnonymous) {
             // If not found by UID, try to find by email (for pre-created admin users)
@@ -9182,8 +9733,24 @@ const App = () => {
             }
             setLoading(false);
           } else {
+            if (u.isAnonymous && pendingPhoneLogin) {
+              try {
+                const matchedProfile = await findUserProfileByPhone(pendingPhoneLogin);
+                if (matchedProfile) {
+                  sessionStorage.setItem(PHONE_LOGIN_PROFILE_KEY, matchedProfile.uid);
+                  sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
+                  setProfile(matchedProfile);
+                  setNotRegisteredError(false);
+                  setLoading(false);
+                  return;
+                }
+              } catch (lookupError) {
+                console.error("Anonymous phone profile lookup error:", lookupError);
+              }
+            }
             if (u.isAnonymous) {
               sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
+              sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
             }
             setProfile(null);
             setLoading(false);
@@ -9195,6 +9762,7 @@ const App = () => {
         });
       } else {
         sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
+        sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
         setProfile(null);
         setLoading(false);
       }
@@ -9208,6 +9776,7 @@ const App = () => {
 
   const handleLogout = () => {
     sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
+    sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
     return signOut(auth);
   };
 

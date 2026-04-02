@@ -234,7 +234,7 @@ async function handleVerifyOtp(req: any, res: any) {
   }
 }
 
-async function handleResolvePhoneLogin(req: any, res: any) {
+export async function handleResolvePhoneLogin(req: any, res: any) {
   const { phoneNumber } = req.body || {};
   const supabaseAdmin = getSupabaseAdmin();
   const variants = buildPhoneVariants(phoneNumber);

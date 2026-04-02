@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import authHandler from "./api/auth.ts";
 import { handleCompleteSignup } from "./api/_lib/signup.ts";
 import { handleSubmitReview } from "./api/_lib/reviews.ts";
 import {
@@ -21,6 +22,7 @@ import {
   handleUserChangePassword,
   requireSuperAdmin,
 } from "./api/_lib/backend.ts";
+import { handleResolvePhoneLogin } from "./api/auth.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,10 +64,12 @@ async function startServer() {
     return handleAdminSaveConfig(req, res);
   });
   app.post("/api/user/change-password", handleUserChangePassword);
+  app.all("/api/auth", authHandler);
   app.post("/api/auth/send-otp", handleSendOtp);
   app.post("/api/auth/send-email-otp", handleSendEmailOtp);
   app.post("/api/auth/verify-otp", handleVerifyOtp);
   app.post("/api/auth/complete-signup", handleCompleteSignup);
+  app.post("/api/auth/resolve-phone-login", handleResolvePhoneLogin);
   app.post("/api/bookings/submit-review", handleSubmitReview);
 
   if (process.env.NODE_ENV !== "production") {
