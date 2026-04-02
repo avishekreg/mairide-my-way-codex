@@ -793,20 +793,6 @@ const AuthPage = ({
     }
   }, [user]);
 
-  const findExistingProfileByPhone = async (value: string) => {
-    const phoneCandidates = buildPhoneVariants(value);
-
-    for (const candidate of phoneCandidates) {
-      const qPhone = query(collection(db, 'users'), where('phoneNumber', '==', candidate));
-      const phoneSnap = await getDocs(qPhone);
-      if (!phoneSnap.empty) {
-        return phoneSnap.docs[0].data() as UserProfile;
-      }
-    }
-
-    return null;
-  };
-
   const handleSendEmailOtp = async () => {
     if (!email) return;
     setIsLoading(true);
@@ -917,11 +903,12 @@ const AuthPage = ({
         if (!user && authMode === 'signup' && email && password && displayName) {
           await completeEmailPasswordSignUp();
         } else if (authMode === 'login') {
-          const existingProfile = await findExistingProfileByPhone(phoneNumber || username);
-          if (!existingProfile) {
-            sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
-            throw new Error("NOT_REGISTERED");
-          }
+          const resolveResponse = await fetch('/api/auth?action=resolve-phone-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phoneNumber: phoneNumber || username }),
+          });
+          const existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
 
           sessionStorage.setItem(PHONE_LOGIN_PROFILE_KEY, existingProfile.uid);
 

@@ -25,6 +25,24 @@ function normalizePhone(phoneNumber: unknown) {
   return String(phoneNumber || "").replace(/[^\d]/g, "");
 }
 
+function buildPhoneVariants(phoneNumber: unknown) {
+  const digits = normalizePhone(phoneNumber);
+  const variants = new Set<string>();
+
+  if (!digits) return [];
+
+  variants.add(digits);
+  variants.add(`+${digits}`);
+
+  if (digits.length > 10) {
+    const last10 = digits.slice(-10);
+    variants.add(last10);
+    variants.add(`+${last10}`);
+  }
+
+  return Array.from(variants);
+}
+
 function normalizeEmail(email: unknown) {
   return String(email || "").trim().toLowerCase();
 }
@@ -216,6 +234,43 @@ async function handleVerifyOtp(req: any, res: any) {
   }
 }
 
+async function handleResolvePhoneLogin(req: any, res: any) {
+  const { phoneNumber } = req.body || {};
+  const supabaseAdmin = getSupabaseAdmin();
+  const variants = buildPhoneVariants(phoneNumber);
+
+  if (!variants.length) {
+    return res.status(400).json({ error: "A valid phone number is required." });
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .select("*")
+      .in("phone_number", variants)
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    const profile = data?.[0];
+    if (!profile) {
+      return res.status(404).json({ error: "NOT_REGISTERED" });
+    }
+
+    return res.status(200).json({
+      uid: profile.id,
+      role: profile.role,
+      email: profile.email || "",
+      phoneNumber: profile.phone_number || "",
+    });
+  } catch (error: any) {
+    console.error("Resolve phone login error:", error);
+    return res.status(500).json({ error: error.message || "Failed to resolve phone login" });
+  }
+}
+
 async function handleCompleteSignup(req: any, res: any) {
   const { email, password, displayName, phoneNumber, role, referralCodeInput, consents } = req.body || {};
 
@@ -361,6 +416,7 @@ function getAction(req: any) {
 
 const handlers: Record<string, (req: any, res: any) => Promise<any> | any> = {
   "complete-signup": handleCompleteSignup,
+  "resolve-phone-login": handleResolvePhoneLogin,
   "send-email-otp": handleSendEmailOtp,
   "send-otp": handleSendOtp,
   "verify-otp": handleVerifyOtp,
