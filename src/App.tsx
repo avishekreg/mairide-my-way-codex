@@ -53,7 +53,7 @@ import {
 } from 'firebase/storage';
 import { auth, db, storage } from './lib/firebase';
 import { supabase } from './lib/supabase';
-import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking } from './types';
+import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import Webcam from 'react-webcam';
 import { motion, AnimatePresence } from 'motion/react';
@@ -6826,6 +6826,7 @@ const ForcePasswordChangeModal = ({ profile }: { profile: UserProfile }) => {
 const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const effectiveAdminRole = profile.adminRole || 'super_admin';
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'config' | 'analytics' | 'security' | 'map'>('revenue');
@@ -6939,6 +6940,17 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   }, []);
 
   useEffect(() => {
+    const q = query(collection(db, 'rides'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ridesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Ride));
+      setRides(ridesData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'rides');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!('geolocation' in navigator)) return;
 
     let isMounted = true;
@@ -6987,6 +6999,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const pendingVerificationDrivers = users.filter(
     (u) => u.role === 'driver' && u.onboardingComplete && u.verificationStatus === 'pending'
   );
+  const getUserRideOffers = (userId: string) =>
+    rides.filter((ride) => ride.driverId === userId);
+  const getUserRideBookings = (userId: string, role: UserProfile['role']) =>
+    bookings.filter((booking) => role === 'driver' ? booking.driverId === userId : booking.consumerId === userId);
   const usersWithLocation = users.filter(
     u => u.location && typeof u.location.lat === 'number' && typeof u.location.lng === 'number'
   );
@@ -8173,6 +8189,86 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   </div>
                 </section>
 
+                <section>
+                  <h3 className="text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-6 flex items-center">
+                    <History className="w-4 h-4 mr-2" />
+                    Driver Activity History
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                    <div className="bg-mairide-bg p-4 rounded-2xl">
+                      <p className="text-[8px] font-bold text-mairide-secondary uppercase mb-1">Ride Offers</p>
+                      <p className="text-2xl font-black text-mairide-primary">{getUserRideOffers(selectedDriver.uid).length}</p>
+                    </div>
+                    <div className="bg-mairide-bg p-4 rounded-2xl">
+                      <p className="text-[8px] font-bold text-mairide-secondary uppercase mb-1">Bookings Handled</p>
+                      <p className="text-2xl font-black text-mairide-primary">{getUserRideBookings(selectedDriver.uid, 'driver').length}</p>
+                    </div>
+                    <div className="bg-mairide-bg p-4 rounded-2xl">
+                      <p className="text-[8px] font-bold text-mairide-secondary uppercase mb-1">Completed Trips</p>
+                      <p className="text-2xl font-black text-mairide-primary">
+                        {getUserRideBookings(selectedDriver.uid, 'driver').filter((booking) => booking.status === 'completed').length}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="bg-white border border-mairide-secondary rounded-3xl overflow-hidden">
+                      <div className="px-6 py-4 border-b border-mairide-secondary">
+                        <h4 className="font-bold text-mairide-primary">Ride Offers Created</h4>
+                      </div>
+                      <div className="divide-y divide-mairide-secondary">
+                        {getUserRideOffers(selectedDriver.uid).length > 0 ? getUserRideOffers(selectedDriver.uid).map((ride) => (
+                          <div key={ride.id} className="px-6 py-4">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                              <div>
+                                <p className="font-bold text-mairide-primary">{ride.origin} → {ride.destination}</p>
+                                <p className="text-xs text-mairide-secondary">{new Date(ride.createdAt).toLocaleString()}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-mairide-accent">{formatCurrency(ride.price)}</p>
+                                <p className="text-[10px] font-bold uppercase text-mairide-secondary">{ride.status}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )) : (
+                          <div className="px-6 py-8 text-sm text-mairide-secondary">No ride offers recorded yet.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-white border border-mairide-secondary rounded-3xl overflow-hidden">
+                      <div className="px-6 py-4 border-b border-mairide-secondary">
+                        <h4 className="font-bold text-mairide-primary">Bookings & Trip History</h4>
+                      </div>
+                      <div className="divide-y divide-mairide-secondary">
+                        {getUserRideBookings(selectedDriver.uid, 'driver').length > 0 ? getUserRideBookings(selectedDriver.uid, 'driver').map((booking) => (
+                          <div key={booking.id} className="px-6 py-4">
+                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                              <div>
+                                <p className="font-bold text-mairide-primary">{booking.origin} → {booking.destination}</p>
+                                <p className="text-sm text-mairide-secondary">Traveler: {booking.consumerName}</p>
+                                <p className="text-xs text-mairide-secondary">{new Date(booking.createdAt).toLocaleString()}</p>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 text-right">
+                                <div>
+                                  <p className="text-[10px] font-bold uppercase text-mairide-secondary">Trip Value</p>
+                                  <p className="font-bold text-mairide-primary">{formatCurrency(booking.totalPrice)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-bold uppercase text-mairide-secondary">Status</p>
+                                  <p className="font-bold text-mairide-accent uppercase">{booking.status}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )) : (
+                          <div className="px-6 py-8 text-sm text-mairide-secondary">No booking history recorded yet.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
                 {/* Final Decision */}
                 <section className="bg-mairide-bg p-8 rounded-[32px] border border-mairide-secondary">
                   <h3 className="text-lg font-bold text-mairide-primary mb-6">Verification Decision</h3>
@@ -8322,6 +8418,93 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     </div>
                   </section>
                 )}
+
+                <section>
+                  <h3 className="text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-4">User History</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div className="bg-mairide-bg p-4 rounded-2xl">
+                      <p className="text-[8px] font-bold text-mairide-secondary uppercase mb-1">
+                        {selectedUser.role === 'driver' ? 'Ride Offers' : 'Trips Taken'}
+                      </p>
+                      <p className="text-2xl font-black text-mairide-primary">
+                        {selectedUser.role === 'driver' ? getUserRideOffers(selectedUser.uid).length : getUserRideBookings(selectedUser.uid, selectedUser.role).length}
+                      </p>
+                    </div>
+                    <div className="bg-mairide-bg p-4 rounded-2xl">
+                      <p className="text-[8px] font-bold text-mairide-secondary uppercase mb-1">Completed</p>
+                      <p className="text-2xl font-black text-mairide-primary">
+                        {getUserRideBookings(selectedUser.uid, selectedUser.role).filter((booking) => booking.status === 'completed').length}
+                      </p>
+                    </div>
+                    <div className="bg-mairide-bg p-4 rounded-2xl">
+                      <p className="text-[8px] font-bold text-mairide-secondary uppercase mb-1">Cancelled / Rejected</p>
+                      <p className="text-2xl font-black text-mairide-primary">
+                        {getUserRideBookings(selectedUser.uid, selectedUser.role).filter((booking) => ['cancelled', 'rejected'].includes(booking.status)).length}
+                      </p>
+                    </div>
+                  </div>
+
+                  {selectedUser.role === 'driver' && (
+                    <div className="bg-white border border-mairide-secondary rounded-3xl overflow-hidden mb-4">
+                      <div className="px-6 py-4 border-b border-mairide-secondary">
+                        <h4 className="font-bold text-mairide-primary">Ride Offers Created</h4>
+                      </div>
+                      <div className="divide-y divide-mairide-secondary">
+                        {getUserRideOffers(selectedUser.uid).length > 0 ? getUserRideOffers(selectedUser.uid).map((ride) => (
+                          <div key={ride.id} className="px-6 py-4">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                              <div>
+                                <p className="font-bold text-mairide-primary">{ride.origin} → {ride.destination}</p>
+                                <p className="text-xs text-mairide-secondary">{new Date(ride.createdAt).toLocaleString()}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-mairide-accent">{formatCurrency(ride.price)}</p>
+                                <p className="text-[10px] font-bold uppercase text-mairide-secondary">{ride.status}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )) : (
+                          <div className="px-6 py-8 text-sm text-mairide-secondary">No ride offers recorded yet.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-white border border-mairide-secondary rounded-3xl overflow-hidden">
+                    <div className="px-6 py-4 border-b border-mairide-secondary">
+                      <h4 className="font-bold text-mairide-primary">
+                        {selectedUser.role === 'driver' ? 'Trips & Booking History' : 'Ride History'}
+                      </h4>
+                    </div>
+                    <div className="divide-y divide-mairide-secondary">
+                      {getUserRideBookings(selectedUser.uid, selectedUser.role).length > 0 ? getUserRideBookings(selectedUser.uid, selectedUser.role).map((booking) => (
+                        <div key={booking.id} className="px-6 py-4">
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                            <div>
+                              <p className="font-bold text-mairide-primary">{booking.origin} → {booking.destination}</p>
+                              <p className="text-sm text-mairide-secondary">
+                                {selectedUser.role === 'driver' ? `Traveler: ${booking.consumerName}` : `Driver: ${booking.driverName}`}
+                              </p>
+                              <p className="text-xs text-mairide-secondary">{new Date(booking.createdAt).toLocaleString()}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 text-right">
+                              <div>
+                                <p className="text-[10px] font-bold uppercase text-mairide-secondary">Trip Value</p>
+                                <p className="font-bold text-mairide-primary">{formatCurrency(booking.totalPrice)}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-bold uppercase text-mairide-secondary">Status</p>
+                                <p className="font-bold text-mairide-accent uppercase">{booking.status}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )) : (
+                        <div className="px-6 py-8 text-sm text-mairide-secondary">No trip history recorded yet.</div>
+                      )}
+                    </div>
+                  </div>
+                </section>
               </div>
             </motion.div>
           </div>
