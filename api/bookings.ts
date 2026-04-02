@@ -1,10 +1,10 @@
-import { handleSubmitReview } from "../_lib/reviews.ts";
+import { handleSubmitReview } from "./_lib/reviews.ts";
 
 function getAction(req: any) {
   const fromQuery = req.query?.action;
   if (Array.isArray(fromQuery)) return fromQuery[0];
   if (typeof fromQuery === "string") return fromQuery;
-  return "";
+  return req.body?.action || "";
 }
 
 export default async function handler(req: any, res: any) {
