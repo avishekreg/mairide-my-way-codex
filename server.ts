@@ -12,6 +12,7 @@ import {
 } from "./api/_lib/otp.ts";
 import {
   handleAdminCreateUser,
+  handleAdminDeleteUser,
   handleAdminGetConfig,
   handleAdminGenerateResetLink,
   handleAdminSaveConfig,
@@ -39,6 +40,10 @@ async function startServer() {
   app.post("/api/admin/create-user", async (req, res) => {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminCreateUser(req, res);
+  });
+  app.post("/api/admin/delete-user", async (req, res) => {
+    if (!(await requireSuperAdmin(req, res))) return;
+    return handleAdminDeleteUser(req, res);
   });
   app.get("/api/admin/config", async (req, res) => {
     if (!(await requireSuperAdmin(req, res))) return;

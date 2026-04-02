@@ -385,7 +385,7 @@ const LOGO_URL = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUx
 const BRAND_NAME = "MaiRide my way";
 const BRAND_TAGLINE = "";
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v2.0.0-supabase-beta';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v2.0.0-beta';
 const CONSENT_VERSION = 'consent-v1';
 const GOOGLE_MAPS_API_KEY =
   import.meta.env.VITE_GOOGLE_MAPS_API_KEY &&
@@ -6993,10 +6993,12 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
   const handleDeleteUser = async (userId: string) => {
     try {
-      await deleteDoc(doc(db, 'users', userId));
+      const headers = await getAdminRequestHeaders(profile.email);
+      await axios.post('/api/admin/delete-user', { uid: userId }, { headers });
       setShowDeleteConfirm(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+    } catch (error: any) {
+      console.error('Error deleting user:', error);
+      alert(error.response?.data?.error || error.message || 'Failed to delete user.');
     }
   };
 

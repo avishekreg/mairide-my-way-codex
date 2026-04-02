@@ -312,6 +312,49 @@ export async function handleAdminUpdatePassword(req: ReqLike, res: ResLike) {
   }
 }
 
+export async function handleAdminDeleteUser(req: ReqLike, res: ResLike) {
+  const { uid } = req.body || {};
+
+  if (!uid) {
+    return res.status(400).json({ error: "Missing required uid" });
+  }
+
+  if (req.user?.id === uid) {
+    return res.status(400).json({ error: "You cannot delete the currently logged-in super admin." });
+  }
+
+  try {
+    const profile = await getUserProfile(uid);
+    const authUser = await findAuthUser(uid, profile?.email);
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const cleanupDeletes = [
+      supabaseAdmin.from("support_tickets").delete().or(`user_id.eq.${uid},data->>userId.eq.${uid}`),
+      supabaseAdmin.from("transactions").delete().or(`user_id.eq.${uid},data->>userId.eq.${uid}`),
+      supabaseAdmin.from("referrals").delete().or(`referrer_id.eq.${uid},referred_id.eq.${uid},data->>referrerId.eq.${uid},data->>referredId.eq.${uid}`),
+      supabaseAdmin.from("bookings").delete().or(`consumer_id.eq.${uid},driver_id.eq.${uid},data->>consumerId.eq.${uid},data->>driverId.eq.${uid}`),
+      supabaseAdmin.from("rides").delete().or(`driver_id.eq.${uid},data->>driverId.eq.${uid}`),
+      supabaseAdmin.from("users").delete().eq("id", uid),
+    ];
+
+    const cleanupResults = await Promise.all(cleanupDeletes);
+    const failedCleanup = cleanupResults.find((result) => result.error);
+    if (failedCleanup?.error) {
+      throw failedCleanup.error;
+    }
+
+    if (authUser?.id) {
+      const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(authUser.id);
+      if (authDeleteError) throw authDeleteError;
+    }
+
+    return res.status(200).json({ message: "User deleted successfully" });
+  } catch (error: any) {
+    console.error("Error deleting user:", error);
+    return res.status(500).json({ error: error.message || "Failed to delete user" });
+  }
+}
+
 export async function handleAdminGenerateResetLink(req: ReqLike, res: ResLike) {
   const { email } = req.body || {};
 
