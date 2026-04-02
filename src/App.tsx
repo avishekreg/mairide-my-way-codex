@@ -1401,6 +1401,16 @@ const AuthPage = ({
                 >
                   {isLoading ? "Verifying..." : "Verify Email OTP"}
                 </button>
+                <button
+                  onClick={async () => {
+                    setOtp('');
+                    await handleSendEmailOtp();
+                  }}
+                  disabled={isLoading}
+                  className="w-full bg-mairide-bg text-mairide-primary py-3 rounded-2xl font-bold transition-all hover:bg-mairide-secondary disabled:opacity-50"
+                >
+                  {isLoading ? "Please wait..." : "Resend Email OTP"}
+                </button>
                 <button 
                   onClick={() => setStep('phone')}
                   className="w-full text-xs text-mairide-secondary hover:text-mairide-accent font-medium"
@@ -1428,6 +1438,16 @@ const AuthPage = ({
                   className="w-full bg-mairide-accent hover:bg-mairide-primary text-white py-4 rounded-2xl font-bold transition-all disabled:opacity-50"
                 >
                   {isLoading ? "Verifying..." : (authMode === 'signup' ? (user ? "Complete Profile" : "Verify & Sign Up") : "Verify & Login")}
+                </button>
+                <button
+                  onClick={async () => {
+                    setOtp('');
+                    await handleSendOtp();
+                  }}
+                  disabled={isLoading}
+                  className="w-full bg-mairide-bg text-mairide-primary py-3 rounded-2xl font-bold transition-all hover:bg-mairide-secondary disabled:opacity-50"
+                >
+                  {isLoading ? "Please wait..." : "Resend Phone OTP"}
                 </button>
                 <button 
                   onClick={() => setStep('phone')}
