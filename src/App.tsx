@@ -6930,12 +6930,20 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       }, {
         headers
       });
-      alert(`Password for ${resetPasswordUser.displayName} has been reset successfully!`);
+      setAdminNotice({
+        title: 'Password updated',
+        message: `A temporary password has been set successfully for ${resetPasswordUser.displayName}.`,
+        tone: 'success',
+      });
       setResetPasswordUser(null);
       setNewAdminPassword('');
     } catch (error: any) {
       console.error('Error resetting password:', error);
-      alert(error.response?.data?.error || error.message || "Failed to reset password.");
+      setAdminNotice({
+        title: 'Password update failed',
+        message: getApiErrorMessage(error, 'We could not update the password right now. Please try again.'),
+        tone: 'error',
+      });
     } finally {
       setIsResetting(false);
     }
@@ -6957,10 +6965,18 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       }
 
       await navigator.clipboard.writeText(resetLink);
-      alert(`A secure reset link for ${targetUser.displayName} has been copied. Share it only through your approved customer support channel.`);
+      setAdminNotice({
+        title: 'Reset link copied',
+        message: `A secure password reset link for ${targetUser.displayName} has been copied. Share it only through your approved support channel.`,
+        tone: 'success',
+      });
     } catch (error: any) {
       console.error('Error generating reset link:', error);
-      alert(error.response?.data?.error || error.message || "Failed to generate reset link.");
+      setAdminNotice({
+        title: 'Reset link failed',
+        message: getApiErrorMessage(error, 'We could not generate a reset link right now. Please try again.'),
+        tone: 'error',
+      });
     } finally {
       setIsGeneratingResetLink(null);
     }
@@ -6982,6 +6998,11 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'consumer' | 'driver' | 'admin'>('all');
   const [usersInsightView, setUsersInsightView] = useState<UsersInsightView>(null);
+  const [adminNotice, setAdminNotice] = useState<{
+    title: string;
+    message: string;
+    tone: 'success' | 'error' | 'info';
+  } | null>(null);
   const selectedDriverMarkers = buildVerificationMarkers(selectedDriver?.driverDetails);
 
   useEffect(() => {
@@ -7252,9 +7273,18 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       const headers = await getAdminRequestHeaders(profile.email);
       await axios.post('/api/admin/delete-user', { uid: userId }, { headers });
       setShowDeleteConfirm(null);
+      setAdminNotice({
+        title: 'User removed',
+        message: 'The selected user has been deleted successfully.',
+        tone: 'success',
+      });
     } catch (error: any) {
       console.error('Error deleting user:', error);
-      alert(error.response?.data?.error || error.message || 'Failed to delete user.');
+      setAdminNotice({
+        title: 'Delete failed',
+        message: getApiErrorMessage(error, 'We could not delete this user right now. Please try again.'),
+        tone: 'error',
+      });
     }
   };
 
@@ -7285,14 +7315,22 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUser.email || !newUser.displayName || !newUser.password) {
-      alert("Please fill in all required fields, including password.");
+      setAdminNotice({
+        title: 'Missing details',
+        message: 'Please complete all required fields, including the temporary password.',
+        tone: 'info',
+      });
       return;
     }
 
     // Check for duplicate email
     const duplicateCheck = users.find(u => u.email === newUser.email);
     if (duplicateCheck) {
-      alert("A user with this email already exists.");
+      setAdminNotice({
+        title: 'User already exists',
+        message: 'A user with this email address already exists on the platform.',
+        tone: 'info',
+      });
       return;
     }
 
@@ -7316,12 +7354,20 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       if (response.status === 201) {
         setShowAddUser(false);
         setNewUser({ email: '', displayName: '', phoneNumber: '', password: '', role: 'consumer', adminRole: 'support' });
-        alert(`User ${newUser.displayName} created successfully with a temporary password!`);
+        setAdminNotice({
+          title: 'User created',
+          message: `${newUser.displayName} has been created successfully with a temporary password.`,
+          tone: 'success',
+        });
       }
     } catch (error: any) {
       console.error('Error creating user:', error);
       const errorMessage = getApiErrorMessage(error, 'Failed to create user');
-      alert(`Error: ${errorMessage}`);
+      setAdminNotice({
+        title: 'User creation failed',
+        message: errorMessage,
+        tone: 'error',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -8012,6 +8058,49 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
       {/* Add User Modal */}
       <AnimatePresence>
+        {adminNotice && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 16 }}
+              className="bg-white w-full max-w-md rounded-[40px] p-8 shadow-2xl border border-mairide-secondary"
+            >
+              <div className="flex items-start gap-4">
+                <div className={cn(
+                  "w-14 h-14 rounded-2xl flex items-center justify-center shrink-0",
+                  adminNotice.tone === 'success'
+                    ? 'bg-green-50 text-green-600'
+                    : adminNotice.tone === 'error'
+                      ? 'bg-red-50 text-red-600'
+                      : 'bg-blue-50 text-blue-600'
+                )}>
+                  {adminNotice.tone === 'success' ? (
+                    <CheckCircle2 className="w-7 h-7" />
+                  ) : adminNotice.tone === 'error' ? (
+                    <AlertTriangle className="w-7 h-7" />
+                  ) : (
+                    <AlertCircle className="w-7 h-7" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-2xl font-bold text-mairide-primary">{adminNotice.title}</h3>
+                  <p className="text-sm text-mairide-secondary mt-2 leading-relaxed">{adminNotice.message}</p>
+                </div>
+              </div>
+              <div className="mt-8 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setAdminNotice(null)}
+                  className="px-6 py-3 rounded-2xl bg-mairide-primary text-white font-bold shadow-lg shadow-mairide-primary/20"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {resetPasswordUser && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <motion.div 
