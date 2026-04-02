@@ -15,6 +15,18 @@ export type ResLike = {
 
 let supabaseAdmin: any = null;
 
+function extractErrorMessage(error: any, fallback: string) {
+  if (!error) return fallback;
+  if (typeof error === "string" && error.trim()) return error;
+  if (typeof error?.message === "string" && error.message.trim()) return error.message;
+  if (typeof error?.msg === "string" && error.msg.trim()) return error.msg;
+  if (typeof error?.details === "string" && error.details.trim()) return error.details;
+  if (typeof error?.error_description === "string" && error.error_description.trim()) {
+    return error.error_description;
+  }
+  return fallback;
+}
+
 function getSupabaseAdmin(): any {
   if (supabaseAdmin) return supabaseAdmin;
 
@@ -238,17 +250,29 @@ export async function handleAdminGetConfig(_req: ReqLike, res: ResLike) {
 
 export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
   const { email, password, displayName, phoneNumber, role, adminRole } = req.body || {};
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedPhone = String(phoneNumber || "").replace(/[^\d+]/g, "");
 
-  if (!email || !password || !displayName || !role) {
+  if (!normalizedEmail || !password || !displayName || !role) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
+    const { data: existingUser, error: existingUserError } = await getSupabaseAdmin()
+      .from("users")
+      .select("id")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (existingUserError) throw existingUserError;
+    if (existingUser) {
+      return res.status(409).json({ error: "A user with this email already exists." });
+    }
+
     const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
-      email,
+      email: normalizedEmail,
       password,
       email_confirm: true,
-      phone: phoneNumber || undefined,
       user_metadata: {
         display_name: displayName,
       },
@@ -260,9 +284,9 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
 
     const row = buildUserRow({
       uid: authData.user.id,
-      email,
+      email: normalizedEmail,
       displayName,
-      phoneNumber,
+      phoneNumber: normalizedPhone,
       role,
       adminRole,
       forcePasswordChange: true,
@@ -280,7 +304,11 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
     });
   } catch (error: any) {
     console.error("Error creating user:", error);
-    res.status(500).json({ error: error.message || "Failed to create user" });
+    const message = extractErrorMessage(error, "Failed to create user");
+    const statusCode =
+      error?.status ||
+      (message.toLowerCase().includes("already") ? 409 : 500);
+    res.status(statusCode).json({ error: message });
   }
 }
 

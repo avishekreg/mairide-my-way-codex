@@ -7320,7 +7320,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       }
     } catch (error: any) {
       console.error('Error creating user:', error);
-      const errorMessage = error.response?.data?.error || error.message || 'Failed to create user';
+      const errorMessage = getApiErrorMessage(error, 'Failed to create user');
       alert(`Error: ${errorMessage}`);
     } finally {
       setIsLoading(false);
@@ -7764,91 +7764,91 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   </div>
                 </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="bg-mairide-bg text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">
-                      <th className="px-8 py-4">User</th>
-                      <th className="px-8 py-4">Role</th>
-                      <th className="px-8 py-4">Activity</th>
-                      <th className="px-8 py-4">MaiCoins</th>
-                      <th className="px-8 py-4">Status</th>
-                      <th className="px-8 py-4">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-mairide-secondary">
-                    {filteredUsers.map(user => (
-                      <tr key={user.uid} className="hover:bg-mairide-bg/50 transition-colors">
-                        <td className="px-8 py-6">
-                          <button
-                            type="button"
-                            onClick={() => user.role === 'driver' ? setSelectedDriver(user) : setSelectedUser(user)}
-                            className="flex items-center space-x-3 text-left group"
-                          >
-                            <div className="w-10 h-10 rounded-xl bg-mairide-bg flex items-center justify-center overflow-hidden border border-mairide-secondary">
-                              {getResolvedUserPhoto(user) ? (
-                                <img src={getResolvedUserPhoto(user)} className="w-full h-full object-cover" alt="" />
-                              ) : (
-                                <UserIcon className="w-5 h-5 text-mairide-secondary" />
-                              )}
-                            </div>
-                            <div>
-                              <p className="font-bold text-mairide-primary group-hover:text-mairide-accent transition-colors">{user.displayName}</p>
-                              <p className="text-xs text-mairide-secondary">{user.email}</p>
-                              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent mt-1">View details</p>
-                              {effectiveAdminRole === 'super_admin' && user.forcePasswordChange && (
-                                <p className="text-[10px] font-mono text-mairide-accent mt-1 bg-mairide-accent/5 px-2 py-0.5 rounded inline-block">
-                                  Password reset required
-                                </p>
-                              )}
-                            </div>
-                          </button>
-                        </td>
-                        <td className="px-8 py-6">
+              <div className="divide-y divide-mairide-secondary">
+                <div className="hidden xl:grid grid-cols-[minmax(0,2fr)_160px_minmax(0,1.2fr)_160px_130px_180px] gap-6 bg-mairide-bg text-[10px] font-bold text-mairide-secondary uppercase tracking-widest px-8 py-4">
+                  <div>User</div>
+                  <div>Role</div>
+                  <div>Activity</div>
+                  <div>MaiCoins</div>
+                  <div>Status</div>
+                  <div>Actions</div>
+                </div>
+                <div className="divide-y divide-mairide-secondary">
+                  {filteredUsers.map(user => (
+                    <div key={user.uid} className="px-6 md:px-8 py-6 hover:bg-mairide-bg/50 transition-colors">
+                      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_160px_minmax(0,1.2fr)_160px_130px_180px] gap-6 items-start">
+                        <button
+                          type="button"
+                          onClick={() => user.role === 'driver' ? setSelectedDriver(user) : setSelectedUser(user)}
+                          className="flex items-center space-x-3 text-left group min-w-0"
+                        >
+                          <div className="w-14 h-14 rounded-2xl bg-mairide-bg flex items-center justify-center overflow-hidden border border-mairide-secondary shrink-0">
+                            {getResolvedUserPhoto(user) ? (
+                              <img src={getResolvedUserPhoto(user)} className="w-full h-full object-cover" alt="" />
+                            ) : (
+                              <UserIcon className="w-6 h-6 text-mairide-secondary" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-lg text-mairide-primary group-hover:text-mairide-accent transition-colors truncate">{user.displayName}</p>
+                            <p className="text-sm text-mairide-secondary truncate">{user.email}</p>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent mt-1">View details</p>
+                            {effectiveAdminRole === 'super_admin' && user.forcePasswordChange && (
+                              <p className="text-[10px] font-mono text-mairide-accent mt-1 bg-mairide-accent/5 px-2 py-0.5 rounded inline-block">
+                                Password reset required
+                              </p>
+                            )}
+                          </div>
+                        </button>
+
+                        <div className="space-y-2">
+                          <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">Role</p>
                           <select 
                             value={user.role}
                             onChange={(e) => handleUpdateRole(user.uid, e.target.value as any)}
-                            className="bg-mairide-bg border-none rounded-xl text-xs font-bold p-2 outline-none"
+                            className="w-full bg-mairide-bg border-none rounded-xl text-xs font-bold p-3 outline-none"
                           >
                             <option value="consumer">Consumer</option>
                             <option value="driver">Driver</option>
                             <option value="admin">Admin</option>
                           </select>
-                        </td>
-                        <td className="px-8 py-6">
-                          <div className="min-w-[170px]">
-                            {user.role === 'driver' ? (
-                              <>
-                                <p className="font-black text-mairide-primary tracking-tight">
-                                  {getActiveRideOffers(user.uid).length} <span className="text-[10px] font-bold text-mairide-accent uppercase">open offers</span>
-                                </p>
-                                <p className="text-[10px] text-mairide-secondary mt-1">
-                                  {getActiveUserTrips(user.uid, user.role).length} active trips · {isUserCurrentlyOnline(user) ? 'online now' : 'offline'}
-                                </p>
-                              </>
-                            ) : (
-                              <>
-                                <p className="font-black text-mairide-primary tracking-tight">
-                                  {getActiveUserTrips(user.uid, user.role).length} <span className="text-[10px] font-bold text-mairide-accent uppercase">active trips</span>
-                                </p>
-                                <p className="text-[10px] text-mairide-secondary mt-1">
-                                  {getUserRideBookings(user.uid, user.role).length} total rides · {isUserCurrentlyOnline(user) ? 'online now' : 'offline'}
-                                </p>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-8 py-6">
-                          <div className="min-w-[140px]">
-                            <p className="font-black text-mairide-primary tracking-tight">
-                              {user.wallet?.balance || 0} <span className="text-[10px] font-bold text-mairide-accent uppercase">MC</span>
-                            </p>
-                            <p className="text-[10px] text-mairide-secondary mt-1">
-                              Pending: {user.wallet?.pendingBalance || 0} MC
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-8 py-6">
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">Activity</p>
+                          {user.role === 'driver' ? (
+                            <>
+                              <p className="font-black text-mairide-primary tracking-tight text-2xl">
+                                {getActiveRideOffers(user.uid).length} <span className="text-[10px] font-bold text-mairide-accent uppercase">open offers</span>
+                              </p>
+                              <p className="text-xs text-mairide-secondary">
+                                {getActiveUserTrips(user.uid, user.role).length} active trips · {isUserCurrentlyOnline(user) ? 'online now' : 'offline'}
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="font-black text-mairide-primary tracking-tight text-2xl">
+                                {getActiveUserTrips(user.uid, user.role).length} <span className="text-[10px] font-bold text-mairide-accent uppercase">active trips</span>
+                              </p>
+                              <p className="text-xs text-mairide-secondary">
+                                {getUserRideBookings(user.uid, user.role).length} total rides · {isUserCurrentlyOnline(user) ? 'online now' : 'offline'}
+                              </p>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">MaiCoins</p>
+                          <p className="font-black text-mairide-primary tracking-tight text-2xl">
+                            {user.wallet?.balance || 0} <span className="text-[10px] font-bold text-mairide-accent uppercase">MC</span>
+                          </p>
+                          <p className="text-xs text-mairide-secondary">
+                            Pending: {user.wallet?.pendingBalance || 0} MC
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">Status</p>
                           <button 
                             onClick={() => handleUpdateStatus(user.uid, user.status === 'active' ? 'inactive' : 'active')}
                             className={cn(
@@ -7858,9 +7858,11 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                           >
                             {user.status}
                           </button>
-                        </td>
-                        <td className="px-8 py-6">
-                          <div className="flex items-center space-x-2">
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">Actions</p>
+                          <div className="flex items-center flex-wrap gap-2">
                             <button 
                               onClick={() => setShowDeleteConfirm(user.uid)}
                               className="p-2 hover:bg-red-50 text-red-600 rounded-xl transition-colors"
@@ -7896,11 +7898,11 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                               </>
                             )}
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
