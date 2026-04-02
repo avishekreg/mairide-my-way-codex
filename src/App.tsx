@@ -6182,7 +6182,7 @@ const AdminConfigView = () => {
 
   const saveConfig = async (payload: Partial<AppConfig>) => {
     const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
-    const response = await axios.post('/api/admin?action=save-config', payload, {
+    const response = await axios.post('/api/admin/save-config', payload, {
       headers
     });
     if (response.data?.config) {
@@ -6195,7 +6195,7 @@ const AdminConfigView = () => {
     const loadConfig = async () => {
       try {
         const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
-        const response = await axios.get('/api/admin?action=config', { headers });
+        const response = await axios.get('/api/admin/config', { headers });
         if (response.data?.config) {
           setFormData(response.data.config);
         } else {
@@ -6825,7 +6825,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     setIsResetting(true);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post('/api/admin?action=update-password', {
+      await axios.post('/api/admin/update-password', {
         uid: resetPasswordUser.uid,
         newPassword: newAdminPassword
       }, {
@@ -6846,7 +6846,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     setIsGeneratingResetLink(targetUser.uid);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      const response = await axios.post('/api/admin?action=generate-reset-link', {
+      const response = await axios.post('/api/admin/generate-reset-link', {
         email: targetUser.email
       }, {
         headers
@@ -6994,7 +6994,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const handleDeleteUser = async (userId: string) => {
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post('/api/admin?action=delete-user', { uid: userId }, { headers });
+      await axios.post('/api/admin/delete-user', { uid: userId }, { headers });
       setShowDeleteConfirm(null);
     } catch (error: any) {
       console.error('Error deleting user:', error);
@@ -7046,7 +7046,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       const headers = await getAdminRequestHeaders(profile.email);
 
       // 2. Call Backend API to create user in Auth and Firestore
-      const response = await axios.post('/api/admin?action=create-user', {
+      const response = await axios.post('/api/admin/create-user', {
         email: newUser.email,
         password: newUser.password,
         displayName: newUser.displayName,
