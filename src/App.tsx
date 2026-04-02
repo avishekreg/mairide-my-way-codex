@@ -7388,6 +7388,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     <tr className="bg-mairide-bg text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">
                       <th className="px-8 py-4">User</th>
                       <th className="px-8 py-4">Role</th>
+                      <th className="px-8 py-4">MaiCoins</th>
                       <th className="px-8 py-4">Status</th>
                       <th className="px-8 py-4">Actions</th>
                     </tr>
@@ -7425,6 +7426,16 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                             <option value="driver">Driver</option>
                             <option value="admin">Admin</option>
                           </select>
+                        </td>
+                        <td className="px-8 py-6">
+                          <div className="min-w-[140px]">
+                            <p className="font-black text-mairide-primary tracking-tight">
+                              {user.wallet?.balance || 0} <span className="text-[10px] font-bold text-mairide-accent uppercase">MC</span>
+                            </p>
+                            <p className="text-[10px] text-mairide-secondary mt-1">
+                              Pending: {user.wallet?.pendingBalance || 0} MC
+                            </p>
+                          </div>
                         </td>
                         <td className="px-8 py-6">
                           <button 

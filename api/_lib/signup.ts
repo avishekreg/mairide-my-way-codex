@@ -243,7 +243,3 @@ export async function handleCompleteSignup(req: any, res: any) {
     return res.status(500).json({ error: error.message || "Failed to complete signup" });
   }
 }
-
-export default async function handler(req: any, res: any) {
-  return handleCompleteSignup(req, res);
-}

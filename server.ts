@@ -3,8 +3,8 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import { handleCompleteSignup } from "./api/auth/complete-signup.ts";
-import submitReviewHandler from "./api/bookings/submit-review.ts";
+import { handleCompleteSignup } from "./api/_lib/signup.ts";
+import { handleSubmitReview } from "./api/_lib/reviews.ts";
 import {
   handleSendEmailOtp,
   handleSendOtp,
@@ -66,7 +66,7 @@ async function startServer() {
   app.post("/api/auth/send-email-otp", handleSendEmailOtp);
   app.post("/api/auth/verify-otp", handleVerifyOtp);
   app.post("/api/auth/complete-signup", handleCompleteSignup);
-  app.post("/api/bookings/submit-review", submitReviewHandler);
+  app.post("/api/bookings/submit-review", handleSubmitReview);
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
