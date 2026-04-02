@@ -2009,6 +2009,15 @@ const DriverOnboarding = ({
           </div>
         </div>
 
+        <div className="mb-6">
+          <button
+            onClick={() => signOut(auth)}
+            className="w-full bg-mairide-bg text-mairide-primary py-3 rounded-2xl font-bold hover:bg-mairide-secondary transition-colors"
+          >
+            Logout and finish later
+          </button>
+        </div>
+
         <div className="mb-8">
           <VerificationMap
             markers={verificationMarkers}
