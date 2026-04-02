@@ -561,6 +561,36 @@ const getApiErrorMessage = (error: any, fallback: string) => {
   return fallback;
 };
 
+const parseApiResponse = async (response: Response, fallback: string) => {
+  const rawText = await response.text();
+  let payload: any = null;
+
+  try {
+    payload = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    payload = rawText;
+  }
+
+  if (!response.ok) {
+    const errorMessage =
+      (typeof payload === 'object' && payload?.error) ||
+      (typeof payload === 'object' && payload?.Details) ||
+      (typeof payload === 'string' && payload.trim() ? payload : null) ||
+      `${fallback} (HTTP ${response.status})`;
+    throw new Error(errorMessage);
+  }
+
+  if (typeof payload === 'string') {
+    const normalized = payload.trim().toLowerCase();
+    if (normalized.startsWith('<!doctype') || normalized.startsWith('<html')) {
+      throw new Error(`${fallback}. The server returned an unexpected HTML response.`);
+    }
+    throw new Error(`${fallback}. The server returned an unexpected response.`);
+  }
+
+  return payload;
+};
+
 const hasSubmittedBookingReview = (booking: Booking, reviewerRole: 'consumer' | 'driver') =>
   reviewerRole === 'consumer' ? !!booking.consumerReview : !!booking.driverReview;
 
@@ -749,7 +779,7 @@ const AuthPage = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Failed to send Email OTP');
       if (data.Status === 'Success') {
         setEmailSessionId(data.Details);
         setStep('email-otp');
@@ -759,7 +789,7 @@ const AuthPage = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phoneNumber }),
         });
-        const phoneOtpData = await phoneOtpResponse.json();
+        const phoneOtpData = await parseApiResponse(phoneOtpResponse, 'Failed to send phone OTP');
         if (phoneOtpData.Status === 'Success') {
           setSessionId(phoneOtpData.Details);
           setStep('otp');
@@ -791,7 +821,7 @@ const AuthPage = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: emailSessionId, otp }),
       });
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Failed to verify Email OTP');
       if (data.Status === 'Success' && data.Details === 'OTP Matched') {
         setOtp(''); // Clear OTP for next step
         await handleSendOtp();
@@ -815,7 +845,7 @@ const AuthPage = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phoneNumber }),
       });
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Failed to send OTP');
       if (data.Status === 'Success') {
         setSessionId(data.Details);
         setStep('otp');
@@ -844,7 +874,7 @@ const AuthPage = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, otp }),
       });
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Failed to verify OTP');
       if (data.Status === 'Success' && data.Details === 'OTP Matched') {
         setOtp('');
         if (!user && authMode === 'signup' && email && password && displayName) {
@@ -926,10 +956,7 @@ const AuthPage = ({
           },
         }),
       });
-      const signupData = await signupResponse.json();
-      if (!signupResponse.ok) {
-        throw new Error(signupData.error || 'Failed to complete sign up.');
-      }
+      await parseApiResponse(signupResponse, 'Failed to complete sign up');
 
       const result = await signInWithEmailAndPassword(auth, email.trim(), password);
       await handleProfileSetup(result.user, phoneNumber, displayName, true);
@@ -994,7 +1021,7 @@ const AuthPage = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phoneNumber: username }),
         });
-        const data = await response.json();
+        const data = await parseApiResponse(response, 'Failed to send OTP');
         if (data.Status === 'Success') {
           setSessionId(data.Details);
           setStep('otp');
