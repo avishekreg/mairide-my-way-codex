@@ -550,6 +550,9 @@ const getResolvedUserRating = (user?: UserProfile | null) => {
   return 5.0;
 };
 
+const getResolvedUserPhoto = (user?: UserProfile | null) =>
+  user?.photoURL || user?.driverDetails?.selfiePhoto || '';
+
 const hasSubmittedBookingReview = (booking: Booking, reviewerRole: 'consumer' | 'driver') =>
   reviewerRole === 'consumer' ? !!booking.consumerReview : !!booking.driverReview;
 
@@ -2560,9 +2563,18 @@ const TravelerDashboardSummary = ({
         {activeBookings.map((booking) => (
           <div key={booking.id} className="bg-white border border-mairide-secondary rounded-[28px] p-6 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center shrink-0">
+                  {booking.driverPhotoUrl ? (
+                    <img src={booking.driverPhotoUrl} alt={booking.driverName} className="w-full h-full object-cover" />
+                  ) : (
+                    <Car className="w-6 h-6 text-mairide-accent" />
+                  )}
+                </div>
+                <div>
                 <p className="text-lg font-bold text-mairide-primary">{booking.origin} → {booking.destination}</p>
                 <p className="text-sm text-mairide-secondary">Driver: {booking.driverName}</p>
+                </div>
               </div>
               <span className={cn(
                 "px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest",
@@ -2991,7 +3003,15 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
           bookings.map((booking) => (
             <div key={booking.id} className="bg-white p-8 rounded-[32px] border border-mairide-secondary shadow-sm hover:shadow-md transition-all">
               <div className="flex justify-between items-start mb-6">
-                <div>
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center shrink-0">
+                    {booking.driverPhotoUrl ? (
+                      <img src={booking.driverPhotoUrl} alt={booking.driverName} className="w-full h-full object-cover" />
+                    ) : (
+                      <Car className="w-6 h-6 text-mairide-accent" />
+                    )}
+                  </div>
+                  <div>
                   <h3 className="font-bold text-xl text-mairide-primary mb-1">{booking.origin} → {booking.destination}</h3>
                   <p className="text-sm text-mairide-secondary">Driver: {booking.driverName}</p>
                   {booking.feePaid && booking.driverFeePaid ? (
@@ -3006,6 +3026,7 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                     </div>
                   ) : null}
                   <p className="text-[10px] font-bold text-mairide-secondary uppercase mt-2">{new Date(booking.createdAt).toLocaleString()}</p>
+                  </div>
                 </div>
                 <div className={cn(
                   "px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest",
@@ -4047,6 +4068,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         consumerPhone: profile.phoneNumber || '',
         driverId: ride.driverId,
         driverName: ride.driverName,
+        driverPhotoUrl: ride.driverPhotoUrl || '',
         origin: ride.origin,
         destination: ride.destination,
         fare: ride.price,
@@ -4451,8 +4473,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
                   className="bg-white p-6 rounded-3xl border border-mairide-secondary shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row md:items-center justify-between gap-6"
                 >
                   <div className="flex items-start space-x-4">
-                    <div className="bg-mairide-bg p-3 rounded-2xl">
-                      <Car className="w-8 h-8 text-mairide-accent" />
+                    <div className="w-14 h-14 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center">
+                      {ride.driverPhotoUrl ? (
+                        <img src={ride.driverPhotoUrl} alt={ride.driverName} className="w-full h-full object-cover" />
+                      ) : (
+                        <Car className="w-8 h-8 text-mairide-accent" />
+                      )}
                     </div>
                     <div>
                       <div className="flex items-center space-x-2 mb-1">
@@ -4508,8 +4534,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
                   </button>
 
                   <div className="flex items-center space-x-4 mb-8">
-                    <div className="bg-mairide-bg p-4 rounded-3xl">
-                      <Car className="w-8 h-8 text-mairide-accent" />
+                    <div className="w-16 h-16 bg-mairide-bg rounded-3xl overflow-hidden border border-mairide-secondary flex items-center justify-center">
+                      {selectedRide.driverPhotoUrl ? (
+                        <img src={selectedRide.driverPhotoUrl} alt={selectedRide.driverName} className="w-full h-full object-cover" />
+                      ) : (
+                        <Car className="w-8 h-8 text-mairide-accent" />
+                      )}
                     </div>
                     <div>
                       <h3 className="text-2xl font-bold text-mairide-primary">Confirm Booking</h3>
@@ -4709,6 +4739,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       await addDoc(collection(db, 'rides'), {
         driverId: profile.uid,
         driverName: profile.displayName,
+        driverPhotoUrl: getResolvedUserPhoto(profile),
         driverRating: getResolvedUserRating(profile),
         origin: newRide.origin,
         destination: newRide.destination,
@@ -6877,6 +6908,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     adminRole?: 'super_admin' | 'support' | 'finance' | 'compliance'
   }>({ email: '', displayName: '', phoneNumber: '', password: '', role: 'consumer', adminRole: 'support' });
   const [selectedDriver, setSelectedDriver] = useState<UserProfile | null>(null);
+  const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -6952,6 +6984,9 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
+  const pendingVerificationDrivers = users.filter(
+    (u) => u.role === 'driver' && u.onboardingComplete && u.verificationStatus === 'pending'
+  );
   const usersWithLocation = users.filter(
     u => u.location && typeof u.location.lat === 'number' && typeof u.location.lng === 'number'
   );
@@ -7138,12 +7173,12 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
               <span className={cn("whitespace-nowrap transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
                 {item.label}
               </span>
-              {item.id === 'verification' && users.filter(u => u.role === 'driver' && u.onboardingComplete && u.verificationStatus === 'pending').length > 0 && (
+              {item.id === 'verification' && pendingVerificationDrivers.length > 0 && (
                 <span className={cn(
                   "bg-mairide-accent text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full ml-auto",
                   !isSidebarOpen && "absolute top-1 right-1"
                 )}>
-                  {users.filter(u => u.role === 'driver' && u.onboardingComplete && u.verificationStatus === 'pending').length}
+                  {pendingVerificationDrivers.length}
                 </span>
               )}
             </button>
@@ -7194,7 +7229,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             {activeTab === 'verification' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {users.filter(u => u.role === 'driver' && u.onboardingComplete).map(driver => (
+              {pendingVerificationDrivers.map(driver => (
                 <div 
                   key={driver.uid}
                   className={cn(
@@ -7237,11 +7272,11 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
               ))}
             </div>
 
-            {users.filter(u => u.role === 'driver' && u.onboardingComplete).length === 0 && (
+            {pendingVerificationDrivers.length === 0 && (
               <div className="text-center py-20 bg-white rounded-[40px] border border-mairide-secondary border-dashed">
                 <ShieldCheck className="w-16 h-16 text-mairide-secondary mx-auto mb-4 opacity-20" />
-                <h3 className="text-xl font-bold text-mairide-primary">No driver applications yet</h3>
-                <p className="text-mairide-secondary italic serif">New driver registrations will appear here for verification.</p>
+                <h3 className="text-xl font-bold text-mairide-primary">No pending verifications</h3>
+                <p className="text-mairide-secondary italic serif">Approved and rejected drivers are now managed from the users section, while only pending applications stay here.</p>
               </div>
             )}
           </div>
@@ -7397,24 +7432,29 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     {filteredUsers.map(user => (
                       <tr key={user.uid} className="hover:bg-mairide-bg/50 transition-colors">
                         <td className="px-8 py-6">
-                          <div className="flex items-center space-x-3">
+                          <button
+                            type="button"
+                            onClick={() => user.role === 'driver' ? setSelectedDriver(user) : setSelectedUser(user)}
+                            className="flex items-center space-x-3 text-left group"
+                          >
                             <div className="w-10 h-10 rounded-xl bg-mairide-bg flex items-center justify-center overflow-hidden border border-mairide-secondary">
-                              {user.photoURL ? (
-                                <img src={user.photoURL} className="w-full h-full object-cover" alt="" />
+                              {getResolvedUserPhoto(user) ? (
+                                <img src={getResolvedUserPhoto(user)} className="w-full h-full object-cover" alt="" />
                               ) : (
                                 <UserIcon className="w-5 h-5 text-mairide-secondary" />
                               )}
                             </div>
                             <div>
-                              <p className="font-bold text-mairide-primary">{user.displayName}</p>
+                              <p className="font-bold text-mairide-primary group-hover:text-mairide-accent transition-colors">{user.displayName}</p>
                               <p className="text-xs text-mairide-secondary">{user.email}</p>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent mt-1">View details</p>
                               {effectiveAdminRole === 'super_admin' && user.forcePasswordChange && (
                                 <p className="text-[10px] font-mono text-mairide-accent mt-1 bg-mairide-accent/5 px-2 py-0.5 rounded inline-block">
                                   Password reset required
                                 </p>
                               )}
                             </div>
-                          </div>
+                          </button>
                         </td>
                         <td className="px-8 py-6">
                           <select 
@@ -7864,7 +7904,9 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   </div>
                   <div>
                     <h2 className="text-xl font-bold text-mairide-primary">{selectedDriver.displayName}</h2>
-                    <p className="text-xs text-mairide-secondary">Driver Application Verification</p>
+                    <p className="text-xs text-mairide-secondary">
+                      {selectedDriver.verificationStatus === 'pending' ? 'Driver Application Verification' : 'Driver Profile Details'}
+                    </p>
                   </div>
                 </div>
                 <button onClick={() => setSelectedDriver(null)} className="p-2 hover:bg-mairide-bg rounded-full transition-colors">
@@ -8167,6 +8209,119 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     </div>
                   </div>
                 </section>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {selectedUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-3xl max-h-[90vh] rounded-[40px] shadow-2xl overflow-hidden flex flex-col"
+            >
+              <div className="p-8 border-b border-mairide-secondary flex justify-between items-center bg-white sticky top-0 z-10">
+                <div className="flex items-center space-x-4">
+                  <div className="w-12 h-12 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center">
+                    {getResolvedUserPhoto(selectedUser) ? (
+                      <img src={getResolvedUserPhoto(selectedUser)} className="w-full h-full object-cover" alt={selectedUser.displayName} />
+                    ) : (
+                      <UserIcon className="w-6 h-6 text-mairide-secondary" />
+                    )}
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-mairide-primary">{selectedUser.displayName}</h2>
+                    <p className="text-xs text-mairide-secondary capitalize">{selectedUser.role} profile details</p>
+                  </div>
+                </div>
+                <button onClick={() => setSelectedUser(null)} className="p-2 hover:bg-mairide-bg rounded-full transition-colors">
+                  <X className="w-6 h-6 text-mairide-secondary" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8 space-y-8">
+                <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-mairide-bg p-6 rounded-3xl">
+                    <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Email</p>
+                    <p className="text-lg font-bold text-mairide-primary break-all">{selectedUser.email}</p>
+                  </div>
+                  <div className="bg-mairide-bg p-6 rounded-3xl">
+                    <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Phone</p>
+                    <p className="text-lg font-bold text-mairide-primary">{selectedUser.phoneNumber || 'Not provided'}</p>
+                  </div>
+                  <div className="bg-mairide-bg p-6 rounded-3xl">
+                    <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Status</p>
+                    <p className="text-lg font-bold text-mairide-primary capitalize">{selectedUser.status}</p>
+                  </div>
+                  <div className="bg-mairide-bg p-6 rounded-3xl">
+                    <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Role</p>
+                    <p className="text-lg font-bold text-mairide-primary capitalize">
+                      {selectedUser.role === 'admin' ? selectedUser.adminRole || 'admin' : selectedUser.role}
+                    </p>
+                  </div>
+                </section>
+
+                <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white border border-mairide-secondary p-6 rounded-3xl">
+                    <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">MaiCoins Balance</p>
+                    <p className="text-3xl font-black text-mairide-primary tracking-tight">{selectedUser.wallet?.balance || 0}</p>
+                  </div>
+                  <div className="bg-white border border-mairide-secondary p-6 rounded-3xl">
+                    <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Pending Coins</p>
+                    <p className="text-3xl font-black text-mairide-primary tracking-tight">{selectedUser.wallet?.pendingBalance || 0}</p>
+                  </div>
+                  <div className="bg-white border border-mairide-secondary p-6 rounded-3xl">
+                    <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Ratings</p>
+                    <p className="text-3xl font-black text-mairide-primary tracking-tight">
+                      {typeof selectedUser.reviewStats?.averageRating === 'number' ? selectedUser.reviewStats.averageRating.toFixed(1) : '5.0'}
+                    </p>
+                    <p className="text-xs text-mairide-secondary mt-1">{selectedUser.reviewStats?.ratingCount || 0} reviews</p>
+                  </div>
+                </section>
+
+                {selectedUser.consents && (
+                  <section className="bg-mairide-bg p-6 rounded-3xl">
+                    <h3 className="text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-4">Consents & Declarations</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div className="rounded-2xl bg-white p-4 border border-mairide-secondary">
+                        <p className="font-bold text-mairide-primary">{selectedUser.consents.truthfulInformationAccepted ? 'Truth declaration accepted' : 'Truth declaration missing'}</p>
+                        <p className="text-xs text-mairide-secondary mt-1">Accepted at {new Date(selectedUser.consents.acceptedAt).toLocaleString()}</p>
+                      </div>
+                      <div className="rounded-2xl bg-white p-4 border border-mairide-secondary">
+                        <p className="font-bold text-mairide-primary">{selectedUser.consents.termsAccepted ? 'Terms accepted' : 'Terms not accepted'}</p>
+                        <p className="text-xs text-mairide-secondary mt-1">Marketing opt-in: {selectedUser.consents.marketingOptIn ? 'Yes' : 'No'}</p>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {selectedUser.location && (
+                  <section className="bg-mairide-bg p-6 rounded-3xl">
+                    <h3 className="text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-4">Latest Known Location</h3>
+                    <p className="text-sm font-bold text-mairide-primary">
+                      {selectedUser.location.lat.toFixed(5)}, {selectedUser.location.lng.toFixed(5)}
+                    </p>
+                    <p className="text-xs text-mairide-secondary mt-2">Updated {new Date(selectedUser.location.lastUpdated).toLocaleString()}</p>
+                  </section>
+                )}
+
+                {selectedUser.role === 'consumer' && (
+                  <section className="bg-mairide-bg p-6 rounded-3xl">
+                    <h3 className="text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-4">Traveler Snapshot</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-2xl bg-white p-4 border border-mairide-secondary">
+                        <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Referral Code</p>
+                        <p className="font-bold text-mairide-primary">{selectedUser.referralCode || 'Not assigned'}</p>
+                      </div>
+                      <div className="rounded-2xl bg-white p-4 border border-mairide-secondary">
+                        <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Password State</p>
+                        <p className="font-bold text-mairide-primary">{selectedUser.forcePasswordChange ? 'Reset required' : 'Normal'}</p>
+                      </div>
+                    </div>
+                  </section>
+                )}
               </div>
             </motion.div>
           </div>

@@ -137,6 +137,8 @@ export interface Ride {
   id: string;
   driverId: string;
   driverName: string;
+  driverPhotoUrl?: string;
+  driverRating?: number;
   origin: string;
   destination: string;
   departureTime: string;
@@ -173,6 +175,7 @@ export interface Booking {
   consumerPhone?: string;
   driverId: string;
   driverName: string;
+  driverPhotoUrl?: string;
   driverPhone?: string;
   origin: string;
   destination: string;
