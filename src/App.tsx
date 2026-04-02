@@ -553,6 +553,14 @@ const getResolvedUserRating = (user?: UserProfile | null) => {
 const getResolvedUserPhoto = (user?: UserProfile | null) =>
   user?.photoURL || user?.driverDetails?.selfiePhoto || '';
 
+const getApiErrorMessage = (error: any, fallback: string) => {
+  const apiError = error?.response?.data?.error;
+  if (typeof apiError === 'string' && apiError.trim()) return apiError;
+  if (apiError?.message) return apiError.message;
+  if (error?.message) return error.message;
+  return fallback;
+};
+
 const hasSubmittedBookingReview = (booking: Booking, reviewerRole: 'consumer' | 'driver') =>
   reviewerRole === 'consumer' ? !!booking.consumerReview : !!booking.driverReview;
 
@@ -6234,7 +6242,7 @@ const AdminConfigView = () => {
         }
       } catch (error: any) {
         console.error('Error loading configuration:', error);
-        alert(error.response?.data?.error || error.message || "Failed to load configuration.");
+        alert(getApiErrorMessage(error, "Failed to load configuration."));
       } finally {
         setLoadingConfig(false);
       }
@@ -6255,7 +6263,7 @@ const AdminConfigView = () => {
       alert("Configuration saved successfully!");
     } catch (error: any) {
       console.error('Error saving configuration:', error);
-      alert(error.response?.data?.error || error.message || "Failed to save configuration.");
+      alert(getApiErrorMessage(error, "Failed to save configuration."));
     } finally {
       setIsSaving(false);
     }
@@ -6285,7 +6293,7 @@ const AdminConfigView = () => {
           alert('QR code uploaded and saved successfully!');
         } catch (error: any) {
           console.error("QR Upload error:", error);
-          alert(error.response?.data?.error || error.message || "Failed to upload and save QR code.");
+          alert(getApiErrorMessage(error, "Failed to upload and save QR code."));
         } finally {
           setUploadingQR(false);
         }
