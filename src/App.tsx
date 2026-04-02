@@ -1120,6 +1120,12 @@ const AuthPage = ({
 
   const handleProfileSetup = async (user: User, phone?: string, name?: string, isSignUp: boolean = false) => {
     const path = `users/${user.uid}`;
+    const mappedPhoneProfileId = !isSignUp && user.isAnonymous ? sessionStorage.getItem(PHONE_LOGIN_PROFILE_KEY) : null;
+
+    if (mappedPhoneProfileId) {
+      return;
+    }
+
     try {
       const docRef = doc(db, 'users', user.uid);
       const docSnap = await getDoc(docRef);
