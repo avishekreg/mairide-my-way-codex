@@ -736,6 +736,7 @@ interface AuthPageProps {
 }
 
 const normalizePhoneForAuth = (value: string) => String(value || '').replace(/[^\d]/g, '');
+const PHONE_LOGIN_PROFILE_KEY = 'mairide_phone_profile_uid';
 
 const buildPhoneVariants = (value: string) => {
   const digits = normalizePhoneForAuth(value);
@@ -791,6 +792,20 @@ const AuthPage = ({
       setAuthMode('signup');
     }
   }, [user]);
+
+  const findExistingProfileByPhone = async (value: string) => {
+    const phoneCandidates = buildPhoneVariants(value);
+
+    for (const candidate of phoneCandidates) {
+      const qPhone = query(collection(db, 'users'), where('phoneNumber', '==', candidate));
+      const phoneSnap = await getDocs(qPhone);
+      if (!phoneSnap.empty) {
+        return phoneSnap.docs[0].data() as UserProfile;
+      }
+    }
+
+    return null;
+  };
 
   const handleSendEmailOtp = async () => {
     if (!email) return;
@@ -901,6 +916,27 @@ const AuthPage = ({
         setOtp('');
         if (!user && authMode === 'signup' && email && password && displayName) {
           await completeEmailPasswordSignUp();
+        } else if (authMode === 'login') {
+          const existingProfile = await findExistingProfileByPhone(phoneNumber || username);
+          if (!existingProfile) {
+            sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
+            throw new Error("NOT_REGISTERED");
+          }
+
+          sessionStorage.setItem(PHONE_LOGIN_PROFILE_KEY, existingProfile.uid);
+
+          if (!auth.currentUser || !auth.currentUser.isAnonymous) {
+            try {
+              await signInAnonymously(auth);
+            } catch (authError: any) {
+              if (authError.code === 'auth/admin-restricted-operation' || authError.code === 'auth/operation-not-allowed') {
+                throw new Error("Anonymous Authentication is not enabled in Firebase. Please enable it in the Firebase Console (Authentication > Sign-in method).");
+              }
+              throw authError;
+            }
+          } else {
+            window.location.reload();
+          }
         } else {
           try {
             const currentUser = auth.currentUser;
@@ -9088,12 +9124,15 @@ const App = () => {
       }
 
       if (u) {
+        const mappedPhoneProfileId = u.isAnonymous ? sessionStorage.getItem(PHONE_LOGIN_PROFILE_KEY) : null;
+        const profileDocId = mappedPhoneProfileId || u.uid;
+
         // Listen to profile changes
-        unsubProfile = onSnapshot(doc(db, 'users', u.uid), async (snapshot) => {
+        unsubProfile = onSnapshot(doc(db, 'users', profileDocId), async (snapshot) => {
           if (snapshot.exists()) {
             setProfile(snapshot.data() as UserProfile);
             setLoading(false);
-          } else if (u.email) {
+          } else if (u.email && !u.isAnonymous) {
             // If not found by UID, try to find by email (for pre-created admin users)
             try {
               const q = query(collection(db, 'users'), where('email', '==', u.email));
@@ -9150,15 +9189,19 @@ const App = () => {
             }
             setLoading(false);
           } else {
+            if (u.isAnonymous) {
+              sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
+            }
             setProfile(null);
             setLoading(false);
           }
         }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
+          handleFirestoreError(error, OperationType.GET, `users/${profileDocId}`);
           setProfile(null);
           setLoading(false);
         });
       } else {
+        sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
         setProfile(null);
         setLoading(false);
       }
@@ -9170,7 +9213,10 @@ const App = () => {
     };
   }, []);
 
-  const handleLogout = () => signOut(auth);
+  const handleLogout = () => {
+    sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
+    return signOut(auth);
+  };
 
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
