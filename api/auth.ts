@@ -173,6 +173,19 @@ async function handleSendEmailOtp(req: any, res: any) {
     return res.status(200).json(data);
   } catch (error: any) {
     console.error("2Factor Email OTP Error:", error?.payload || error?.message || error);
+    const payload = error?.payload;
+    const htmlLikePayload =
+      typeof payload === "string" &&
+      /<!doctype|<html|page not found/i.test(payload);
+
+    if (htmlLikePayload || error?.status === 404) {
+      return res.status(200).json({
+        Status: "Error",
+        Code: "EMAIL_OTP_UNAVAILABLE",
+        Details: "Email OTP is unavailable right now. Please continue with phone OTP.",
+      });
+    }
+
     return res.status(error?.status || 500).json(error?.payload || { Status: "Error", Details: error?.message || "Failed to send Email OTP" });
   }
 }
