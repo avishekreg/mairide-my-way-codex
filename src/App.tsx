@@ -10664,6 +10664,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   }, []);
 
   useEffect(() => {
+    if (activeTab !== 'transactions') {
+      return;
+    }
+
     let active = true;
 
     const loadTransactions = async () => {
@@ -10692,7 +10696,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       active = false;
       window.clearInterval(intervalId);
     };
-  }, [profile.email]);
+  }, [activeTab, profile.email]);
 
   const handleAdminForceCancelRide = async (booking: any) => {
     const rideId = booking.rideId || booking.ride_id;

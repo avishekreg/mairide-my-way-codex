@@ -410,13 +410,6 @@ export async function handleAdminGetTransactions(_req: ReqLike, res: ResLike) {
       }
     }
 
-    if (synthesizedRows.length) {
-      const { error: upsertError } = await supabaseAdmin
-        .from("transactions")
-        .upsert(synthesizedRows, { onConflict: "id" });
-      if (upsertError) throw upsertError;
-    }
-
     const allRows = [...existing, ...synthesizedRows].sort(
       (a: any, b: any) => new Date(b.created_at || b.data?.createdAt || 0).getTime() - new Date(a.created_at || a.data?.createdAt || 0).getTime()
     );
