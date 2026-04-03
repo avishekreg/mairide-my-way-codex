@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import authHandler from "./api/auth.ts";
 import bookingsHandler from "./api/bookings.ts";
 import paymentsHandler from "./api/payments.ts";
-import adminHandler from "./api/admin.ts";
+import adminHandler from "./api/admin-api.ts";
 import userHandler from "./api/user.ts";
 import completeDriverOnboardingHandler from "./api/complete-driver-onboarding.ts";
 import deleteUserHandler from "./api/delete-user.ts";
@@ -47,7 +47,7 @@ async function startServer() {
   app.get("/api/health", handleHealth);
   app.post("/api/delete-user", deleteUserHandler);
   app.post("/api/upload-driver-doc", uploadDriverDocHandler);
-  app.all("/api/admin", adminHandler);
+  app.all("/api/admin-api", adminHandler);
   app.post("/api/user/change-password", handleUserChangePassword);
   app.post("/api/complete-driver-onboarding", completeDriverOnboardingHandler);
   app.post("/api/user/create-ride", handleUserCreateRide);

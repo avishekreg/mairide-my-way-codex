@@ -17,7 +17,7 @@ type Handler = (req: any, res: any) => Promise<any>;
 const superAdminHandlers: Record<string, { method: string; handler: Handler }> = {
   "create-user": { method: "POST", handler: handleAdminCreateUser },
   "delete-user": { method: "POST", handler: handleAdminDeleteUser },
-  "config": { method: "GET", handler: handleAdminGetConfig },
+  config: { method: "GET", handler: handleAdminGetConfig },
   "update-password": { method: "POST", handler: handleAdminUpdatePassword },
   "generate-reset-link": { method: "POST", handler: handleAdminGenerateResetLink },
   "save-config": { method: "POST", handler: handleAdminSaveConfig },

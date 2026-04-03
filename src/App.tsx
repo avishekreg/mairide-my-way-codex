@@ -827,7 +827,7 @@ const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
 const CONSENT_VERSION = 'consent-v1';
 const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
-const adminApiPath = (action: string) => `/api/admin?action=${encodeURIComponent(action)}`;
+const adminApiPath = (action: string) => `/api/admin-api?action=${encodeURIComponent(action)}`;
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
