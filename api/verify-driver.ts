@@ -91,19 +91,26 @@ export default async function handler(req: any, res: any) {
     const existingData = (existingUser.data as Record<string, any>) || {};
     const nextData = {
       ...existingData,
+      uid,
+      role: "driver",
+      onboardingComplete: true,
       verificationStatus: normalizedStatus,
       rejectionReason: normalizedStatus === "rejected" ? (rejectionReason || "") : null,
       verifiedBy: auth.user.id,
       status: normalizedStatus === "approved" ? "active" : "inactive",
+      driverDetails: existingUser.driver_details || existingData.driverDetails || null,
     };
 
     const { error } = await auth.supabaseAdmin
       .from("users")
       .update({
+        role: "driver",
+        onboarding_complete: true,
         verification_status: normalizedStatus,
         rejection_reason: normalizedStatus === "rejected" ? (rejectionReason || "") : null,
         verified_by: auth.user.id,
         status: normalizedStatus === "approved" ? "active" : "inactive",
+        driver_details: existingUser.driver_details || existingData.driverDetails || null,
         data: nextData,
         updated_at: new Date().toISOString(),
       })
