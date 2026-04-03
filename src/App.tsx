@@ -3283,7 +3283,7 @@ const DriverOnboarding = ({
       };
       const token = await getAccessToken();
       await axios.post(
-        '/api/user?action=complete-driver-onboarding',
+        '/api/complete-driver-onboarding',
         {
           driverId: profile.uid,
           driverDetails: updatedProfile.driverDetails,
@@ -11026,7 +11026,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const handleDeleteUser = async (userId: string) => {
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post(`/api/admin/delete-user`, { uid: userId }, { headers });
+      await axios.post(`/api/delete-user`, { uid: userId }, { headers });
       setShowDeleteConfirm(null);
       setAdminNotice({
         title: 'User removed',
