@@ -111,11 +111,18 @@ import {
   Lock,
   Phone,
   Copy,
+  Receipt,
   ArrowUpRight,
   ArrowDownLeft,
   Wallet
 } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, any>) => { open: () => void };
+  }
+}
 
 // --- Utils ---
 
@@ -287,6 +294,402 @@ const maybeActivateRideLifecycle = async (bookingId: string) => {
   }
 };
 
+type PlatformFeePaymentEvent = {
+  id: string;
+  bookingId: string;
+  payer: 'consumer' | 'driver';
+  createdAt: string;
+  revenue: number;
+  gst: number;
+  total: number;
+  paymentMode: 'maicoins' | 'online' | 'manual';
+};
+
+const hasLockedRideLifecycle = (booking: Partial<Booking>) =>
+  booking.status === 'confirmed'
+  || booking.rideLifecycleStatus === 'awaiting_start_otp'
+  || booking.rideLifecycleStatus === 'in_progress';
+
+const getLockedRideIds = (bookings: Booking[]) => {
+  const lockedRideIds = new Set<string>();
+  bookings.forEach((booking) => {
+    if (booking.rideId && hasLockedRideLifecycle(booking)) {
+      lockedRideIds.add(booking.rideId);
+    }
+  });
+  return lockedRideIds;
+};
+
+const getPlatformFeePaymentEvents = (bookings: Booking[]): PlatformFeePaymentEvent[] => {
+  const events: PlatformFeePaymentEvent[] = [];
+
+  bookings.forEach((booking) => {
+    if (booking.feePaid) {
+      const paymentMode = booking.consumerPaymentMode === 'maicoins'
+        ? 'maicoins'
+        : booking.consumerPaymentGateway === 'razorpay'
+          ? 'online'
+          : 'manual';
+      events.push({
+        id: `${booking.id}-consumer`,
+        bookingId: booking.id,
+        payer: 'consumer',
+        createdAt: booking.consumerPaymentSubmittedAt || booking.createdAt,
+        revenue: paymentMode === 'maicoins' ? 0 : booking.serviceFee || 0,
+        gst: paymentMode === 'maicoins' ? 0 : booking.gstAmount || 0,
+        total: paymentMode === 'maicoins' ? 0 : (booking.serviceFee || 0) + (booking.gstAmount || 0),
+        paymentMode,
+      });
+    }
+
+    if (booking.driverFeePaid) {
+      const paymentMode = booking.driverPaymentMode === 'maicoins'
+        ? 'maicoins'
+        : booking.driverPaymentGateway === 'razorpay'
+          ? 'online'
+          : 'manual';
+      events.push({
+        id: `${booking.id}-driver`,
+        bookingId: booking.id,
+        payer: 'driver',
+        createdAt: booking.driverPaymentSubmittedAt || booking.createdAt,
+        revenue: paymentMode === 'maicoins' ? 0 : booking.serviceFee || 0,
+        gst: paymentMode === 'maicoins' ? 0 : booking.gstAmount || 0,
+        total: paymentMode === 'maicoins' ? 0 : (booking.serviceFee || 0) + (booking.gstAmount || 0),
+        paymentMode,
+      });
+    }
+  });
+
+  return events;
+};
+
+const recordPlatformFeeTransaction = async ({
+  booking,
+  payer,
+  paymentMode,
+  paymentStatus,
+  transactionId,
+  orderId,
+  receiptUrl,
+  gateway,
+  coinsUsed = 0,
+  metadata = {},
+}: {
+  booking: Booking;
+  payer: 'consumer' | 'driver';
+  paymentMode: 'maicoins' | 'online';
+  paymentStatus: 'pending' | 'completed' | 'failed';
+  transactionId?: string;
+  orderId?: string;
+  receiptUrl?: string;
+  gateway?: 'manual' | 'razorpay';
+  coinsUsed?: number;
+  metadata?: Record<string, any>;
+}) => {
+  const token = await getAccessToken();
+  await axios.post(
+    '/api/payments?action=record-platform-fee',
+    {
+      bookingId: booking.id,
+      payer,
+      paymentMode,
+      paymentStatus,
+      transactionId,
+      orderId,
+      receiptUrl,
+      gateway,
+      coinsUsed,
+      metadata,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+};
+
+const getTransactionsForBooking = (transactions: Transaction[], bookingId: string) =>
+  transactions
+    .filter(
+      (tx) =>
+        tx.relatedId === bookingId ||
+        tx.metadata?.bookingId === bookingId
+    )
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+const PaymentAuditTrail = ({
+  booking,
+  transactions = [],
+  viewer,
+}: {
+  booking: Booking;
+  transactions?: Transaction[];
+  viewer: 'consumer' | 'driver' | 'admin';
+}) => {
+  const bookingTransactions = getTransactionsForBooking(transactions, booking.id);
+  const relevantTransactions =
+    viewer === 'admin'
+      ? bookingTransactions
+      : bookingTransactions.filter((tx) => tx.metadata?.payer === viewer);
+
+  const travelerPaymentSummary = {
+    paid: Boolean(booking.feePaid),
+    mode: booking.consumerPaymentMode,
+    gateway: booking.consumerPaymentGateway,
+    transactionId: booking.consumerPaymentTransactionId,
+    orderId: booking.consumerPaymentOrderId,
+    receiptUrl: booking.consumerPaymentReceiptUrl,
+    submittedAt: booking.consumerPaymentSubmittedAt,
+    coinsUsed: booking.maiCoinsUsed || 0,
+  };
+
+  const driverPaymentSummary = {
+    paid: Boolean(booking.driverFeePaid),
+    mode: booking.driverPaymentMode,
+    gateway: booking.driverPaymentGateway,
+    transactionId: booking.driverPaymentTransactionId,
+    orderId: booking.driverPaymentOrderId,
+    receiptUrl: booking.driverPaymentReceiptUrl,
+    submittedAt: booking.driverPaymentSubmittedAt,
+    coinsUsed: booking.driverMaiCoinsUsed || 0,
+  };
+
+  const paymentRows =
+    viewer === 'consumer'
+      ? [{ label: 'Your payment', value: travelerPaymentSummary }]
+      : viewer === 'driver'
+        ? [{ label: 'Your payment', value: driverPaymentSummary }]
+        : [
+            { label: 'Traveler payment', value: travelerPaymentSummary },
+            { label: 'Driver payment', value: driverPaymentSummary },
+          ];
+
+  return (
+    <div className="mt-4 rounded-2xl border border-mairide-secondary/30 bg-mairide-bg p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Payment audit</p>
+          <p className="mt-1 text-sm font-bold text-mairide-primary">Platform fee and gateway trace for this ride</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Fee + GST</p>
+          <p className="text-lg font-black text-mairide-accent">{formatCurrency((booking.serviceFee || 0) + (booking.gstAmount || 0))}</p>
+        </div>
+      </div>
+
+      <div className={cn("mt-4 grid gap-3", paymentRows.length === 2 ? "md:grid-cols-2" : "grid-cols-1")}>
+        {paymentRows.map(({ label, value }) => (
+          <div key={label} className="rounded-2xl bg-white p-4 border border-mairide-secondary/20">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{label}</p>
+              <span
+                className={cn(
+                  "rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest",
+                  value.paid ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
+                )}
+              >
+                {value.paid ? "paid" : "pending"}
+              </span>
+            </div>
+            <div className="mt-3 space-y-2 text-sm text-mairide-primary">
+              <div className="flex justify-between gap-3">
+                <span className="text-mairide-secondary">Mode</span>
+                <span className="font-bold capitalize">{value.mode || 'not submitted'}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-mairide-secondary">Gateway</span>
+                <span className="font-bold capitalize">{value.gateway || (value.mode === 'maicoins' ? 'maicoins' : 'manual')}</span>
+              </div>
+              {value.coinsUsed > 0 && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-mairide-secondary">MaiCoins used</span>
+                  <span className="font-bold">{value.coinsUsed} MC</span>
+                </div>
+              )}
+              {value.transactionId && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-mairide-secondary">Transaction ID</span>
+                  <span className="font-mono text-xs font-bold break-all text-right">{value.transactionId}</span>
+                </div>
+              )}
+              {value.orderId && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-mairide-secondary">Order ID</span>
+                  <span className="font-mono text-xs font-bold break-all text-right">{value.orderId}</span>
+                </div>
+              )}
+              {value.submittedAt && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-mairide-secondary">Submitted</span>
+                  <span className="font-bold text-right">{new Date(value.submittedAt).toLocaleString()}</span>
+                </div>
+              )}
+              {value.receiptUrl && (
+                <div className="pt-1">
+                  <a
+                    href={value.receiptUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-bold text-mairide-accent hover:underline"
+                  >
+                    View receipt
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {viewer === 'admin' && relevantTransactions.length > 0 && (
+        <div className="mt-4 rounded-2xl bg-white p-4 border border-mairide-secondary/20">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Stored transaction records</p>
+          <div className="mt-3 space-y-3">
+            {relevantTransactions.map((tx) => (
+              <div key={tx.id} className="rounded-xl border border-mairide-secondary/20 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-sm text-mairide-primary">{tx.description}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+                      {tx.metadata?.payer || 'payer'} • {tx.status} • {tx.currency}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-black text-mairide-accent">{tx.currency === 'INR' ? formatCurrency(tx.amount) : `${tx.amount} MC`}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{new Date(tx.createdAt).toLocaleString()}</p>
+                  </div>
+                </div>
+                {(tx.metadata?.transactionId || tx.metadata?.orderId) && (
+                  <div className="mt-2 text-xs text-mairide-secondary space-y-1">
+                    {tx.metadata?.transactionId && <p>Txn: <span className="font-mono text-mairide-primary">{tx.metadata.transactionId}</span></p>}
+                    {tx.metadata?.orderId && <p>Order: <span className="font-mono text-mairide-primary">{tx.metadata.orderId}</span></p>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AdminTransactionsView = ({
+  transactions,
+  bookings,
+  users,
+}: {
+  transactions: Transaction[];
+  bookings: Booking[];
+  users: UserProfile[];
+}) => {
+  const paymentTransactions = transactions
+    .filter((tx) => tx.type === 'maintenance_fee_payment')
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const totalRevenue = paymentTransactions
+    .filter((tx) => tx.currency === 'INR' && tx.status === 'completed')
+    .reduce((sum, tx) => sum + (tx.metadata?.serviceFee || 0), 0);
+  const totalGST = paymentTransactions
+    .filter((tx) => tx.currency === 'INR' && tx.status === 'completed')
+    .reduce((sum, tx) => sum + (tx.metadata?.gstAmount || 0), 0);
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-3xl border border-mairide-secondary p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">Recorded payments</p>
+          <p className="mt-2 text-3xl font-black text-mairide-primary">{paymentTransactions.length}</p>
+        </div>
+        <div className="bg-white rounded-3xl border border-mairide-secondary p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">Revenue captured</p>
+          <p className="mt-2 text-3xl font-black text-mairide-accent">{formatCurrency(totalRevenue)}</p>
+        </div>
+        <div className="bg-white rounded-3xl border border-mairide-secondary p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">GST captured</p>
+          <p className="mt-2 text-3xl font-black text-mairide-primary">{formatCurrency(totalGST)}</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-sm overflow-hidden">
+        <div className="p-8 border-b border-mairide-secondary">
+          <h2 className="text-xl font-bold text-mairide-primary">Payment Transactions</h2>
+          <p className="mt-2 text-sm text-mairide-secondary">Support and finance can review every platform-fee payment event here.</p>
+        </div>
+        <div className="divide-y divide-mairide-secondary">
+          {paymentTransactions.length ? paymentTransactions.map((tx) => {
+            const booking = bookings.find((item) => item.id === (tx.relatedId || tx.metadata?.bookingId));
+            const user = users.find((item) => item.uid === tx.userId);
+            return (
+              <div key={tx.id} className="p-6 md:p-8">
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
+                  <div className="space-y-2 min-w-0">
+                    <p className="text-lg font-bold text-mairide-primary break-words">{booking ? `${booking.origin} → ${booking.destination}` : tx.description}</p>
+                    <p className="text-sm text-mairide-secondary">
+                      {tx.metadata?.payer === 'driver' ? 'Driver' : 'Traveler'}: {user?.displayName || tx.userId}
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <span className="rounded-full bg-mairide-bg px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-mairide-primary">
+                        {tx.status}
+                      </span>
+                      <span className="rounded-full bg-mairide-bg px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-mairide-primary">
+                        {tx.metadata?.gateway || tx.metadata?.paymentMode || 'payment'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 min-w-full lg:min-w-[520px]">
+                    <div className="rounded-2xl bg-mairide-bg p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Total</p>
+                      <p className="mt-2 text-lg font-black text-mairide-primary">{tx.currency === 'INR' ? formatCurrency(tx.amount) : `${tx.amount} MC`}</p>
+                    </div>
+                    <div className="rounded-2xl bg-mairide-bg p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Revenue</p>
+                      <p className="mt-2 text-lg font-black text-mairide-primary">{formatCurrency(tx.metadata?.serviceFee || 0)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-mairide-bg p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">GST</p>
+                      <p className="mt-2 text-lg font-black text-mairide-primary">{formatCurrency(tx.metadata?.gstAmount || 0)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-mairide-bg p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Captured</p>
+                      <p className="mt-2 text-sm font-bold text-mairide-primary">{new Date(tx.createdAt).toLocaleString()}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Gateway trace</p>
+                    <div className="mt-2 space-y-1 text-mairide-primary break-words">
+                      {tx.metadata?.transactionId && <p>Txn ID: <span className="font-mono text-xs break-all">{tx.metadata.transactionId}</span></p>}
+                      {tx.metadata?.orderId && <p>Order ID: <span className="font-mono text-xs break-all">{tx.metadata.orderId}</span></p>}
+                      <p>Mode: <span className="font-bold capitalize">{tx.metadata?.paymentMode || 'manual'}</span></p>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Ride linkage</p>
+                    <div className="mt-2 space-y-1 text-mairide-primary break-words">
+                      <p>Booking ID: <span className="font-mono text-xs break-all">{tx.metadata?.bookingId || tx.relatedId || 'N/A'}</span></p>
+                      <p>Ride ID: <span className="font-mono text-xs break-all">{tx.metadata?.rideId || booking?.rideId || 'N/A'}</span></p>
+                      {tx.metadata?.receiptUrl && (
+                        <a href={tx.metadata.receiptUrl} target="_blank" rel="noreferrer" className="text-mairide-accent font-bold hover:underline">
+                          View receipt
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }) : (
+            <div className="p-12 text-center text-mairide-secondary italic">No payment transactions recorded yet.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Error Handling ---
 
 enum OperationType {
@@ -416,11 +819,19 @@ const LOGO_URL = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUx
 const BRAND_NAME = "MaiRide my way";
 const BRAND_TAGLINE = "";
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
+const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v2.0.1-beta';
 const APP_NAV_HOME_EVENT = 'mairide:navigate-home';
 const APP_DIALOG_EVENT = 'mairide:dialog';
 const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
 const CONSENT_VERSION = 'consent-v1';
+const isLocalDevHost = () =>
+  typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
+  String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
+const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
+const isLocalRazorpayEnabled = (config?: Partial<AppConfig> | null) => isRazorpayEnabled(config);
+let razorpayScriptPromise: Promise<boolean> | null = null;
 const GOOGLE_MAPS_API_KEY =
   import.meta.env.VITE_GOOGLE_MAPS_API_KEY &&
   import.meta.env.VITE_GOOGLE_MAPS_API_KEY.length > 10
@@ -605,6 +1016,145 @@ const showAppDialog = (message: string, tone?: AppDialogTone, title?: string) =>
       },
     })
   );
+};
+
+const ensureRazorpayCheckoutScript = async () => {
+  if (typeof window === 'undefined') return false;
+  if (window.Razorpay) return true;
+
+  if (!razorpayScriptPromise) {
+    razorpayScriptPromise = new Promise<boolean>((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => {
+        razorpayScriptPromise = null;
+        resolve(false);
+      };
+      document.body.appendChild(script);
+    });
+  }
+
+  const loaded = await razorpayScriptPromise;
+  if (!loaded) {
+    razorpayScriptPromise = null;
+  }
+  return loaded;
+};
+
+const startRazorpayPlatformFeeCheckout = async ({
+  booking,
+  payer,
+  profile,
+  config,
+  onVerified,
+}: {
+  booking: Booking;
+  payer: 'consumer' | 'driver';
+  profile: UserProfile;
+  config?: AppConfig | null;
+  onVerified: (payment: { paymentId: string; orderId: string; signature: string }) => Promise<void>;
+}) => {
+  const razorpayKeyId = getConfiguredRazorpayKeyId(config);
+
+  if (!razorpayKeyId) {
+    showAppDialog('Razorpay test checkout is not enabled for this environment.', 'warning', 'Payment unavailable');
+    return false;
+  }
+
+  const scriptLoaded = await ensureRazorpayCheckoutScript();
+  if (!scriptLoaded || !window.Razorpay) {
+    showAppDialog('We could not load Razorpay checkout. Please check your internet connection and try again.', 'error', 'Checkout unavailable');
+    throw new Error('Failed to load Razorpay checkout.');
+  }
+
+  const token = await getAccessToken();
+  const { totalFee } = calculateServiceFee(booking.fare, config || undefined);
+  let order;
+  try {
+    const orderResponse = await axios.post(
+      '/api/payments?action=create-razorpay-order',
+      {
+        amount: totalFee,
+        bookingId: booking.id,
+        payer,
+        notes: {
+          route: `${booking.origin} -> ${booking.destination}`,
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    order = orderResponse.data;
+  } catch (error: any) {
+    const message = error?.response?.data?.error || error?.message || 'We could not initialize the Razorpay order.';
+    showAppDialog(message, 'error', 'Payment unavailable');
+    throw new Error(message);
+  }
+
+  if (!order?.id) {
+    showAppDialog('We could not initialize the Razorpay order. Please try again.', 'error', 'Payment unavailable');
+    throw new Error('Failed to initialize Razorpay order.');
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const razorpay = new window.Razorpay!({
+      key: razorpayKeyId,
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency || 'INR',
+      name: BRAND_NAME,
+      description: `${payer === 'consumer' ? 'Traveler' : 'Driver'} platform fee`,
+      image: LOGO_URL,
+      theme: {
+        color: '#F47C20',
+      },
+      prefill: {
+        name: profile.displayName || '',
+        email: profile.email || '',
+        contact: profile.phoneNumber ? profile.phoneNumber.replace(/[^\d]/g, '').slice(-10) : '',
+      },
+      notes: order.notes,
+      modal: {
+        ondismiss: () => reject(new Error('Razorpay checkout was closed.')),
+      },
+      handler: async (response: Record<string, string>) => {
+        try {
+          const verification = await axios.post(
+            '/api/payments?action=verify-razorpay-payment',
+            response,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+
+          if (!verification.data?.verified || !response.razorpay_payment_id || !response.razorpay_order_id || !response.razorpay_signature) {
+            reject(new Error('Razorpay payment verification failed.'));
+            return;
+          }
+
+          await onVerified({
+            paymentId: response.razorpay_payment_id,
+            orderId: response.razorpay_order_id,
+            signature: response.razorpay_signature,
+          });
+          resolve();
+        } catch (error: any) {
+          reject(new Error(error?.response?.data?.error || error?.message || 'Failed to verify Razorpay payment.'));
+        }
+      },
+    });
+
+    razorpay.open();
+  });
+
+  return true;
 };
 
 const canUseBrowserNotifications = () =>
@@ -2669,9 +3219,26 @@ const DriverOnboarding = ({
 
   const uploadImage = async (base64: string, path: string) => {
     if (!base64) return '';
-    const sRef = storageRef(storage, `drivers/${profile.uid}/${path}`);
-    await uploadString(sRef, base64, 'data_url');
-    return await getDownloadURL(sRef);
+    const token = await getAccessToken();
+    const response = await axios.post(
+      '/api/user?action=upload-driver-doc',
+      {
+        driverId: profile.uid,
+        path,
+        dataUrl: base64,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!response.data?.url) {
+      throw new Error('Failed to upload driver document');
+    }
+
+    return response.data.url as string;
   };
 
   const handleSubmit = async () => {
@@ -3568,7 +4135,7 @@ const TravelerDashboardSummary = ({
                       Pay with Maicoins
                     </button>
                     <button onClick={() => onPayOnline(booking)} className={cn("flex-1 bg-white border border-mairide-primary text-mairide-primary py-3", secondaryActionButtonClass)}>
-                      Pay Online
+                      {isLocalRazorpayEnabled(config) ? 'Pay with Razorpay' : 'Pay Online'}
                     </button>
                   </div>
                 ) : (
@@ -3860,7 +4427,7 @@ const DriverDashboardSummary = ({
                       Pay with Maicoins
                     </button>
                     <button onClick={() => onPayOnline(request)} className={cn("flex-1 bg-white border border-mairide-primary text-mairide-primary py-3", secondaryActionButtonClass)}>
-                      Pay Online
+                      {isLocalRazorpayEnabled(config) ? 'Pay with Razorpay' : 'Pay Online'}
                     </button>
                   </div>
                 ) : (
@@ -4162,6 +4729,7 @@ const UserSelfProfilePanel = ({ profile }: { profile: UserProfile }) => {
 const MyBookings = ({ profile }: { profile: UserProfile }) => {
   const { config } = useAppConfig();
   const [bookings, setBookings] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [paymentBooking, setPaymentBooking] = useState<Booking | null>(null);
   const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
@@ -4184,6 +4752,19 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     return () => unsubscribe();
   }, [profile.uid]);
 
+  useEffect(() => {
+    const q = query(
+      collection(db, 'transactions'),
+      where('userId', '==', profile.uid),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }));
+      setTransactions(list);
+    });
+    return () => unsubscribe();
+  }, [profile.uid]);
+
   const submitTravelerPaymentProof = async (
     booking: Booking,
     payload: { transactionId: string; receiptDataUrl: string }
@@ -4199,9 +4780,52 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
       consumerPaymentReceiptUrl: receiptUrl,
       consumerPaymentSubmittedAt: new Date().toISOString(),
     });
+    await recordPlatformFeeTransaction({
+      booking,
+      payer: 'consumer',
+      paymentMode: 'online',
+      paymentStatus: 'pending',
+      transactionId: payload.transactionId,
+      receiptUrl,
+      gateway: 'manual',
+    });
     await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
     await maybeActivateRideLifecycle(booking.id);
     alert('Traveler payment proof submitted successfully.');
+  };
+
+  const finalizeTravelerRazorpayPayment = async (
+    booking: Booking,
+    payment: { paymentId: string; orderId: string; signature: string }
+  ) => {
+    await updateDoc(doc(db, 'bookings', booking.id), {
+      feePaid: true,
+      paymentStatus: 'paid',
+      consumerPaymentMode: 'online',
+      consumerPaymentTransactionId: payment.paymentId,
+      consumerPaymentOrderId: payment.orderId,
+      consumerPaymentGateway: 'razorpay',
+      consumerPaymentMetadata: {
+        signature: payment.signature,
+        verifiedAt: new Date().toISOString(),
+      },
+      consumerPaymentSubmittedAt: new Date().toISOString(),
+    });
+    await recordPlatformFeeTransaction({
+      booking,
+      payer: 'consumer',
+      paymentMode: 'online',
+      paymentStatus: 'completed',
+      transactionId: payment.paymentId,
+      orderId: payment.orderId,
+      gateway: 'razorpay',
+      metadata: {
+        signature: payment.signature,
+      },
+    });
+    await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
+    await maybeActivateRideLifecycle(booking.id);
+    showAppDialog('Traveler Razorpay payment verified successfully.', 'success');
   };
 
   const handlePayFee = async (booking: Booking, useCoins: boolean) => {
@@ -4217,6 +4841,16 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
       const amountPaid = totalFee - coinsToUse;
 
       if (amountPaid > 0) {
+        if (isLocalRazorpayEnabled(config)) {
+          await startRazorpayPlatformFeeCheckout({
+            booking,
+            payer: 'consumer',
+            profile,
+            config,
+            onVerified: (payment) => finalizeTravelerRazorpayPayment(booking, payment),
+          });
+          return;
+        }
         setPaymentBooking(booking);
         return;
       }
@@ -4234,14 +4868,23 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
         consumerPaymentMode: 'maicoins',
         paymentStatus: 'paid'
       });
+      await recordPlatformFeeTransaction({
+        booking,
+        payer: 'consumer',
+        paymentMode: 'maicoins',
+        paymentStatus: 'completed',
+        coinsUsed: coinsToUse,
+        gateway: 'manual',
+      });
 
       // Trigger referral bonus activation
       await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
       await maybeActivateRideLifecycle(booking.id);
       
       alert("Platform fee paid successfully!");
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+    } catch (error: any) {
+      const message = getApiErrorMessage(error, 'Unable to start Razorpay checkout.');
+      showAppDialog(message, 'error', 'Payment unavailable');
     }
   };
 
@@ -4542,7 +5185,7 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                     onClick={() => handlePayFee(booking, false)}
                     className="flex-1 bg-white border-2 border-mairide-primary text-mairide-primary py-4 rounded-2xl font-bold hover:bg-mairide-bg transition-colors"
                   >
-                    Pay Online & Upload Proof
+                    {isLocalRazorpayEnabled(config) ? 'Pay with Razorpay' : 'Pay Online & Upload Proof'}
                   </button>
                 </div>
               )}
@@ -4617,6 +5260,12 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                   </div>
                 </div>
               )}
+
+              <PaymentAuditTrail
+                booking={booking}
+                transactions={transactions}
+                viewer="consumer"
+              />
             </div>
           )})
         ) : (
@@ -4846,6 +5495,7 @@ const MyRides = ({
 const DriverHistory = ({ profile }: { profile: UserProfile }) => {
   const [rides, setRides] = useState<any[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loadingRides, setLoadingRides] = useState(true);
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
@@ -4875,6 +5525,19 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
       unsubscribeRides();
       unsubscribeBookings();
     };
+  }, [profile.uid]);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, 'transactions'),
+      where('userId', '==', profile.uid),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }));
+      setTransactions(list);
+    });
+    return () => unsubscribe();
   }, [profile.uid]);
 
   if (loadingRides || loadingBookings) return <LoadingScreen />;
@@ -5027,6 +5690,11 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
                   ))}
                 </div>
               )}
+              <PaymentAuditTrail
+                booking={booking}
+                transactions={transactions}
+                viewer="driver"
+              />
             </div>
           ))
         ) : (
@@ -5086,6 +5754,7 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
 const BookingRequests = ({ profile }: { profile: UserProfile }) => {
   const { config } = useAppConfig();
   const [requests, setRequests] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [counterFares, setCounterFares] = useState<{[key: string]: string}>({});
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
@@ -5156,6 +5825,19 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'bookings');
+    });
+    return () => unsubscribe();
+  }, [profile.uid]);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, 'transactions'),
+      where('userId', '==', profile.uid),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }));
+      setTransactions(list);
     });
     return () => unsubscribe();
   }, [profile.uid]);
@@ -5240,9 +5922,53 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       driverPaymentSubmittedAt: new Date().toISOString(),
       driverPhone: profile.phoneNumber || '',
     });
+    await recordPlatformFeeTransaction({
+      booking,
+      payer: 'driver',
+      paymentMode: 'online',
+      paymentStatus: 'pending',
+      transactionId: payload.transactionId,
+      receiptUrl,
+      gateway: 'manual',
+    });
     await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
     await maybeActivateRideLifecycle(booking.id);
     alert('Driver payment proof submitted successfully.');
+  };
+
+  const finalizeDriverRazorpayPayment = async (
+    booking: Booking,
+    payment: { paymentId: string; orderId: string; signature: string }
+  ) => {
+    await updateDoc(doc(db, 'bookings', booking.id), {
+      driverFeePaid: true,
+      paymentStatus: 'paid',
+      driverPaymentMode: 'online',
+      driverPaymentTransactionId: payment.paymentId,
+      driverPaymentOrderId: payment.orderId,
+      driverPaymentGateway: 'razorpay',
+      driverPaymentMetadata: {
+        signature: payment.signature,
+        verifiedAt: new Date().toISOString(),
+      },
+      driverPaymentSubmittedAt: new Date().toISOString(),
+      driverPhone: profile.phoneNumber || '',
+    });
+    await recordPlatformFeeTransaction({
+      booking,
+      payer: 'driver',
+      paymentMode: 'online',
+      paymentStatus: 'completed',
+      transactionId: payment.paymentId,
+      orderId: payment.orderId,
+      gateway: 'razorpay',
+      metadata: {
+        signature: payment.signature,
+      },
+    });
+    await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
+    await maybeActivateRideLifecycle(booking.id);
+    showAppDialog('Driver Razorpay payment verified successfully.', 'success');
   };
 
   const handlePayFee = async (booking: Booking, useCoins: boolean) => {
@@ -5258,6 +5984,16 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       const amountPaid = totalFee - coinsToUse;
 
       if (amountPaid > 0) {
+        if (isLocalRazorpayEnabled(config)) {
+          await startRazorpayPlatformFeeCheckout({
+            booking,
+            payer: 'driver',
+            profile,
+            config,
+            onVerified: (payment) => finalizeDriverRazorpayPayment(booking, payment),
+          });
+          return;
+        }
         setPaymentRequest(booking);
         return;
       }
@@ -5276,14 +6012,23 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
         paymentStatus: 'paid',
         driverPhone: profile.phoneNumber || '',
       });
+      await recordPlatformFeeTransaction({
+        booking,
+        payer: 'driver',
+        paymentMode: 'maicoins',
+        paymentStatus: 'completed',
+        coinsUsed: coinsToUse,
+        gateway: 'manual',
+      });
 
       // Trigger referral bonus activation
       await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
       await maybeActivateRideLifecycle(booking.id);
       
       alert("Platform fee paid successfully!");
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+    } catch (error: any) {
+      const message = getApiErrorMessage(error, 'Unable to start Razorpay checkout.');
+      showAppDialog(message, 'error', 'Payment unavailable');
     }
   };
 
@@ -5449,7 +6194,7 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
                     onClick={() => handlePayFee(request, false)}
                     className="flex-1 bg-white border-2 border-mairide-primary text-mairide-primary py-4 rounded-2xl font-bold hover:bg-mairide-bg transition-colors"
                   >
-                    Pay Online & Upload Proof
+                    {isLocalRazorpayEnabled(config) ? 'Pay with Razorpay' : 'Pay Online & Upload Proof'}
                   </button>
                 </div>
               ) : (
@@ -5458,6 +6203,12 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
                   <span>Platform Fee Submitted {request.driverMaiCoinsUsed > 0 && `(Used ${request.driverMaiCoinsUsed} Maicoins)`}</span>
                 </div>
               )}
+
+              <PaymentAuditTrail
+                booking={request}
+                transactions={transactions}
+                viewer="driver"
+              />
                   </>
                 );
               })()}
@@ -5712,14 +6463,19 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const handleSearch = async () => {
     setIsLoading(true);
     try {
-      const q = query(
-        collection(db, 'rides'),
-        where('status', '==', 'available')
+      const [querySnapshot, bookingsSnapshot] = await Promise.all([
+        getDocs(query(collection(db, 'rides'), where('status', '==', 'available'))),
+        getDocs(collection(db, 'bookings')),
+      ]);
+      const lockedRideIds = getLockedRideIds(
+        bookingsSnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
       );
-      const querySnapshot = await getDocs(q);
       const rideMap = new Map<string, any>();
       querySnapshot.forEach((doc) => {
         const data = doc.data() as Ride;
+        if (lockedRideIds.has(doc.id)) {
+          return;
+        }
 
         const normalizedSearchFrom = normalizeSearchText(search.from);
         const normalizedSearchTo = normalizeSearchText(search.to);
@@ -6040,8 +6796,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         )
       );
       alert('Counter offer rejected.');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+    } catch (error: any) {
+      const message = getApiErrorMessage(error, 'Unable to start Razorpay checkout.');
+      showAppDialog(message, 'error', 'Payment unavailable');
     }
   };
 
@@ -6164,6 +6921,15 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         consumerPaymentReceiptUrl: receiptUrl,
         consumerPaymentSubmittedAt: new Date().toISOString(),
       });
+      await recordPlatformFeeTransaction({
+        booking,
+        payer: 'consumer',
+        paymentMode: 'online',
+        paymentStatus: 'pending',
+        transactionId: payload.transactionId,
+        receiptUrl,
+        gateway: 'manual',
+      });
       await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
       await maybeActivateRideLifecycle(booking.id);
       alert('Traveler payment proof submitted successfully.');
@@ -6171,6 +6937,40 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
     }
+  };
+
+  const finalizeTravelerDashboardRazorpayPayment = async (
+    booking: Booking,
+    payment: { paymentId: string; orderId: string; signature: string }
+  ) => {
+    await updateDoc(doc(db, 'bookings', booking.id), {
+      feePaid: true,
+      paymentStatus: 'paid',
+      consumerPaymentMode: 'online',
+      consumerPaymentTransactionId: payment.paymentId,
+      consumerPaymentOrderId: payment.orderId,
+      consumerPaymentGateway: 'razorpay',
+      consumerPaymentMetadata: {
+        signature: payment.signature,
+        verifiedAt: new Date().toISOString(),
+      },
+      consumerPaymentSubmittedAt: new Date().toISOString(),
+    });
+    await recordPlatformFeeTransaction({
+      booking,
+      payer: 'consumer',
+      paymentMode: 'online',
+      paymentStatus: 'completed',
+      transactionId: payment.paymentId,
+      orderId: payment.orderId,
+      gateway: 'razorpay',
+      metadata: {
+        signature: payment.signature,
+      },
+    });
+    await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
+    await maybeActivateRideLifecycle(booking.id);
+    showAppDialog('Traveler Razorpay payment verified successfully.', 'success');
   };
 
   const handleTravelerDashboardPayment = async (booking: Booking, useCoins: boolean) => {
@@ -6185,6 +6985,16 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
       const amountPaid = totalFee - coinsToUse;
       if (amountPaid > 0) {
+        if (isLocalRazorpayEnabled(config)) {
+          await startRazorpayPlatformFeeCheckout({
+            booking,
+            payer: 'consumer',
+            profile,
+            config,
+            onVerified: (payment) => finalizeTravelerDashboardRazorpayPayment(booking, payment),
+          });
+          return;
+        }
         setPaymentBooking(booking);
         return;
       }
@@ -6201,6 +7011,14 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         maiCoinsUsed: coinsToUse,
         consumerPaymentMode: 'maicoins',
         paymentStatus: 'paid',
+      });
+      await recordPlatformFeeTransaction({
+        booking,
+        payer: 'consumer',
+        paymentMode: 'maicoins',
+        paymentStatus: 'completed',
+        coinsUsed: coinsToUse,
+        gateway: 'manual',
       });
 
       await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
@@ -7285,6 +8103,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         driverPaymentSubmittedAt: new Date().toISOString(),
         driverPhone: profile.phoneNumber || '',
       });
+      await recordPlatformFeeTransaction({
+        booking,
+        payer: 'driver',
+        paymentMode: 'online',
+        paymentStatus: 'pending',
+        transactionId: payload.transactionId,
+        receiptUrl,
+        gateway: 'manual',
+      });
       await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
       await maybeActivateRideLifecycle(booking.id);
       alert('Driver payment proof submitted successfully.');
@@ -7292,6 +8119,41 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
     }
+  };
+
+  const finalizeDriverDashboardRazorpayPayment = async (
+    booking: Booking,
+    payment: { paymentId: string; orderId: string; signature: string }
+  ) => {
+    await updateDoc(doc(db, 'bookings', booking.id), {
+      driverFeePaid: true,
+      paymentStatus: 'paid',
+      driverPaymentMode: 'online',
+      driverPaymentTransactionId: payment.paymentId,
+      driverPaymentOrderId: payment.orderId,
+      driverPaymentGateway: 'razorpay',
+      driverPaymentMetadata: {
+        signature: payment.signature,
+        verifiedAt: new Date().toISOString(),
+      },
+      driverPaymentSubmittedAt: new Date().toISOString(),
+      driverPhone: profile.phoneNumber || '',
+    });
+    await recordPlatformFeeTransaction({
+      booking,
+      payer: 'driver',
+      paymentMode: 'online',
+      paymentStatus: 'completed',
+      transactionId: payment.paymentId,
+      orderId: payment.orderId,
+      gateway: 'razorpay',
+      metadata: {
+        signature: payment.signature,
+      },
+    });
+    await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
+    await maybeActivateRideLifecycle(booking.id);
+    showAppDialog('Driver Razorpay payment verified successfully.', 'success');
   };
 
   const handleDriverDashboardPayment = async (booking: Booking, useCoins: boolean) => {
@@ -7306,6 +8168,16 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
       const amountPaid = totalFee - coinsToUse;
       if (amountPaid > 0) {
+        if (isLocalRazorpayEnabled(config)) {
+          await startRazorpayPlatformFeeCheckout({
+            booking,
+            payer: 'driver',
+            profile,
+            config,
+            onVerified: (payment) => finalizeDriverDashboardRazorpayPayment(booking, payment),
+          });
+          return;
+        }
         setPaymentRequest(booking);
         return;
       }
@@ -7323,6 +8195,14 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         driverPaymentMode: 'maicoins',
         paymentStatus: 'paid',
         driverPhone: profile.phoneNumber || '',
+      });
+      await recordPlatformFeeTransaction({
+        booking,
+        payer: 'driver',
+        paymentMode: 'maicoins',
+        paymentStatus: 'completed',
+        coinsUsed: coinsToUse,
+        gateway: 'manual',
       });
 
       await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
@@ -8511,10 +9391,11 @@ const DriverRejected = ({ profile }: { profile: UserProfile }) => {
 
 const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: UserProfile[] }) => {
   const [timeframe, setTimeframe] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const paymentEvents = getPlatformFeePaymentEvents(bookings as Booking[]);
   
   // Calculate stats
-  const totalRevenue = bookings.filter(b => b.status === 'completed').reduce((acc, b) => acc + (b.serviceFee || 0), 0);
-  const totalGST = bookings.filter(b => b.status === 'completed').reduce((acc, b) => acc + (b.gstAmount || 0), 0);
+  const totalRevenue = paymentEvents.reduce((acc, event) => acc + event.revenue, 0);
+  const totalGST = paymentEvents.reduce((acc, event) => acc + event.gst, 0);
   const totalMaiCoinsIssued = users.reduce((acc, u) => acc + (u.wallet?.balance || 0) + (u.wallet?.pendingBalance || 0), 0);
   
   // Prepare chart data
@@ -8527,14 +9408,13 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
         const d = new Date();
         d.setDate(now.getDate() - i);
         const dateStr = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        const dayBookings = bookings.filter(b => 
-          b.status === 'completed' && 
-          new Date(b.createdAt).toDateString() === d.toDateString()
+        const dayBookings = paymentEvents.filter(event => 
+          new Date(event.createdAt).toDateString() === d.toDateString()
         );
         data.push({
           name: dateStr,
-          revenue: dayBookings.reduce((acc, b) => acc + (b.serviceFee || 0), 0),
-          gst: dayBookings.reduce((acc, b) => acc + (b.gstAmount || 0), 0),
+          revenue: dayBookings.reduce((acc, event) => acc + event.revenue, 0),
+          gst: dayBookings.reduce((acc, event) => acc + event.gst, 0),
           bookings: dayBookings.length
         });
       }
@@ -8543,15 +9423,15 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
         const d = new Date();
         d.setDate(now.getDate() - (i * 7));
         const weekStr = `Week ${4-i}`;
-        const weekBookings = bookings.filter(b => {
-          const bDate = new Date(b.createdAt);
+        const weekBookings = paymentEvents.filter(event => {
+          const bDate = new Date(event.createdAt);
           const diffDays = Math.floor((now.getTime() - bDate.getTime()) / (1000 * 60 * 60 * 24));
-          return b.status === 'completed' && diffDays >= i * 7 && diffDays < (i + 1) * 7;
+          return diffDays >= i * 7 && diffDays < (i + 1) * 7;
         });
         data.push({
           name: weekStr,
-          revenue: weekBookings.reduce((acc, b) => acc + (b.serviceFee || 0), 0),
-          gst: weekBookings.reduce((acc, b) => acc + (b.gstAmount || 0), 0),
+          revenue: weekBookings.reduce((acc, event) => acc + event.revenue, 0),
+          gst: weekBookings.reduce((acc, event) => acc + event.gst, 0),
           bookings: weekBookings.length
         });
       }
@@ -8560,14 +9440,14 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
         const d = new Date();
         d.setMonth(now.getMonth() - i);
         const monthStr = d.toLocaleDateString('en-IN', { month: 'short' });
-        const monthBookings = bookings.filter(b => {
-          const bDate = new Date(b.createdAt);
-          return b.status === 'completed' && bDate.getMonth() === d.getMonth() && bDate.getFullYear() === d.getFullYear();
+        const monthBookings = paymentEvents.filter(event => {
+          const bDate = new Date(event.createdAt);
+          return bDate.getMonth() === d.getMonth() && bDate.getFullYear() === d.getFullYear();
         });
         data.push({
           name: monthStr,
-          revenue: monthBookings.reduce((acc, b) => acc + (b.serviceFee || 0), 0),
-          gst: monthBookings.reduce((acc, b) => acc + (b.gstAmount || 0), 0),
+          revenue: monthBookings.reduce((acc, event) => acc + event.revenue, 0),
+          gst: monthBookings.reduce((acc, event) => acc + event.gst, 0),
           bookings: monthBookings.length
         });
       }
@@ -8736,10 +9616,42 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
 };
 
 const AdminConfigView = () => {
+  const buildDefaultConfig = (): Partial<AppConfig> => ({
+    maintenanceFeeBase: 100,
+    gstRate: 0.18,
+    referralRewardTier1: 25,
+    referralRewardTier2: 5,
+    paymentGatewayUrl: 'https://api.razorpay.com/v1',
+    razorpayKeyId: RAZORPAY_KEY_ID || '',
+    smsOtpProvider: '2factor',
+    smsApiUrl: 'https://2factor.in/API/V1',
+    emailOtpEnabled: true,
+    emailOtpProvider: 'resend',
+    resendApiBaseUrl: 'https://api.resend.com/emails',
+    resendFromName: 'MaiRide',
+    emailOtpExpiryMinutes: 10,
+    emailOtpSubject: 'Your MaiRide verification code',
+    appBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
+    publicApiBaseUrl: typeof window !== 'undefined' ? `${window.location.origin}/api` : '',
+    environmentLabel: typeof window !== 'undefined' ? window.location.hostname : 'localhost',
+    superAdminEmail: SUPER_ADMIN_EMAIL,
+    appVersion: APP_VERSION,
+    supabaseProjectUrl: import.meta.env.VITE_SUPABASE_URL || '',
+    storageBucket: import.meta.env.VITE_SUPABASE_STORAGE_BUCKET || '',
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY || '',
+    supportEmail: '',
+    supportPhone: '',
+    n8nBaseUrl: '',
+    n8nOtpWebhookUrl: '',
+    n8nPaymentWebhookUrl: '',
+    n8nBookingWebhookUrl: '',
+    n8nSupportWebhookUrl: '',
+    n8nUserWebhookUrl: '',
+  });
+
   const [formData, setFormData] = useState<Partial<AppConfig>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
-  const [uploadingQR, setUploadingQR] = useState(false);
 
   const saveConfig = async (payload: Partial<AppConfig>) => {
     const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
@@ -8755,16 +9667,18 @@ const AdminConfigView = () => {
   useEffect(() => {
     const loadConfig = async () => {
       try {
+        const defaults = buildDefaultConfig();
         const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
         const response = await axios.get('/api/admin/config', { headers });
         if (response.data?.config) {
-          setFormData(response.data.config);
+          setFormData({ ...defaults, ...response.data.config });
         } else {
-          setFormData({});
+          setFormData(defaults);
         }
       } catch (error: any) {
         console.error('Error loading configuration:', error);
         alert(getApiErrorMessage(error, "Failed to load configuration."));
+        setFormData(buildDefaultConfig());
       } finally {
         setLoadingConfig(false);
       }
@@ -8791,46 +9705,6 @@ const AdminConfigView = () => {
     }
   };
 
-  const handleQRUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploadingQR(true);
-    try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        try {
-          const base64 = event.target?.result as string;
-          const path = `config/qr_code_${Date.now()}`;
-          const storageReference = storageRef(storage, path);
-          await uploadString(storageReference, base64, 'data_url');
-          const url = await getDownloadURL(storageReference);
-          const nextPayload = { ...formData, qrCodeUrl: url };
-          setFormData(nextPayload);
-          await saveConfig({
-            ...nextPayload,
-            updatedAt: new Date().toISOString(),
-            updatedBy: auth.currentUser?.email || 'admin'
-          });
-          alert('QR code uploaded and saved successfully!');
-        } catch (error: any) {
-          console.error("QR Upload error:", error);
-          alert(getApiErrorMessage(error, "Failed to upload and save QR code."));
-        } finally {
-          setUploadingQR(false);
-        }
-      };
-      reader.onerror = () => {
-        setUploadingQR(false);
-        alert('Failed to read the selected QR image.');
-      };
-      reader.readAsDataURL(file);
-    } catch (error) {
-      console.error("QR Upload error:", error);
-      setUploadingQR(false);
-    }
-  };
-
   if (loadingConfig) return <div className="p-20 text-center font-bold">Loading configuration...</div>;
 
   return (
@@ -8851,17 +9725,6 @@ const AdminConfigView = () => {
           <div className="space-y-6">
             <h3 className="text-sm font-bold text-mairide-secondary uppercase tracking-widest border-b border-mairide-bg pb-2">Payment & Revenue</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">UPI ID for Collection</label>
-                <input 
-                  type="text"
-                  value={formData.upiId || ''}
-                  onChange={e => setFormData({ ...formData, upiId: e.target.value })}
-                  placeholder="e.g. mairide@upi"
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
-                  required
-                />
-              </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Maintenance Fee Base (₹)</label>
                 <input 
@@ -8893,33 +9756,34 @@ const AdminConfigView = () => {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Payment Gateway API Key</label>
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Razorpay Key ID</label>
                 <input 
-                  type="password"
-                  value={formData.paymentGatewayApiKey || ''}
-                  onChange={e => setFormData({ ...formData, paymentGatewayApiKey: e.target.value })}
+                  type="text"
+                  value={formData.razorpayKeyId || ''}
+                  onChange={e => setFormData({ ...formData, razorpayKeyId: e.target.value })}
+                  placeholder="e.g. rzp_test_xxxxx"
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Collection QR Code</label>
-              <div className="flex items-center space-x-6 bg-mairide-bg p-6 rounded-3xl border-2 border-dashed border-mairide-secondary">
-                <div className="w-32 h-32 bg-white rounded-2xl flex items-center justify-center overflow-hidden border border-mairide-secondary">
-                  {formData.qrCodeUrl ? (
-                    <img src={formData.qrCodeUrl} className="w-full h-full object-contain" alt="QR Code" />
-                  ) : (
-                    <Camera className="w-8 h-8 text-mairide-secondary opacity-20" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <p className="text-xs text-mairide-secondary mb-4">Upload the QR code that will be displayed to users for manual UPI payments.</p>
-                  <label className="bg-mairide-primary text-white px-6 py-2.5 rounded-xl text-xs font-bold cursor-pointer hover:bg-mairide-primary/90 transition-colors inline-block">
-                    {uploadingQR ? 'Uploading...' : 'Upload New QR'}
-                    <input type="file" accept="image/*" className="hidden" onChange={handleQRUpload} disabled={uploadingQR} />
-                  </label>
-                </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Razorpay Key Secret</label>
+                <input 
+                  type="password"
+                  value={formData.razorpayKeySecret || ''}
+                  onChange={e => setFormData({ ...formData, razorpayKeySecret: e.target.value })}
+                  placeholder="Server-side secret"
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Razorpay Webhook Secret</label>
+                <input 
+                  type="password"
+                  value={formData.razorpayWebhookSecret || ''}
+                  onChange={e => setFormData({ ...formData, razorpayWebhookSecret: e.target.value })}
+                  placeholder="Optional webhook signature secret"
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
               </div>
             </div>
           </div>
@@ -8953,8 +9817,19 @@ const AdminConfigView = () => {
 
           {/* External APIs */}
           <div className="space-y-6">
-            <h3 className="text-sm font-bold text-mairide-secondary uppercase tracking-widest border-b border-mairide-bg pb-2">External Services (SMS/Email)</h3>
+            <h3 className="text-sm font-bold text-mairide-secondary uppercase tracking-widest border-b border-mairide-bg pb-2">OTP & Messaging</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">SMS OTP Provider</label>
+                <select
+                  value={formData.smsOtpProvider || '2factor'}
+                  onChange={e => setFormData({ ...formData, smsOtpProvider: e.target.value as AppConfig['smsOtpProvider'] })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="2factor">2Factor</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">SMS API URL</label>
                 <input 
@@ -8965,29 +9840,282 @@ const AdminConfigView = () => {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">SMS API Key</label>
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">2Factor / SMS API Key</label>
                 <input 
                   type="password"
-                  value={formData.smsApiKey || ''}
-                  onChange={e => setFormData({ ...formData, smsApiKey: e.target.value })}
+                  value={formData.twoFactorApiKey || formData.smsApiKey || ''}
+                  onChange={e => setFormData({ ...formData, twoFactorApiKey: e.target.value, smsApiKey: e.target.value })}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Email API URL</label>
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">SMS Template / Route Name</label>
+                <input 
+                  type="text"
+                  value={formData.smsTemplateName || ''}
+                  onChange={e => setFormData({ ...formData, smsTemplateName: e.target.value })}
+                  placeholder="AUTOGEN2"
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Email OTP Enabled</label>
+                <select
+                  value={formData.emailOtpEnabled === false ? 'disabled' : 'enabled'}
+                  onChange={e => setFormData({ ...formData, emailOtpEnabled: e.target.value === 'enabled' })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Email OTP Provider</label>
+                <select
+                  value={formData.emailOtpProvider || 'resend'}
+                  onChange={e => setFormData({ ...formData, emailOtpProvider: e.target.value as AppConfig['emailOtpProvider'] })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="resend">Resend</option>
+                  <option value="2factor">2Factor</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Resend API URL</label>
                 <input 
                   type="url"
-                  value={formData.emailApiUrl || ''}
-                  onChange={e => setFormData({ ...formData, emailApiUrl: e.target.value })}
+                  value={formData.resendApiBaseUrl || formData.emailApiUrl || ''}
+                  onChange={e => setFormData({ ...formData, resendApiBaseUrl: e.target.value, emailApiUrl: e.target.value })}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Email API Key</label>
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Resend API Key</label>
                 <input 
                   type="password"
-                  value={formData.emailApiKey || ''}
-                  onChange={e => setFormData({ ...formData, emailApiKey: e.target.value })}
+                  value={formData.resendApiKey || formData.emailApiKey || ''}
+                  onChange={e => setFormData({ ...formData, resendApiKey: e.target.value, emailApiKey: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Resend From Email</label>
+                <input 
+                  type="email"
+                  value={formData.resendFromEmail || ''}
+                  onChange={e => setFormData({ ...formData, resendFromEmail: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Resend From Name</label>
+                <input 
+                  type="text"
+                  value={formData.resendFromName || ''}
+                  onChange={e => setFormData({ ...formData, resendFromName: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Reply-To Email</label>
+                <input 
+                  type="email"
+                  value={formData.resendReplyToEmail || ''}
+                  onChange={e => setFormData({ ...formData, resendReplyToEmail: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Email OTP Subject</label>
+                <input 
+                  type="text"
+                  value={formData.emailOtpSubject || ''}
+                  onChange={e => setFormData({ ...formData, emailOtpSubject: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Email OTP Expiry (minutes)</label>
+                <input 
+                  type="number"
+                  min="3"
+                  value={formData.emailOtpExpiryMinutes || 10}
+                  onChange={e => setFormData({ ...formData, emailOtpExpiryMinutes: Number(e.target.value) })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Support Email</label>
+                <input 
+                  type="email"
+                  value={formData.supportEmail || ''}
+                  onChange={e => setFormData({ ...formData, supportEmail: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <h3 className="text-sm font-bold text-mairide-secondary uppercase tracking-widest border-b border-mairide-bg pb-2">Runtime & Automation</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">App Base URL</label>
+                <input 
+                  type="url"
+                  value={formData.appBaseUrl || ''}
+                  onChange={e => setFormData({ ...formData, appBaseUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Public API Base URL</label>
+                <input 
+                  type="url"
+                  value={formData.publicApiBaseUrl || ''}
+                  onChange={e => setFormData({ ...formData, publicApiBaseUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Environment Label</label>
+                <input 
+                  type="text"
+                  value={formData.environmentLabel || ''}
+                  onChange={e => setFormData({ ...formData, environmentLabel: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Support Phone</label>
+                <input 
+                  type="tel"
+                  value={formData.supportPhone || ''}
+                  onChange={e => setFormData({ ...formData, supportPhone: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n Base URL</label>
+                <input 
+                  type="url"
+                  value={formData.n8nBaseUrl || ''}
+                  onChange={e => setFormData({ ...formData, n8nBaseUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n API Key</label>
+                <input 
+                  type="password"
+                  value={formData.n8nApiKey || ''}
+                  onChange={e => setFormData({ ...formData, n8nApiKey: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n Shared Secret</label>
+                <input 
+                  type="password"
+                  value={formData.n8nSharedSecret || ''}
+                  onChange={e => setFormData({ ...formData, n8nSharedSecret: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n OTP Webhook URL</label>
+                <input 
+                  type="url"
+                  value={formData.n8nOtpWebhookUrl || ''}
+                  onChange={e => setFormData({ ...formData, n8nOtpWebhookUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n Payment Webhook URL</label>
+                <input 
+                  type="url"
+                  value={formData.n8nPaymentWebhookUrl || ''}
+                  onChange={e => setFormData({ ...formData, n8nPaymentWebhookUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n Booking Webhook URL</label>
+                <input 
+                  type="url"
+                  value={formData.n8nBookingWebhookUrl || ''}
+                  onChange={e => setFormData({ ...formData, n8nBookingWebhookUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n Support Webhook URL</label>
+                <input 
+                  type="url"
+                  value={formData.n8nSupportWebhookUrl || ''}
+                  onChange={e => setFormData({ ...formData, n8nSupportWebhookUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n User Webhook URL</label>
+                <input 
+                  type="url"
+                  value={formData.n8nUserWebhookUrl || ''}
+                  onChange={e => setFormData({ ...formData, n8nUserWebhookUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <h3 className="text-sm font-bold text-mairide-secondary uppercase tracking-widest border-b border-mairide-bg pb-2">System Reference</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">App Version</label>
+                <input 
+                  type="text"
+                  value={formData.appVersion || ''}
+                  onChange={e => setFormData({ ...formData, appVersion: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Super Admin Email</label>
+                <input 
+                  type="email"
+                  value={formData.superAdminEmail || ''}
+                  onChange={e => setFormData({ ...formData, superAdminEmail: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Supabase Project URL</label>
+                <input 
+                  type="url"
+                  value={formData.supabaseProjectUrl || ''}
+                  onChange={e => setFormData({ ...formData, supabaseProjectUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Storage Bucket</label>
+                <input 
+                  type="text"
+                  value={formData.storageBucket || ''}
+                  onChange={e => setFormData({ ...formData, storageBucket: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Google Maps API Key</label>
+                <input 
+                  type="password"
+                  value={formData.googleMapsApiKey || ''}
+                  onChange={e => setFormData({ ...formData, googleMapsApiKey: e.target.value })}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
               </div>
@@ -9023,17 +10151,18 @@ const AdminConfigView = () => {
 };
 
 const AdminCashFlowAnalytics = ({ bookings, users }: { bookings: any[], users: UserProfile[] }) => {
-  const totalRevenue = bookings.filter(b => b.status === 'completed').reduce((acc, b) => acc + (b.serviceFee || 0), 0);
+  const paymentEvents = getPlatformFeePaymentEvents(bookings as Booking[]);
+  const totalRevenue = paymentEvents.reduce((acc, event) => acc + event.revenue, 0);
   const totalMaiCoinsIssued = users.reduce((acc, u) => acc + (u.wallet?.balance || 0) + (u.wallet?.pendingBalance || 0), 0);
   
   // Projection Logic
-  const last30DaysBookings = bookings.filter(b => {
-    const bDate = new Date(b.createdAt);
+  const last30DaysBookings = paymentEvents.filter(event => {
+    const bDate = new Date(event.createdAt);
     const diffDays = Math.floor((new Date().getTime() - bDate.getTime()) / (1000 * 60 * 60 * 24));
-    return b.status === 'completed' && diffDays <= 30;
+    return diffDays <= 30;
   });
 
-  const dailyAvgRevenue = totalRevenue / 30; // Rough estimate
+  const dailyAvgRevenue = last30DaysBookings.length ? totalRevenue / 30 : 0; // Rough estimate
   const projectedRevenueNext30 = dailyAvgRevenue * 30;
   const projectedLiabilitiesNext30 = users.length * 5; // Assume each user refers 0.2 people on avg
 
@@ -9060,7 +10189,7 @@ const AdminCashFlowAnalytics = ({ bookings, users }: { bookings: any[], users: U
           </div>
           <div>
             <h3 className="text-2xl font-black tracking-tight mb-1">NEGATIVE CASH FLOW WARNING</h3>
-            <p className="text-sm opacity-90 font-medium">Maicoin liabilities are growing faster than cash revenue. Current Ratio: {(totalMaiCoinsIssued / totalRevenue).toFixed(2)}x. Immediate adjustment required.</p>
+            <p className="text-sm opacity-90 font-medium">Maicoin liabilities are growing faster than cash revenue. Current Ratio: {(totalMaiCoinsIssued / Math.max(totalRevenue, 1)).toFixed(2)}x. Immediate adjustment required.</p>
           </div>
         </motion.div>
       )}
@@ -9275,6 +10404,16 @@ const ForcePasswordChangeModal = ({ profile }: { profile: UserProfile }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
+  const handleCloseForNow = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('Error signing out after password prompt close:', error);
+    } finally {
+      window.location.href = '/';
+    }
+  };
+
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
@@ -9309,12 +10448,22 @@ const ForcePasswordChangeModal = ({ profile }: { profile: UserProfile }) => {
         animate={{ opacity: 1, scale: 1 }}
         className="bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl"
       >
-        <div className="text-center mb-8">
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div className="flex-1 text-center">
           <div className="w-20 h-20 bg-mairide-accent/10 rounded-full flex items-center justify-center mx-auto mb-6">
             <Lock className="w-10 h-10 text-mairide-accent" />
           </div>
           <h2 className="text-3xl font-black text-mairide-primary tracking-tighter mb-2">Secure Your Account</h2>
           <p className="text-mairide-secondary italic serif">For security reasons, you must change your temporary password before proceeding.</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleCloseForNow}
+            className="rounded-2xl bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+            aria-label="Close and return to login"
+          >
+            <X className="h-6 w-6" />
+          </button>
         </div>
 
         <form onSubmit={handleUpdatePassword} className="space-y-6">
@@ -9347,6 +10496,13 @@ const ForcePasswordChangeModal = ({ profile }: { profile: UserProfile }) => {
           >
             {isUpdating ? 'Updating...' : 'Update Password & Continue'}
           </button>
+          <button
+            type="button"
+            onClick={handleCloseForNow}
+            className="w-full rounded-3xl border border-mairide-secondary bg-white py-4 text-base font-bold text-mairide-primary transition-colors hover:bg-mairide-bg"
+          >
+            Logout for now
+          </button>
         </form>
       </motion.div>
     </div>
@@ -9360,8 +10516,9 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'config' | 'analytics' | 'security' | 'map'>('revenue');
+  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map'>('revenue');
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   if (loadError || authFailure) {
     return (
@@ -9504,6 +10661,37 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadTransactions = async () => {
+      try {
+        const headers = await getAdminRequestHeaders(profile.email);
+        const response = await axios.get('/api/admin/transactions', { headers });
+        if (!active) return;
+        setTransactions((response.data?.transactions || []) as Transaction[]);
+      } catch (error) {
+        if (!active) return;
+        console.error('Error loading admin transactions:', error);
+        setAdminNotice({
+          title: 'Transactions unavailable',
+          message: getApiErrorMessage(error, 'We could not load platform transaction records right now.'),
+          tone: 'error',
+        });
+      }
+    };
+
+    void loadTransactions();
+    const intervalId = window.setInterval(() => {
+      void loadTransactions();
+    }, 5000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [profile.email]);
+
   const handleAdminForceCancelRide = async (booking: any) => {
     const rideId = booking.rideId || booking.ride_id;
     if (!rideId) {
@@ -9605,6 +10793,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
   const filteredUsers = users.filter(user => {
     if (user.uid === profile.uid) return false;
+    if (user.role === 'driver' && user.verificationStatus === 'pending') return false;
     const matchesSearch = user.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
@@ -9629,7 +10818,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const registeredTravelers = users.filter((u) => u.role === 'consumer');
   const onlineDrivers = registeredDrivers.filter((u) => isUserCurrentlyOnline(u));
   const onlineTravelers = registeredTravelers.filter((u) => isUserCurrentlyOnline(u));
-  const openRideOffers = rides.filter((ride) => ride.status === 'available');
+  const lockedRideIds = getLockedRideIds(bookings as Booking[]);
+  const openRideOffers = rides.filter((ride) => ride.status === 'available' && !lockedRideIds.has(ride.id));
   const activeTrips = bookings.filter((booking) =>
     booking.status === 'confirmed'
     || booking.rideLifecycleStatus === 'awaiting_start_otp'
@@ -9638,7 +10828,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const getUserRideOffers = (userId: string) =>
     rides.filter((ride) => ride.driverId === userId);
   const getActiveRideOffers = (userId: string) =>
-    rides.filter((ride) => ride.driverId === userId && ride.status === 'available');
+    rides.filter((ride) => ride.driverId === userId && ride.status === 'available' && !lockedRideIds.has(ride.id));
   const getUserRideBookings = (userId: string, role: UserProfile['role']) =>
     bookings.filter((booking) => role === 'driver' ? booking.driverId === userId : booking.consumerId === userId);
   const getActiveUserTrips = (userId: string, role: UserProfile['role']) =>
@@ -9776,16 +10966,33 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       return;
     }
     try {
-      await updateDoc(doc(db, 'users', userId), { 
+      const headers = await getAdminRequestHeaders(profile.email);
+      await axios.post('/api/admin/verify-driver', {
+        uid: userId,
         verificationStatus: status,
-        rejectionReason: status === 'rejected' ? rejectionReason : undefined,
-        status: status === 'approved' ? 'active' : 'inactive',
-        verifiedBy: profile.uid
-      });
+        rejectionReason: status === 'rejected' ? rejectionReason : '',
+      }, { headers });
+      setUsers((prev) =>
+        prev.map((currentUser) =>
+          currentUser.uid === userId
+            ? {
+                ...currentUser,
+                verificationStatus: status,
+                rejectionReason: status === 'rejected' ? rejectionReason : undefined,
+                status: status === 'approved' ? 'active' : 'inactive',
+                verifiedBy: profile.uid,
+              }
+            : currentUser
+        )
+      );
       setSelectedDriver(null);
       setRejectionReason('');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+      setAdminNotice({
+        title: 'Verification update failed',
+        message: getApiErrorMessage(error, 'We could not update this driver verification right now.'),
+        tone: 'error',
+      });
     }
   };
 
@@ -9972,6 +11179,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             { id: 'rides', label: 'Rides', icon: Car, roles: ['super_admin', 'compliance'] },
             { id: 'revenue', label: 'Revenue', icon: IndianRupee, roles: ['super_admin', 'finance'] },
             { id: 'analytics', label: 'Analytics', icon: LineChartIcon, roles: ['super_admin', 'finance'] },
+            { id: 'transactions', label: 'Transactions', icon: Receipt, roles: ['super_admin', 'finance', 'support'] },
             { id: 'config', label: 'Config', icon: Settings, roles: ['super_admin', 'finance'] },
             { id: 'support', label: 'Support', icon: LifeBuoy, roles: ['super_admin', 'support'] },
             { id: 'security', label: 'Security', icon: Lock, roles: ['super_admin'] },
@@ -10588,6 +11796,14 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
         {activeTab === 'analytics' && (
           <AdminCashFlowAnalytics bookings={bookings} users={users} />
+        )}
+
+        {activeTab === 'transactions' && (
+          <AdminTransactionsView
+            transactions={transactions}
+            bookings={bookings as Booking[]}
+            users={users}
+          />
         )}
 
         {activeTab === 'config' && (
@@ -11630,7 +12846,24 @@ const useAppConfig = () => {
     const configRef = doc(db, 'app_config', 'global');
     const unsubscribe = onSnapshot(configRef, (snapshot) => {
       if (snapshot.exists()) {
-        setConfig({ id: snapshot.id, ...snapshot.data() } as AppConfig);
+        const nextConfig = { id: snapshot.id, ...snapshot.data() } as AppConfig;
+        [
+          'razorpayKeySecret',
+          'razorpayWebhookSecret',
+          'resendApiKey',
+          'emailApiKey',
+          'smsApiKey',
+          'twoFactorApiKey',
+          'paymentGatewayApiKey',
+          'n8nApiKey',
+          'n8nSharedSecret',
+          'geminiApiKey',
+        ].forEach((key) => {
+          if (key in nextConfig) {
+            delete (nextConfig as Record<string, any>)[key];
+          }
+        });
+        setConfig(nextConfig);
       }
       setLoading(false);
     }, (error) => {
@@ -11652,6 +12885,11 @@ const App = () => {
   const [notRegisteredError, setNotRegisteredError] = useState(false);
   const [referralCodeInput, setReferralCodeInput] = useState('');
   const [role, setRole] = useState<'consumer' | 'driver'>('consumer');
+
+  useEffect(() => {
+    if (!isLocalRazorpayEnabled()) return;
+    ensureRazorpayCheckoutScript().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     async function testConnection() {

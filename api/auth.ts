@@ -1,9 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
+import crypto from "node:crypto";
 
 const DRIVER_JOINING_BONUS = 500;
 const TRAVELER_JOINING_BONUS = 250;
 const TIER1_REWARD = 25;
 const TIER2_REWARD = 5;
+const EMAIL_OTP_SESSION_PREFIX = "emailotp_";
+const inMemoryOtpSessions = new Map<string, {
+  email: string;
+  otpHash: string;
+  expiresAt: string;
+  consumedAt: string | null;
+}>();
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -49,6 +57,184 @@ function normalizeEmail(email: unknown) {
 
 function normalizeOtpValue(value: unknown) {
   return String(value || "").trim();
+}
+
+async function getAppConfigData(supabaseAdmin?: any) {
+  try {
+    const admin = supabaseAdmin || getSupabaseAdmin();
+    const { data, error } = await admin
+      .from("app_config")
+      .select("data")
+      .eq("id", "global")
+      .maybeSingle();
+
+    if (error) throw error;
+    return (data?.data as Record<string, any> | undefined) || {};
+  } catch {
+    return {};
+  }
+}
+
+async function getSmsOtpConfig(supabaseAdmin?: any) {
+  const configData = await getAppConfigData(supabaseAdmin);
+  return {
+    provider: String(configData.smsOtpProvider || "2factor").trim().toLowerCase(),
+    apiUrl: String(configData.smsApiUrl || process.env.SMS_API_URL || "https://2factor.in/API/V1").trim(),
+    apiKey: String(configData.twoFactorApiKey || configData.smsApiKey || process.env.TWO_FACTOR_API_KEY || "").trim(),
+    templateName: String(configData.smsTemplateName || "AUTOGEN2").trim() || "AUTOGEN2",
+  };
+}
+
+async function getEmailOtpConfig(supabaseAdmin?: any) {
+  const configData = await getAppConfigData(supabaseAdmin);
+  const provider = String(
+    configData.emailOtpProvider ||
+      (configData.resendApiKey || process.env.RESEND_API_KEY ? "resend" : "2factor")
+  )
+    .trim()
+    .toLowerCase();
+
+  return {
+    enabled: configData.emailOtpEnabled !== false,
+    provider,
+    apiUrl: String(configData.emailApiUrl || process.env.EMAIL_API_URL || "").trim(),
+    apiKey: String(configData.emailApiKey || process.env.EMAIL_API_KEY || "").trim(),
+    resendApiBaseUrl: String(configData.resendApiBaseUrl || process.env.RESEND_API_BASE_URL || "https://api.resend.com/emails").trim(),
+    resendApiKey: String(configData.resendApiKey || process.env.RESEND_API_KEY || "").trim(),
+    resendFromEmail: String(configData.resendFromEmail || process.env.RESEND_FROM_EMAIL || "").trim(),
+    resendFromName: String(configData.resendFromName || process.env.RESEND_FROM_NAME || "MaiRide").trim(),
+    resendReplyToEmail: String(configData.resendReplyToEmail || process.env.RESEND_REPLY_TO_EMAIL || "").trim(),
+    expiryMinutes: Math.max(3, Number(configData.emailOtpExpiryMinutes || process.env.EMAIL_OTP_EXPIRY_MINUTES || 10)),
+    subject: String(configData.emailOtpSubject || process.env.EMAIL_OTP_SUBJECT || "Your MaiRide verification code").trim(),
+    appBaseUrl: String(configData.appBaseUrl || process.env.APP_URL || process.env.VITE_APP_URL || "").trim(),
+    supportEmail: String(configData.supportEmail || process.env.SUPPORT_EMAIL || "").trim(),
+  };
+}
+
+function hashOtp(code: string) {
+  return crypto.createHash("sha256").update(code).digest("hex");
+}
+
+async function persistEmailOtpSession(supabaseAdmin: any, sessionId: string, email: string, otpHash: string, expiresAt: string) {
+  try {
+    const { error } = await supabaseAdmin.from("otp_sessions").upsert(
+      {
+        id: sessionId,
+        channel: "email",
+        recipient: email,
+        otp_hash: otpHash,
+        expires_at: expiresAt,
+        consumed_at: null,
+        attempts: 0,
+        data: {},
+      },
+      { onConflict: "id" }
+    );
+
+    if (error) throw error;
+    return true;
+  } catch {
+    inMemoryOtpSessions.set(sessionId, {
+      email,
+      otpHash,
+      expiresAt,
+      consumedAt: null,
+    });
+    return false;
+  }
+}
+
+async function consumeEmailOtpSession(supabaseAdmin: any, sessionId: string, otp: string) {
+  const hashedOtp = hashOtp(otp);
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("otp_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .eq("channel", "email")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return { ok: false, message: "Invalid OTP session." };
+    if (data.consumed_at) return { ok: false, message: "OTP has already been used." };
+    if (new Date(data.expires_at).getTime() < Date.now()) return { ok: false, message: "OTP has expired." };
+    if (data.otp_hash !== hashedOtp) {
+      await supabaseAdmin
+        .from("otp_sessions")
+        .update({ attempts: Number(data.attempts || 0) + 1 })
+        .eq("id", sessionId);
+      return { ok: false, message: "Invalid OTP." };
+    }
+
+    await supabaseAdmin
+      .from("otp_sessions")
+      .update({ consumed_at: new Date().toISOString(), attempts: Number(data.attempts || 0) + 1 })
+      .eq("id", sessionId);
+
+    return { ok: true, email: String(data.recipient || "").trim().toLowerCase() };
+  } catch {
+    const session = inMemoryOtpSessions.get(sessionId);
+    if (!session) return { ok: false, message: "Invalid OTP session." };
+    if (session.consumedAt) return { ok: false, message: "OTP has already been used." };
+    if (new Date(session.expiresAt).getTime() < Date.now()) return { ok: false, message: "OTP has expired." };
+    if (session.otpHash !== hashedOtp) return { ok: false, message: "Invalid OTP." };
+    session.consumedAt = new Date().toISOString();
+    inMemoryOtpSessions.set(sessionId, session);
+    return { ok: true, email: session.email };
+  }
+}
+
+async function sendEmailOtpViaResend(emailConfig: Awaited<ReturnType<typeof getEmailOtpConfig>>, email: string) {
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const sessionId = `${EMAIL_OTP_SESSION_PREFIX}${crypto.randomUUID()}`;
+  const expiresAt = new Date(Date.now() + emailConfig.expiryMinutes * 60_000).toISOString();
+  const supabaseAdmin = getSupabaseAdmin();
+  await persistEmailOtpSession(supabaseAdmin, sessionId, email, hashOtp(code), expiresAt);
+
+  const fromAddress = emailConfig.resendFromName
+    ? `${emailConfig.resendFromName} <${emailConfig.resendFromEmail}>`
+    : emailConfig.resendFromEmail;
+
+  const response = await fetch(emailConfig.resendApiBaseUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${emailConfig.resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: fromAddress,
+      to: [email],
+      reply_to: emailConfig.resendReplyToEmail || undefined,
+      subject: emailConfig.subject,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1f2937">
+          <h2 style="margin:0 0 12px;color:#1f2937">Verify your MaiRide email</h2>
+          <p style="margin:0 0 16px;line-height:1.6">Use the verification code below to continue your signup. This code expires in ${emailConfig.expiryMinutes} minutes.</p>
+          <div style="font-size:32px;font-weight:700;letter-spacing:8px;color:#ea7a27;background:#fff7ed;border:1px solid #fdba74;border-radius:16px;padding:20px 24px;text-align:center">${code}</div>
+          <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:#64748b">If you did not request this code, you can ignore this email${emailConfig.supportEmail ? ` or contact ${emailConfig.supportEmail}` : ""}.</p>
+        </div>
+      `,
+      tags: [
+        { name: "product", value: "mairide" },
+        { name: "flow", value: "email-otp" },
+      ],
+    }),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw Object.assign(
+      new Error(payload?.message || payload?.error?.message || "Failed to send Email OTP"),
+      { status: response.status, payload }
+    );
+  }
+
+  return {
+    Status: "Success",
+    Details: sessionId,
+    Provider: "resend",
+  };
 }
 
 async function fetchJson(url: string) {
@@ -151,8 +337,9 @@ async function generateUniqueReferralCode(supabaseAdmin: any) {
 
 async function handleSendOtp(req: any, res: any) {
   const { phoneNumber } = req.body || {};
-  const apiKey = process.env.TWO_FACTOR_API_KEY;
   const normalizedPhone = normalizePhone(phoneNumber);
+  const smsConfig = await getSmsOtpConfig();
+  const apiKey = smsConfig.apiKey;
 
   if (!normalizedPhone) {
     return res.status(400).json({ Status: "Error", Details: "A valid phone number is required." });
@@ -164,7 +351,8 @@ async function handleSendOtp(req: any, res: any) {
   }
 
   try {
-    const data = await fetchJson(`https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/AUTOGEN2`);
+    const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
+    const data = await fetchJson(`${baseUrl}/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/${encodeURIComponent(smsConfig.templateName)}`);
     return res.status(200).json(data);
   } catch (error: any) {
     console.error("2Factor SMS OTP Error:", error?.payload || error?.message || error);
@@ -174,11 +362,33 @@ async function handleSendOtp(req: any, res: any) {
 
 async function handleSendEmailOtp(req: any, res: any) {
   const { email } = req.body || {};
-  const apiKey = process.env.TWO_FACTOR_API_KEY;
   const normalizedEmail = normalizeEmail(email);
+  const emailConfig = await getEmailOtpConfig();
+  const apiKey = emailConfig.apiKey;
 
   if (!normalizedEmail) {
     return res.status(400).json({ Status: "Error", Details: "A valid email address is required." });
+  }
+
+  if (!emailConfig.enabled) {
+    return res.status(200).json({
+      Status: "Error",
+      Code: "EMAIL_OTP_UNAVAILABLE",
+      Details: "Email OTP is disabled right now. Please continue with phone OTP.",
+    });
+  }
+
+  if (emailConfig.provider === "resend" && emailConfig.resendApiKey && emailConfig.resendFromEmail) {
+    try {
+      const data = await sendEmailOtpViaResend(emailConfig, normalizedEmail);
+      return res.status(200).json(data);
+    } catch (error: any) {
+      console.error("Resend Email OTP Error:", error?.payload || error?.message || error);
+      return res.status(error?.status || 500).json({
+        Status: "Error",
+        Details: error?.message || "Failed to send Email OTP",
+      });
+    }
   }
 
   if (!apiKey) {
@@ -210,12 +420,21 @@ async function handleSendEmailOtp(req: any, res: any) {
 
 async function handleVerifyOtp(req: any, res: any) {
   const { sessionId, otp } = req.body || {};
-  const apiKey = process.env.TWO_FACTOR_API_KEY;
   const normalizedSessionId = normalizeOtpValue(sessionId);
   const normalizedOtp = normalizeOtpValue(otp);
+  const smsConfig = await getSmsOtpConfig();
+  const apiKey = smsConfig.apiKey;
 
   if (!normalizedSessionId || !normalizedOtp) {
     return res.status(400).json({ Status: "Error", Details: "Session ID and OTP are required." });
+  }
+
+  if (normalizedSessionId.startsWith(EMAIL_OTP_SESSION_PREFIX)) {
+    const result = await consumeEmailOtpSession(getSupabaseAdmin(), normalizedSessionId, normalizedOtp);
+    if (!result.ok) {
+      return res.status(400).json({ Status: "Error", Details: result.message || "Invalid OTP" });
+    }
+    return res.status(200).json({ Status: "Success", Details: "OTP Matched", Email: result.email });
   }
 
   if (!apiKey || normalizedSessionId.startsWith("mock_")) {
@@ -226,7 +445,8 @@ async function handleVerifyOtp(req: any, res: any) {
   }
 
   try {
-    const data = await fetchJson(`https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`);
+    const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
+    const data = await fetchJson(`${baseUrl}/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`);
     return res.status(200).json(data);
   } catch (error: any) {
     console.error("2Factor OTP Verify Error:", error?.payload || error?.message || error);

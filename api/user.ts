@@ -6,6 +6,7 @@ import {
   handleUserRejectBooking,
   handleUserTravelerCounterBooking,
   handleUserTravelerRespondBooking,
+  handleUserUploadDriverDoc,
 } from "./_lib/backend.ts";
 
 function getAction(req: any) {
@@ -46,6 +47,10 @@ export default async function handler(req: any, res: any) {
     return handleUserTravelerRespondBooking(req, res);
   }
 
+  if (action === "upload-driver-doc") {
+    return handleUserUploadDriverDoc(req, res);
+  }
+
   if (req.url?.endsWith("/create-ride")) {
     return handleUserCreateRide(req, res);
   }
@@ -68,6 +73,10 @@ export default async function handler(req: any, res: any) {
 
   if (req.url?.endsWith("/traveler-respond-booking")) {
     return handleUserTravelerRespondBooking(req, res);
+  }
+
+  if (req.url?.endsWith("/upload-driver-doc")) {
+    return handleUserUploadDriverDoc(req, res);
   }
 
   if (req.url?.endsWith("/change-password")) {

@@ -83,6 +83,19 @@ create table if not exists public.support_tickets (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.otp_sessions (
+  id text primary key,
+  channel text not null,
+  recipient text not null,
+  otp_hash text not null,
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  attempts integer not null default 0,
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -121,6 +134,10 @@ drop trigger if exists support_tickets_set_updated_at on public.support_tickets;
 create trigger support_tickets_set_updated_at before update on public.support_tickets
 for each row execute procedure public.set_updated_at();
 
+drop trigger if exists otp_sessions_set_updated_at on public.otp_sessions;
+create trigger otp_sessions_set_updated_at before update on public.otp_sessions
+for each row execute procedure public.set_updated_at();
+
 alter table public.users enable row level security;
 alter table public.app_config enable row level security;
 alter table public.rides enable row level security;
@@ -128,6 +145,7 @@ alter table public.bookings enable row level security;
 alter table public.transactions enable row level security;
 alter table public.referrals enable row level security;
 alter table public.support_tickets enable row level security;
+alter table public.otp_sessions enable row level security;
 
 drop policy if exists "authenticated users can read users" on public.users;
 create policy "authenticated users can read users"

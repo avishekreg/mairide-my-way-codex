@@ -318,6 +318,126 @@ export async function handleAdminGetConfig(_req: ReqLike, res: ResLike) {
   }
 }
 
+export async function handleAdminGetTransactions(_req: ReqLike, res: ResLike) {
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin
+      .from("transactions")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    const existing = data || [];
+    const existingIds = new Set(existing.map((row: any) => row.id));
+
+    const { data: bookingRows, error: bookingError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (bookingError) throw bookingError;
+
+    const synthesizedRows: any[] = [];
+    for (const booking of bookingRows || []) {
+      const bookingData = (booking.data as Record<string, any>) || {};
+      const serviceFee = Number(bookingData.serviceFee || 0);
+      const gstAmount = Number(bookingData.gstAmount || 0);
+      const totalFee = serviceFee + gstAmount;
+
+      const maybeBuildRow = (payer: "consumer" | "driver") => {
+        const isConsumer = payer === "consumer";
+        const paid = isConsumer ? bookingData.feePaid : bookingData.driverFeePaid;
+        const paymentMode = isConsumer ? bookingData.consumerPaymentMode : bookingData.driverPaymentMode;
+        if (!paid || !paymentMode) return null;
+
+        const txId = `platform_fee_${booking.id}_${payer}`;
+        if (existingIds.has(txId)) return null;
+
+        return {
+          id: txId,
+          user_id: isConsumer ? booking.consumer_id || bookingData.consumerId : booking.driver_id || bookingData.driverId,
+          type: "maintenance_fee_payment",
+          status: bookingData.paymentStatus === "proof_submitted" ? "pending" : "completed",
+          data: {
+            id: txId,
+            userId: isConsumer ? booking.consumer_id || bookingData.consumerId : booking.driver_id || bookingData.driverId,
+            type: "maintenance_fee_payment",
+            amount: paymentMode === "maicoins"
+              ? Number(isConsumer ? bookingData.maiCoinsUsed || 0 : bookingData.driverMaiCoinsUsed || 0)
+              : totalFee,
+            currency: paymentMode === "maicoins" ? "MAICOIN" : "INR",
+            status: bookingData.paymentStatus === "proof_submitted" ? "pending" : "completed",
+            description: `Platform fee payment for ${bookingData.origin || "ride"} to ${bookingData.destination || "destination"}`,
+            relatedId: booking.id,
+            createdAt: isConsumer
+              ? bookingData.consumerPaymentSubmittedAt || booking.created_at
+              : bookingData.driverPaymentSubmittedAt || booking.created_at,
+            metadata: {
+              bookingId: booking.id,
+              rideId: booking.ride_id || bookingData.rideId || null,
+              payer,
+              payerName: isConsumer ? bookingData.consumerName || null : bookingData.driverName || null,
+              paymentMode,
+              gateway: isConsumer
+                ? bookingData.consumerPaymentGateway || (paymentMode === "online" ? "razorpay" : "manual")
+                : bookingData.driverPaymentGateway || (paymentMode === "online" ? "razorpay" : "manual"),
+              transactionId: isConsumer ? bookingData.consumerPaymentTransactionId || null : bookingData.driverPaymentTransactionId || null,
+              orderId: isConsumer ? bookingData.consumerPaymentOrderId || null : bookingData.driverPaymentOrderId || null,
+              receiptUrl: isConsumer ? bookingData.consumerPaymentReceiptUrl || null : bookingData.driverPaymentReceiptUrl || null,
+              serviceFee,
+              gstAmount,
+              totalFee,
+              coinsUsed: paymentMode === "maicoins"
+                ? Number(isConsumer ? bookingData.maiCoinsUsed || 0 : bookingData.driverMaiCoinsUsed || 0)
+                : 0,
+              route: `${bookingData.origin || "Unknown"} -> ${bookingData.destination || "Unknown"}`,
+            },
+          },
+        };
+      };
+
+      const consumerRow = maybeBuildRow("consumer");
+      if (consumerRow) {
+        synthesizedRows.push(consumerRow);
+        existingIds.add(consumerRow.id);
+      }
+
+      const driverRow = maybeBuildRow("driver");
+      if (driverRow) {
+        synthesizedRows.push(driverRow);
+        existingIds.add(driverRow.id);
+      }
+    }
+
+    if (synthesizedRows.length) {
+      const { error: upsertError } = await supabaseAdmin
+        .from("transactions")
+        .upsert(synthesizedRows, { onConflict: "id" });
+      if (upsertError) throw upsertError;
+    }
+
+    const allRows = [...existing, ...synthesizedRows].sort(
+      (a: any, b: any) => new Date(b.created_at || b.data?.createdAt || 0).getTime() - new Date(a.created_at || a.data?.createdAt || 0).getTime()
+    );
+
+    const transactions = allRows.map((row: any) => ({
+      ...((row.data as Record<string, any>) || {}),
+      id: row.id,
+      userId: row.user_id ?? row.data?.userId ?? null,
+      type: row.type ?? row.data?.type ?? null,
+      status: row.status ?? row.data?.status ?? null,
+      createdAt: row.created_at ?? row.data?.createdAt ?? null,
+      updatedAt: row.updated_at ?? row.data?.updatedAt ?? null,
+    }));
+
+    res.status(200).json({ transactions });
+  } catch (error: any) {
+    console.error("Error fetching transactions:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch transactions" });
+  }
+}
+
 export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
   const { email, password, displayName, phoneNumber, role, adminRole } = req.body || {};
   const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -379,6 +499,61 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
       error?.status ||
       (message.toLowerCase().includes("already") ? 409 : 500);
     res.status(statusCode).json({ error: message });
+  }
+}
+
+export async function handleAdminVerifyDriver(req: ReqLike, res: ResLike) {
+  const { uid, verificationStatus, rejectionReason } = req.body || {};
+  const normalizedStatus = verificationStatus === "approved" || verificationStatus === "rejected"
+    ? verificationStatus
+    : null;
+
+  if (!uid || !normalizedStatus) {
+    return res.status(400).json({ error: "Missing uid or valid verificationStatus" });
+  }
+
+  try {
+    const verifiedBy = req.user?.id || req.profile?.id || null;
+    const { data: existingUser, error: existingUserError } = await getSupabaseAdmin()
+      .from("users")
+      .select("*")
+      .eq("id", uid)
+      .maybeSingle();
+
+    if (existingUserError) throw existingUserError;
+    if (!existingUser) {
+      return res.status(404).json({ error: "Driver not found" });
+    }
+
+    const existingData = (existingUser.data as Record<string, any>) || {};
+    const nextData = {
+      ...existingData,
+      verificationStatus: normalizedStatus,
+      rejectionReason: normalizedStatus === "rejected" ? (rejectionReason || "") : null,
+      verifiedBy,
+      status: normalizedStatus === "approved" ? "active" : "inactive",
+    };
+
+    const { error } = await getSupabaseAdmin()
+      .from("users")
+      .update({
+        verification_status: normalizedStatus,
+        rejection_reason: normalizedStatus === "rejected" ? (rejectionReason || "") : null,
+        verified_by: verifiedBy,
+        status: normalizedStatus === "approved" ? "active" : "inactive",
+        data: nextData,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", uid);
+
+    if (error) throw error;
+
+    return res.status(200).json({ message: `Driver ${normalizedStatus} successfully.` });
+  } catch (error: any) {
+    console.error("Error verifying driver:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to update driver verification"),
+    });
   }
 }
 
@@ -665,6 +840,68 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
     console.error("Error creating ride:", error);
     return res.status(error?.status || 500).json({
       error: extractErrorMessage(error, "Failed to create ride"),
+    });
+  }
+}
+
+function parseDataUrlPayload(dataUrl: string) {
+  const match = String(dataUrl || "").match(/^data:(.*?);base64,(.*)$/);
+  if (!match) {
+    throw Object.assign(new Error("Invalid data URL payload"), { status: 400 });
+  }
+
+  const [, contentType, base64] = match;
+  return {
+    contentType: contentType || "application/octet-stream",
+    buffer: Buffer.from(base64, "base64"),
+  };
+}
+
+export async function handleUserUploadDriverDoc(req: ReqLike, res: ResLike) {
+  const { driverId, path, dataUrl } = req.body || {};
+
+  if (!driverId || !path || !dataUrl) {
+    return res.status(400).json({ error: "Missing driverId, path, or dataUrl" });
+  }
+
+  try {
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+    const user = await verifyTokenFromHeader(authHeader);
+    if (user.id !== driverId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (String(path).includes("..") || String(path).includes("/")) {
+      return res.status(400).json({ error: "Invalid upload path" });
+    }
+
+    const bucket = process.env.VITE_SUPABASE_STORAGE_BUCKET;
+    if (!bucket) {
+      throw new Error("Supabase storage bucket is not configured.");
+    }
+
+    const { contentType, buffer } = parseDataUrlPayload(String(dataUrl));
+    const storagePath = `drivers/${driverId}/${path}`;
+    const supabaseAdmin = getSupabaseAdmin();
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from(bucket)
+      .upload(storagePath, buffer, {
+        upsert: true,
+        contentType,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(storagePath);
+    return res.status(200).json({ url: data.publicUrl });
+  } catch (error: any) {
+    console.error("Error uploading driver document:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to upload driver document"),
     });
   }
 }

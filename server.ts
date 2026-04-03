@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import authHandler from "./api/auth.ts";
 import bookingsHandler from "./api/bookings.ts";
+import paymentsHandler from "./api/payments.ts";
 import userHandler from "./api/user.ts";
 import { handleCompleteSignup } from "./api/_lib/signup.ts";
 import { handleSubmitReview } from "./api/_lib/reviews.ts";
@@ -18,9 +19,11 @@ import {
   handleAdminCreateUser,
   handleAdminDeleteUser,
   handleAdminGetConfig,
+  handleAdminGetTransactions,
   handleAdminGenerateResetLink,
   handleAdminSaveConfig,
   handleAdminUpdatePassword,
+  handleAdminVerifyDriver,
   handleHealth,
   handleUserCancelRide,
   handleUserCreateRide,
@@ -61,6 +64,10 @@ async function startServer() {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminGetConfig(req, res);
   });
+  app.get("/api/admin/transactions", async (req, res) => {
+    if (!(await requireAdminStaff(req, res))) return;
+    return handleAdminGetTransactions(req, res);
+  });
   app.post("/api/admin/update-password", async (req, res) => {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminUpdatePassword(req, res);
@@ -72,6 +79,10 @@ async function startServer() {
   app.post("/api/admin/save-config", async (req, res) => {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminSaveConfig(req, res);
+  });
+  app.post("/api/admin/verify-driver", async (req, res) => {
+    if (!(await requireSuperAdmin(req, res))) return;
+    return handleAdminVerifyDriver(req, res);
   });
   app.post("/api/admin/force-cancel-ride", async (req, res) => {
     if (!(await requireAdminStaff(req, res))) return;
@@ -86,6 +97,7 @@ async function startServer() {
   app.post("/api/user/traveler-respond-booking", handleUserTravelerRespondBooking);
   app.all("/api/user", userHandler);
   app.all("/api/auth", authHandler);
+  app.all("/api/payments", paymentsHandler);
   app.post("/api/auth/send-otp", handleSendOtp);
   app.post("/api/auth/send-email-otp", handleSendEmailOtp);
   app.post("/api/auth/verify-otp", handleVerifyOtp);
