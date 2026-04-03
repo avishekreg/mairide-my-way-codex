@@ -9653,7 +9653,8 @@ const AdminConfigView = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
 
-  const adminApiPath = (action: string) => `/api/admin?action=${encodeURIComponent(action)}`;
+  const adminApiPath = (action: 'config' | 'save-config') =>
+    action === 'config' ? '/api/admin/config' : '/api/admin/save-config';
 
   const saveConfig = async (payload: Partial<AppConfig>) => {
     const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
@@ -10673,7 +10674,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     const loadTransactions = async () => {
       try {
         const headers = await getAdminRequestHeaders(profile.email);
-        const response = await axios.get(`/api/admin?action=transactions`, { headers });
+        const response = await axios.get(`/api/admin/transactions`, { headers });
         if (!active) return;
         setTransactions((response.data?.transactions || []) as Transaction[]);
       } catch (error) {
