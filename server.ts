@@ -10,6 +10,7 @@ import adminHandler from "./api/admin/[action].ts";
 import userHandler from "./api/user.ts";
 import completeDriverOnboardingHandler from "./api/complete-driver-onboarding.ts";
 import deleteUserHandler from "./api/delete-user.ts";
+import uploadDriverDocHandler from "./api/upload-driver-doc.ts";
 import { handleCompleteSignup } from "./api/_lib/signup.ts";
 import { handleSubmitReview } from "./api/_lib/reviews.ts";
 import {
@@ -64,6 +65,7 @@ async function startServer() {
     return handleAdminDeleteUser(req, res);
   });
   app.post("/api/delete-user", deleteUserHandler);
+  app.post("/api/upload-driver-doc", uploadDriverDocHandler);
   app.get("/api/admin/config", async (req, res) => {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminGetConfig(req, res);

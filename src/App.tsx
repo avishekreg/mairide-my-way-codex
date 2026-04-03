@@ -3221,7 +3221,7 @@ const DriverOnboarding = ({
     if (!base64) return '';
     const token = await getAccessToken();
     const response = await axios.post(
-      '/api/user?action=upload-driver-doc',
+      '/api/upload-driver-doc',
       {
         driverId: profile.uid,
         path,
