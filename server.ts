@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import authHandler from "./api/auth.ts";
 import bookingsHandler from "./api/bookings.ts";
 import paymentsHandler from "./api/payments.ts";
-import adminHandler from "./api/admin/[action].ts";
+import adminHandler from "./api/admin.ts";
 import userHandler from "./api/user.ts";
 import completeDriverOnboardingHandler from "./api/complete-driver-onboarding.ts";
 import deleteUserHandler from "./api/delete-user.ts";
@@ -19,15 +19,6 @@ import {
   handleVerifyOtp,
 } from "./api/_lib/otp.ts";
 import {
-  handleAdminForceCancelRide,
-  handleAdminCreateUser,
-  handleAdminDeleteUser,
-  handleAdminGetConfig,
-  handleAdminGetTransactions,
-  handleAdminGenerateResetLink,
-  handleAdminSaveConfig,
-  handleAdminUpdatePassword,
-  handleAdminVerifyDriver,
   handleHealth,
   handleUserCancelRide,
   handleUserCreateRide,
@@ -36,8 +27,6 @@ import {
   handleUserRejectBooking,
   handleUserTravelerCounterBooking,
   handleUserTravelerRespondBooking,
-  requireAdminStaff,
-  requireSuperAdmin,
 } from "./api/_lib/backend.ts";
 import { handleResolvePhoneLogin } from "./api/auth.ts";
 
@@ -56,45 +45,9 @@ async function startServer() {
   app.use(express.json({ limit: "10mb" }));
 
   app.get("/api/health", handleHealth);
-  app.post("/api/admin/create-user", async (req, res) => {
-    if (!(await requireSuperAdmin(req, res))) return;
-    return handleAdminCreateUser(req, res);
-  });
-  app.post("/api/admin/delete-user", async (req, res) => {
-    if (!(await requireSuperAdmin(req, res))) return;
-    return handleAdminDeleteUser(req, res);
-  });
   app.post("/api/delete-user", deleteUserHandler);
   app.post("/api/upload-driver-doc", uploadDriverDocHandler);
-  app.get("/api/admin/config", async (req, res) => {
-    if (!(await requireSuperAdmin(req, res))) return;
-    return handleAdminGetConfig(req, res);
-  });
-  app.get("/api/admin/transactions", async (req, res) => {
-    if (!(await requireAdminStaff(req, res))) return;
-    return handleAdminGetTransactions(req, res);
-  });
-  app.post("/api/admin/update-password", async (req, res) => {
-    if (!(await requireSuperAdmin(req, res))) return;
-    return handleAdminUpdatePassword(req, res);
-  });
-  app.post("/api/admin/generate-reset-link", async (req, res) => {
-    if (!(await requireSuperAdmin(req, res))) return;
-    return handleAdminGenerateResetLink(req, res);
-  });
-  app.post("/api/admin/save-config", async (req, res) => {
-    if (!(await requireSuperAdmin(req, res))) return;
-    return handleAdminSaveConfig(req, res);
-  });
-  app.post("/api/admin/verify-driver", async (req, res) => {
-    if (!(await requireSuperAdmin(req, res))) return;
-    return handleAdminVerifyDriver(req, res);
-  });
-  app.post("/api/admin/force-cancel-ride", async (req, res) => {
-    if (!(await requireAdminStaff(req, res))) return;
-    return handleAdminForceCancelRide(req, res);
-  });
-  app.all("/api/admin/:action", adminHandler);
+  app.all("/api/admin", adminHandler);
   app.post("/api/user/change-password", handleUserChangePassword);
   app.post("/api/complete-driver-onboarding", completeDriverOnboardingHandler);
   app.post("/api/user/create-ride", handleUserCreateRide);

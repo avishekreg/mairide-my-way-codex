@@ -10,7 +10,7 @@ import {
   handleAdminVerifyDriver,
   requireAdminStaff,
   requireSuperAdmin,
-} from "../_lib/backend.ts";
+} from "./_lib/backend.ts";
 
 type Handler = (req: any, res: any) => Promise<any>;
 
@@ -33,9 +33,6 @@ function getAction(req: any) {
   const action = req.query?.action;
   if (typeof action === "string") return action;
   if (Array.isArray(action) && action[0]) return action[0];
-  const url = String(req.url || "");
-  const match = url.match(/\/api\/admin\/([^/?#]+)/);
-  if (match?.[1]) return match[1];
   return "";
 }
 

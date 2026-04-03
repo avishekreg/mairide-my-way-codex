@@ -9665,8 +9665,7 @@ const AdminConfigView = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
 
-  const adminApiPath = (action: 'config' | 'save-config') =>
-    action === 'config' ? '/api/admin/config' : '/api/admin/save-config';
+  const adminApiPath = (action: string) => `/api/admin?action=${encodeURIComponent(action)}`;
 
   const saveConfig = async (payload: Partial<AppConfig>) => {
     const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
@@ -10560,7 +10559,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     setIsResetting(true);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post(`/api/admin/update-password`, {
+      await axios.post(adminApiPath('update-password'), {
         uid: resetPasswordUser.uid,
         newPassword: newAdminPassword
       }, {
@@ -10589,7 +10588,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     setIsGeneratingResetLink(targetUser.uid);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      const response = await axios.post(`/api/admin/generate-reset-link`, {
+      const response = await axios.post(adminApiPath('generate-reset-link'), {
         email: targetUser.email
       }, {
         headers
@@ -10686,7 +10685,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     const loadTransactions = async () => {
       try {
         const headers = await getAdminRequestHeaders(profile.email);
-        const response = await axios.get(`/api/admin/transactions`, { headers });
+        const response = await axios.get(adminApiPath('transactions'), { headers });
         if (!active) return;
         setTransactions((response.data?.transactions || []) as Transaction[]);
       } catch (error) {
@@ -10725,7 +10724,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     setForceCancellingRideId(rideId);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post(`/api/admin/force-cancel-ride`, {
+      await axios.post(adminApiPath('force-cancel-ride'), {
         rideId,
         bookingId: booking.id,
         reason: 'Cancelled by MaiRide customer support',
@@ -10986,7 +10985,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     }
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post(`/api/admin/verify-driver`, {
+      await axios.post(adminApiPath('verify-driver'), {
         uid: userId,
         verificationStatus: status,
         rejectionReason: status === 'rejected' ? rejectionReason : '',
@@ -11122,7 +11121,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       const headers = await getAdminRequestHeaders(profile.email);
 
       // 2. Call Backend API to create user in Auth and Firestore
-      const response = await axios.post(`/api/admin/create-user`, {
+      const response = await axios.post(adminApiPath('create-user'), {
         email: normalizedEmail,
         password: newUser.password,
         displayName: sanitizeDisplayName(newUser.displayName),
