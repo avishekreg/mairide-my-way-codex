@@ -3,6 +3,7 @@ import {
   handleUserChangePassword,
   handleUserCounterBooking,
   handleUserCreateRide,
+  handleUserCompleteDriverOnboarding,
   handleUserRejectBooking,
   handleUserTravelerCounterBooking,
   handleUserTravelerRespondBooking,
@@ -25,6 +26,10 @@ export default async function handler(req: any, res: any) {
 
   if (action === "create-ride") {
     return handleUserCreateRide(req, res);
+  }
+
+  if (action === "complete-driver-onboarding") {
+    return handleUserCompleteDriverOnboarding(req, res);
   }
 
   if (action === "reject-booking") {
@@ -53,6 +58,10 @@ export default async function handler(req: any, res: any) {
 
   if (req.url?.endsWith("/create-ride")) {
     return handleUserCreateRide(req, res);
+  }
+
+  if (req.url?.endsWith("/complete-driver-onboarding")) {
+    return handleUserCompleteDriverOnboarding(req, res);
   }
 
   if (req.url?.endsWith("/reject-booking")) {

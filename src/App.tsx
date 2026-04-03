@@ -3281,7 +3281,19 @@ const DriverOnboarding = ({
           totalEarnings: 0,
         }
       };
-      await setDoc(doc(db, 'users', profile.uid), updatedProfile);
+      const token = await getAccessToken();
+      await axios.post(
+        '/api/user?action=complete-driver-onboarding',
+        {
+          driverId: profile.uid,
+          driverDetails: updatedProfile.driverDetails,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
       onComplete();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${profile.uid}`);
@@ -10800,7 +10812,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
   const filteredUsers = users.filter(user => {
     if (user.uid === profile.uid) return false;
-    if (user.role === 'driver' && user.verificationStatus === 'pending') return false;
+    if (user.role === 'driver' && (!user.onboardingComplete || user.verificationStatus === 'pending')) return false;
     const matchesSearch = user.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
@@ -13120,7 +13132,7 @@ const App = () => {
 
   if (profile && profile.role === 'driver') {
     if (!profile.onboardingComplete) {
-      return <ErrorBoundary><DriverOnboarding profile={profile} onComplete={() => {}} isLoaded={isLoaded} /></ErrorBoundary>;
+      return <ErrorBoundary><DriverOnboarding profile={profile} onComplete={() => window.location.reload()} isLoaded={isLoaded} /></ErrorBoundary>;
     }
     if (profile.verificationStatus === 'pending') {
       return <ErrorBoundary><DriverPendingApproval profile={profile} /></ErrorBoundary>;

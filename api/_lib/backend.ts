@@ -899,6 +899,61 @@ export async function handleUserUploadDriverDoc(req: ReqLike, res: ResLike) {
   }
 }
 
+export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResLike) {
+  const { driverId, driverDetails } = req.body || {};
+
+  if (!driverId || !driverDetails) {
+    return res.status(400).json({ error: "Missing driverId or driverDetails" });
+  }
+
+  try {
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+    const user = await verifyTokenFromHeader(authHeader);
+    if (user.id !== driverId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const existingProfile = await getUserProfile(driverId);
+    if (!existingProfile) {
+      return res.status(404).json({ error: "Driver profile not found" });
+    }
+
+    const { error } = await getSupabaseAdmin()
+      .from("users")
+      .update({
+        role: "driver",
+        onboarding_complete: true,
+        verification_status: "pending",
+        rejection_reason: null,
+        verified_by: null,
+        driver_details: driverDetails,
+        data: {
+          ...((existingProfile.data as Record<string, any>) || {}),
+          uid: driverId,
+          role: "driver",
+          onboardingComplete: true,
+          verificationStatus: "pending",
+          rejectionReason: null,
+          verifiedBy: null,
+          driverDetails,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", driverId);
+
+    if (error) throw error;
+
+    return res.status(200).json({ message: "Driver onboarding submitted successfully." });
+  } catch (error: any) {
+    console.error("Error completing driver onboarding:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to complete driver onboarding"),
+    });
+  }
+}
+
 export async function handleUserRejectBooking(req: ReqLike, res: ResLike) {
   const { bookingId, driverId, driverPhone } = req.body || {};
 
