@@ -9653,9 +9653,11 @@ const AdminConfigView = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
 
+  const adminApiPath = (action: string) => `/api/admin?action=${encodeURIComponent(action)}`;
+
   const saveConfig = async (payload: Partial<AppConfig>) => {
     const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
-    const response = await axios.post('/api/admin/save-config', payload, {
+    const response = await axios.post(adminApiPath('save-config'), payload, {
       headers
     });
     if (response.data?.config) {
@@ -9669,7 +9671,7 @@ const AdminConfigView = () => {
       try {
         const defaults = buildDefaultConfig();
         const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
-        const response = await axios.get('/api/admin/config', { headers });
+        const response = await axios.get(adminApiPath('config'), { headers });
         if (response.data?.config) {
           setFormData({ ...defaults, ...response.data.config });
         } else {
@@ -10545,7 +10547,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     setIsResetting(true);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post('/api/admin/update-password', {
+      await axios.post(`/api/admin?action=update-password`, {
         uid: resetPasswordUser.uid,
         newPassword: newAdminPassword
       }, {
@@ -10574,7 +10576,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     setIsGeneratingResetLink(targetUser.uid);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      const response = await axios.post('/api/admin/generate-reset-link', {
+      const response = await axios.post(`/api/admin?action=generate-reset-link`, {
         email: targetUser.email
       }, {
         headers
@@ -10667,7 +10669,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     const loadTransactions = async () => {
       try {
         const headers = await getAdminRequestHeaders(profile.email);
-        const response = await axios.get('/api/admin/transactions', { headers });
+        const response = await axios.get(`/api/admin?action=transactions`, { headers });
         if (!active) return;
         setTransactions((response.data?.transactions || []) as Transaction[]);
       } catch (error) {
@@ -10706,7 +10708,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     setForceCancellingRideId(rideId);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post('/api/admin/force-cancel-ride', {
+      await axios.post(`/api/admin?action=force-cancel-ride`, {
         rideId,
         bookingId: booking.id,
         reason: 'Cancelled by MaiRide customer support',
@@ -10967,7 +10969,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     }
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post('/api/admin/verify-driver', {
+      await axios.post(`/api/admin?action=verify-driver`, {
         uid: userId,
         verificationStatus: status,
         rejectionReason: status === 'rejected' ? rejectionReason : '',
@@ -11007,7 +11009,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const handleDeleteUser = async (userId: string) => {
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post('/api/admin/delete-user', { uid: userId }, { headers });
+      await axios.post(`/api/admin?action=delete-user`, { uid: userId }, { headers });
       setShowDeleteConfirm(null);
       setAdminNotice({
         title: 'User removed',
@@ -11103,7 +11105,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       const headers = await getAdminRequestHeaders(profile.email);
 
       // 2. Call Backend API to create user in Auth and Firestore
-      const response = await axios.post('/api/admin/create-user', {
+      const response = await axios.post(`/api/admin?action=create-user`, {
         email: normalizedEmail,
         password: newUser.password,
         displayName: sanitizeDisplayName(newUser.displayName),
