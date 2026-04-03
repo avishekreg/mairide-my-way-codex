@@ -27,6 +27,36 @@ function extractErrorMessage(error: any, fallback: string) {
   return fallback;
 }
 
+function normalizeRouteText(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getRideThreadKey(data: any) {
+  return [
+    data?.driverId || data?.driver_id || "",
+    normalizeRouteText(data?.origin),
+    normalizeRouteText(data?.destination),
+    data?.departureTime || "",
+  ].join("__");
+}
+
+function getBookingThreadKey(data: any) {
+  const rideId = data?.rideId || data?.ride_id || "";
+  if (rideId) {
+    return [rideId, data?.consumerId || data?.consumer_id || ""].join("__");
+  }
+  return [
+    data?.driverId || data?.driver_id || "",
+    data?.consumerId || data?.consumer_id || "",
+    normalizeRouteText(data?.origin),
+    normalizeRouteText(data?.destination),
+  ].join("__");
+}
+
+function isActiveBookingStatus(status: string | null | undefined) {
+  return ["pending", "confirmed", "negotiating"].includes(String(status || ""));
+}
+
 function getSupabaseAdmin(): any {
   if (supabaseAdmin) return supabaseAdmin;
 
@@ -211,6 +241,46 @@ export async function requireSuperAdmin(req: ReqLike, res: ResLike) {
     }
 
     res.status(403).json({ error: "Forbidden: Super Admin access required" });
+    return false;
+  } catch (error: any) {
+    res.status(error.status || 401).json({ error: error.message || "Unauthorized" });
+    return false;
+  }
+}
+
+export async function requireAdminStaff(req: ReqLike, res: ResLike) {
+  try {
+    if (process.env.NODE_ENV !== "production") {
+      req.user = { id: "local-dev-admin", email: process.env.VITE_SUPER_ADMIN_EMAIL || "local@admin.dev" };
+      req.profile = {
+        id: "local-dev-admin",
+        role: "admin",
+        admin_role: "super_admin",
+        email: process.env.VITE_SUPER_ADMIN_EMAIL || "local@admin.dev",
+      };
+      return true;
+    }
+
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+
+    const user = await verifyTokenFromHeader(authHeader);
+    const profile = await getUserProfile(user.id);
+    const effectiveAdminRole =
+      profile?.admin_role ||
+      profile?.data?.adminRole ||
+      (user.email && process.env.VITE_SUPER_ADMIN_EMAIL && user.email.toLowerCase() === process.env.VITE_SUPER_ADMIN_EMAIL.toLowerCase()
+        ? "super_admin"
+        : null);
+
+    if (profile && profile.role === "admin" && effectiveAdminRole) {
+      req.user = user;
+      req.profile = profile;
+      return true;
+    }
+
+    res.status(403).json({ error: "Forbidden: Admin access required" });
     return false;
   } catch (error: any) {
     res.status(error.status || 401).json({ error: error.message || "Unauthorized" });
@@ -511,6 +581,700 @@ export async function handleUserChangePassword(req: ReqLike, res: ResLike) {
   } catch (error: any) {
     console.error("Error changing password:", error);
     res.status(error.status || 500).json({ error: error.message || "Failed to change password" });
+  }
+}
+
+export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
+  const {
+    driverId,
+    driverName,
+    driverPhotoUrl,
+    driverRating,
+    origin,
+    destination,
+    originLocation,
+    destinationLocation,
+    price,
+    seatsAvailable,
+    departureDay,
+    departureDayLabel,
+    departureClock,
+    departureNote,
+    departureTime,
+  } = req.body || {};
+
+  if (
+    !driverId ||
+    !origin ||
+    !destination ||
+    !originLocation ||
+    !destinationLocation ||
+    !Number.isFinite(Number(price)) ||
+    !Number.isFinite(Number(seatsAvailable))
+  ) {
+    return res.status(400).json({ error: "Missing required ride fields" });
+  }
+
+  try {
+    if (process.env.NODE_ENV === "production") {
+      const authHeader = Array.isArray(req.headers.authorization)
+        ? req.headers.authorization[0]
+        : req.headers.authorization;
+      const user = await verifyTokenFromHeader(authHeader);
+      if (user.id !== driverId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
+    const rideId = crypto.randomUUID();
+    const rideRow = {
+      id: rideId,
+      driver_id: driverId,
+      status: "available",
+      created_at: departureTime || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      data: {
+        id: rideId,
+        driverId,
+        driverName,
+        driverPhotoUrl: driverPhotoUrl || "",
+        driverRating: Number(driverRating) || 0,
+        origin,
+        destination,
+        originLocation,
+        destinationLocation,
+        price: Number(price),
+        seatsAvailable: Number(seatsAvailable),
+        status: "available",
+        departureDay: departureDay || "today",
+        departureDayLabel: departureDayLabel || "Today",
+        departureClock: departureClock || "09:00",
+        departureNote:
+          departureNote ||
+          "Planned departure time may vary based on traffic, road, and operational conditions.",
+        departureTime: departureTime || new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    };
+
+    const { error } = await getSupabaseAdmin().from("rides").insert(rideRow);
+    if (error) throw error;
+
+    return res.status(201).json({ message: "Ride created successfully", id: rideId });
+  } catch (error: any) {
+    console.error("Error creating ride:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to create ride"),
+    });
+  }
+}
+
+export async function handleUserRejectBooking(req: ReqLike, res: ResLike) {
+  const { bookingId, driverId, driverPhone } = req.body || {};
+
+  if (!bookingId || !driverId) {
+    return res.status(400).json({ error: "Missing bookingId or driverId" });
+  }
+
+  try {
+    if (process.env.NODE_ENV === "production") {
+      const authHeader = Array.isArray(req.headers.authorization)
+        ? req.headers.authorization[0]
+        : req.headers.authorization;
+      const user = await verifyTokenFromHeader(authHeader);
+      if (user.id !== driverId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: bookingRow, error: bookingError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (bookingError) throw bookingError;
+    if (!bookingRow) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const storedDriverId = bookingRow.driver_id || bookingRow.data?.driverId;
+    if (storedDriverId !== driverId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const updatedAt = new Date().toISOString();
+    const seedData = bookingRow.data || {};
+    const threadKey = getBookingThreadKey(seedData);
+    const { data: candidateRows, error: candidateError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("driver_id", driverId)
+      .eq("consumer_id", bookingRow.consumer_id || seedData.consumerId);
+
+    if (candidateError) throw candidateError;
+
+    const threadRows = (candidateRows || []).filter((row: any) => {
+      const rowData = row.data || {};
+      return getBookingThreadKey(rowData) === threadKey && isActiveBookingStatus(row.status || rowData.status);
+    });
+
+    await Promise.all(
+      (threadRows.length ? threadRows : [bookingRow]).map(async (row: any) => {
+        const rowData = row.data || {};
+        const nextData = {
+          ...rowData,
+          status: "rejected",
+          negotiationStatus: "rejected",
+          negotiationActor: "driver",
+          driverCounterPending: false,
+          driverPhone: driverPhone || rowData.driverPhone || "",
+          updatedAt,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("bookings")
+          .update({
+            status: "rejected",
+            updated_at: updatedAt,
+            data: nextData,
+          })
+          .eq("id", row.id);
+
+        if (error) throw error;
+      })
+    );
+
+    return res.status(200).json({ message: "Traveler offer rejected." });
+  } catch (error: any) {
+    console.error("Error rejecting booking:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to reject traveler offer"),
+    });
+  }
+}
+
+export async function handleUserCounterBooking(req: ReqLike, res: ResLike) {
+  const { bookingId, driverId, fare } = req.body || {};
+
+  if (!bookingId || !driverId || !Number.isFinite(Number(fare)) || Number(fare) <= 0) {
+    return res.status(400).json({ error: "Missing bookingId, driverId, or valid fare" });
+  }
+
+  try {
+    if (process.env.NODE_ENV === "production") {
+      const authHeader = Array.isArray(req.headers.authorization)
+        ? req.headers.authorization[0]
+        : req.headers.authorization;
+      const user = await verifyTokenFromHeader(authHeader);
+      if (user.id !== driverId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: bookingRow, error: bookingError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (bookingError) throw bookingError;
+    if (!bookingRow) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const storedDriverId = bookingRow.driver_id || bookingRow.data?.driverId;
+    if (storedDriverId !== driverId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const seedData = bookingRow.data || {};
+    const threadKey = getBookingThreadKey(seedData);
+    const updatedAt = new Date().toISOString();
+    const { data: candidateRows, error: candidateError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("driver_id", driverId)
+      .eq("consumer_id", bookingRow.consumer_id || seedData.consumerId);
+
+    if (candidateError) throw candidateError;
+
+    const threadRows = (candidateRows || []).filter((row: any) => {
+      const rowData = row.data || {};
+      return getBookingThreadKey(rowData) === threadKey && isActiveBookingStatus(row.status || rowData.status);
+    });
+
+    await Promise.all(
+      (threadRows.length ? threadRows : [bookingRow]).map(async (row: any) => {
+        const rowData = row.data || {};
+        const nextData = {
+          ...rowData,
+          negotiatedFare: Number(fare),
+          negotiationStatus: "pending",
+          negotiationActor: "driver",
+          driverCounterPending: true,
+          status: "negotiating",
+          updatedAt,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("bookings")
+          .update({
+            status: "negotiating",
+            updated_at: updatedAt,
+            data: nextData,
+          })
+          .eq("id", row.id);
+
+        if (error) throw error;
+      })
+    );
+
+    return res.status(200).json({ message: "Counter offer sent to traveler." });
+  } catch (error: any) {
+    console.error("Error countering booking:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to send counter offer"),
+    });
+  }
+}
+
+export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLike) {
+  const { bookingId, consumerId, fare } = req.body || {};
+
+  if (!bookingId || !consumerId || !Number.isFinite(Number(fare)) || Number(fare) <= 0) {
+    return res.status(400).json({ error: "Missing bookingId, consumerId, or valid fare" });
+  }
+
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: bookingRow, error: bookingError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (bookingError) throw bookingError;
+    if (!bookingRow) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const storedConsumerId = bookingRow.consumer_id || bookingRow.data?.consumerId;
+    if (storedConsumerId !== consumerId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const seedData = bookingRow.data || {};
+    const threadKey = getBookingThreadKey(seedData);
+    const updatedAt = new Date().toISOString();
+    const { data: candidateRows, error: candidateError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("consumer_id", consumerId)
+      .eq("driver_id", bookingRow.driver_id || seedData.driverId);
+
+    if (candidateError) throw candidateError;
+
+    const threadRows = (candidateRows || []).filter((row: any) => {
+      const rowData = row.data || {};
+      return getBookingThreadKey(rowData) === threadKey && isActiveBookingStatus(row.status || rowData.status);
+    });
+
+    await Promise.all(
+      (threadRows.length ? threadRows : [bookingRow]).map(async (row: any) => {
+        const rowData = row.data || {};
+        const nextData = {
+          ...rowData,
+          negotiatedFare: Number(fare),
+          negotiationStatus: "pending",
+          negotiationActor: "consumer",
+          driverCounterPending: false,
+          status: "negotiating",
+          rideRetired: false,
+          updatedAt,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("bookings")
+          .update({
+            status: "negotiating",
+            updated_at: updatedAt,
+            data: nextData,
+          })
+          .eq("id", row.id);
+
+        if (error) throw error;
+      })
+    );
+
+    return res.status(200).json({ message: "Counter offer sent to the driver." });
+  } catch (error: any) {
+    console.error("Error sending traveler counter offer:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to send counter offer"),
+    });
+  }
+}
+
+export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLike) {
+  const { bookingId, consumerId, action } = req.body || {};
+
+  if (!bookingId || !consumerId || !["accepted", "rejected"].includes(String(action || ""))) {
+    return res.status(400).json({ error: "Missing bookingId, consumerId, or valid action" });
+  }
+
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: bookingRow, error: bookingError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (bookingError) throw bookingError;
+    if (!bookingRow) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const storedConsumerId = bookingRow.consumer_id || bookingRow.data?.consumerId;
+    if (storedConsumerId !== consumerId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const seedData = bookingRow.data || {};
+    const threadKey = getBookingThreadKey(seedData);
+    const updatedAt = new Date().toISOString();
+    const { data: candidateRows, error: candidateError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("consumer_id", consumerId)
+      .eq("driver_id", bookingRow.driver_id || seedData.driverId);
+
+    if (candidateError) throw candidateError;
+
+    const threadRows = (candidateRows || []).filter((row: any) => {
+      const rowData = row.data || {};
+      return getBookingThreadKey(rowData) === threadKey && isActiveBookingStatus(row.status || rowData.status);
+    });
+
+    const targetRows = threadRows.length ? threadRows : [bookingRow];
+
+    if (action === "accepted") {
+      const negotiatedFare = Number(seedData.negotiatedFare ?? bookingRow.data?.negotiatedFare);
+      if (!Number.isFinite(negotiatedFare) || negotiatedFare <= 0) {
+        return res.status(400).json({ error: "No valid negotiated fare to accept" });
+      }
+
+      await Promise.all(
+        targetRows.map(async (row: any) => {
+          const rowData = row.data || {};
+          const nextData = {
+            ...rowData,
+            fare: negotiatedFare,
+            negotiationStatus: "accepted",
+            negotiationActor: "driver",
+            driverCounterPending: false,
+            status: "confirmed",
+            updatedAt,
+          };
+
+          const { error } = await supabaseAdmin
+            .from("bookings")
+            .update({
+              status: "confirmed",
+              updated_at: updatedAt,
+              data: nextData,
+            })
+            .eq("id", row.id);
+
+          if (error) throw error;
+        })
+      );
+
+      return res.status(200).json({ message: "Counter offer accepted." });
+    }
+
+    await Promise.all(
+      targetRows.map(async (row: any) => {
+        const rowData = row.data || {};
+        const nextData = {
+          ...rowData,
+          status: "rejected",
+          negotiationStatus: "rejected",
+          negotiationActor: "driver",
+          driverCounterPending: false,
+          updatedAt,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("bookings")
+          .update({
+            status: "rejected",
+            updated_at: updatedAt,
+            data: nextData,
+          })
+          .eq("id", row.id);
+
+        if (error) throw error;
+      })
+    );
+
+    return res.status(200).json({ message: "Counter offer rejected." });
+  } catch (error: any) {
+    console.error("Error responding to traveler booking:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to update negotiation"),
+    });
+  }
+}
+
+export async function handleUserCancelRide(req: ReqLike, res: ResLike) {
+  const { rideId, driverId, driverPhone } = req.body || {};
+
+  if (!rideId || !driverId) {
+    return res.status(400).json({ error: "Missing rideId or driverId" });
+  }
+
+  try {
+    if (process.env.NODE_ENV === "production") {
+      const authHeader = Array.isArray(req.headers.authorization)
+        ? req.headers.authorization[0]
+        : req.headers.authorization;
+      const user = await verifyTokenFromHeader(authHeader);
+      if (user.id !== driverId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: rideRow, error: rideError } = await supabaseAdmin
+      .from("rides")
+      .select("*")
+      .eq("id", rideId)
+      .maybeSingle();
+
+    if (rideError) throw rideError;
+    if (!rideRow) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    const storedDriverId = rideRow.driver_id || rideRow.data?.driverId;
+    if (storedDriverId !== driverId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const updatedAt = new Date().toISOString();
+    const rideIdsToRetire = [rideId];
+
+    const { data: bookingRows, error: bookingError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("ride_id", rideId);
+
+    if (bookingError) throw bookingError;
+
+    const activeBookingRows = (bookingRows || []).filter((bookingRow: any) => {
+      const rowData = bookingRow.data || {};
+      return rideIdsToRetire.includes(bookingRow.ride_id || rowData.rideId) && isActiveBookingStatus(bookingRow.status || rowData.status);
+    });
+
+    const hasLockedTrip = activeBookingRows.some((bookingRow: any) => {
+      const rowData = bookingRow.data || {};
+      return (
+        bookingRow.status === "confirmed" ||
+        rowData.status === "confirmed" ||
+        Boolean(rowData.feePaid) ||
+        Boolean(rowData.driverFeePaid) ||
+        Boolean(rowData.rideStartedAt) ||
+        Boolean(rowData.rideEndedAt)
+      );
+    });
+
+    if (hasLockedTrip) {
+      return res.status(409).json({
+        error: "This trip is already confirmed and locked for travel. Drivers cannot cancel it now. Please contact MaiRide customer support for an override if cancellation is unavoidable.",
+      });
+    }
+
+    await Promise.all(
+      activeBookingRows.map(async (bookingRow: any) => {
+        const rowData = bookingRow.data || {};
+        const nextData = {
+          ...rowData,
+          status: "cancelled",
+          negotiationStatus: "rejected",
+          negotiationActor: "driver",
+          driverCounterPending: false,
+          rideRetired: true,
+          retiredAt: updatedAt,
+          driverPhone: driverPhone || rowData.driverPhone || "",
+          updatedAt,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("bookings")
+          .update({
+            status: "cancelled",
+            updated_at: updatedAt,
+            data: nextData,
+          })
+          .eq("id", bookingRow.id);
+
+        if (error) throw error;
+      })
+    );
+
+    await Promise.all(
+      rideIdsToRetire.map(async (currentRideId: string) => {
+        const nextRideData = {
+          ...(rideRow.data || {}),
+          status: "cancelled",
+          updatedAt,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("rides")
+          .update({
+            status: "cancelled",
+            updated_at: updatedAt,
+            data: nextRideData,
+          })
+          .eq("id", currentRideId);
+
+        if (error) throw error;
+      })
+    );
+
+    return res.status(200).json({
+      message: "Ride offer cancelled. All live requests linked to it were cleared.",
+    });
+  } catch (error: any) {
+    console.error("Error cancelling ride:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to cancel ride offer"),
+    });
+  }
+}
+
+export async function handleAdminForceCancelRide(req: ReqLike, res: ResLike) {
+  const { rideId, bookingId, reason } = req.body || {};
+
+  if (!rideId && !bookingId) {
+    return res.status(400).json({ error: "Missing rideId or bookingId" });
+  }
+
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    let resolvedRideId = String(rideId || "");
+    let rideRow: any = null;
+
+    if (resolvedRideId) {
+      const { data, error } = await supabaseAdmin
+        .from("rides")
+        .select("*")
+        .eq("id", resolvedRideId)
+        .maybeSingle();
+      if (error) throw error;
+      rideRow = data;
+    }
+
+    if (!rideRow && bookingId) {
+      const { data: bookingRow, error: bookingError } = await supabaseAdmin
+        .from("bookings")
+        .select("*")
+        .eq("id", bookingId)
+        .maybeSingle();
+
+      if (bookingError) throw bookingError;
+      if (!bookingRow) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      resolvedRideId = bookingRow.ride_id || bookingRow.data?.rideId || "";
+      if (!resolvedRideId) {
+        return res.status(404).json({ error: "Linked ride not found" });
+      }
+
+      const { data: resolvedRide, error: rideError } = await supabaseAdmin
+        .from("rides")
+        .select("*")
+        .eq("id", resolvedRideId)
+        .maybeSingle();
+      if (rideError) throw rideError;
+      rideRow = resolvedRide;
+    }
+
+    if (!rideRow || !resolvedRideId) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    const updatedAt = new Date().toISOString();
+    const adminEmail = req.user?.email || req.profile?.email || "";
+    const { data: bookingRows, error: bookingError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("ride_id", resolvedRideId);
+
+    if (bookingError) throw bookingError;
+
+    await Promise.all(
+      (bookingRows || []).map(async (bookingRow: any) => {
+        const rowData = bookingRow.data || {};
+        const nextData = {
+          ...rowData,
+          status: "cancelled",
+          negotiationStatus: "rejected",
+          negotiationActor: rowData.negotiationActor || "admin",
+          driverCounterPending: false,
+          rideRetired: true,
+          retiredAt: updatedAt,
+          forceCancelledByAdmin: true,
+          forceCancelledBy: adminEmail,
+          cancellationReason: reason || "Cancelled by MaiRide support",
+          updatedAt,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("bookings")
+          .update({
+            status: "cancelled",
+            updated_at: updatedAt,
+            data: nextData,
+          })
+          .eq("id", bookingRow.id);
+
+        if (error) throw error;
+      })
+    );
+
+    const nextRideData = {
+      ...(rideRow.data || {}),
+      status: "cancelled",
+      forceCancelledByAdmin: true,
+      forceCancelledBy: adminEmail,
+      cancellationReason: reason || "Cancelled by MaiRide support",
+      updatedAt,
+    };
+
+    const { error: rideUpdateError } = await supabaseAdmin
+      .from("rides")
+      .update({
+        status: "cancelled",
+        updated_at: updatedAt,
+        data: nextRideData,
+      })
+      .eq("id", resolvedRideId);
+
+    if (rideUpdateError) throw rideUpdateError;
+
+    return res.status(200).json({ message: "Ride cancelled by customer support." });
+  } catch (error: any) {
+    console.error("Error force cancelling ride:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to cancel ride from admin panel"),
+    });
   }
 }
 

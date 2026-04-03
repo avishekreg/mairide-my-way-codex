@@ -17,7 +17,8 @@ export const GST_RATE = 0.18; // 18% GST in India
 
 export function calculateServiceFee(fare: number, config?: { maintenanceFeeBase?: number, gstRate?: number }) {
   const baseFee = config?.maintenanceFeeBase ?? 100; // Fixed 100 INR platform maintenance fee or from config
-  const gstRate = config?.gstRate ?? GST_RATE;
+  const rawGstRate = config?.gstRate ?? GST_RATE;
+  const gstRate = rawGstRate > 1 ? rawGstRate / 100 : rawGstRate;
   const gstAmount = baseFee * gstRate;
   return {
     baseFee,

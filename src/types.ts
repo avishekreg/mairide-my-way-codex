@@ -80,7 +80,7 @@ export interface UserProfile {
 export interface Transaction {
   id: string;
   userId: string;
-  type: 'referral_bonus' | 'referral_tier2' | 'maintenance_fee_payment' | 'fintech_payment' | 'wallet_topup';
+  type: 'referral_bonus' | 'referral_tier2' | 'maintenance_fee_payment' | 'fintech_payment' | 'wallet_topup' | 'ride_completion_bonus';
   amount: number;
   currency: 'INR' | 'MAICOIN';
   status: 'pending' | 'completed' | 'failed';
@@ -142,6 +142,10 @@ export interface Ride {
   origin: string;
   destination: string;
   departureTime: string;
+  departureDay?: 'today' | 'tomorrow' | 'dayAfter';
+  departureDayLabel?: string;
+  departureClock?: string;
+  departureNote?: string;
   price: number;
   seatsAvailable: number;
   status: 'available' | 'full' | 'completed' | 'cancelled';
@@ -179,6 +183,11 @@ export interface Booking {
   driverPhone?: string;
   origin: string;
   destination: string;
+  listedOrigin?: string;
+  listedDestination?: string;
+  requestedOrigin?: string;
+  requestedDestination?: string;
+  requiresDetour?: boolean;
   fare: number;
   seatsBooked: number;
   totalPrice: number;
@@ -199,6 +208,8 @@ export interface Booking {
   driverPaymentSubmittedAt?: string;
   negotiatedFare?: number;
   negotiationStatus?: 'pending' | 'accepted' | 'rejected';
+  negotiationActor?: 'consumer' | 'driver';
+  driverCounterPending?: boolean;
   rideLifecycleStatus?: 'awaiting_start_otp' | 'in_progress' | 'completed';
   rideStartOtp?: string;
   rideStartOtpGeneratedAt?: string;
@@ -208,14 +219,18 @@ export interface Booking {
   rideEndOtpVerifiedAt?: string;
   rideStartedAt?: string;
   rideEndedAt?: string;
+  driverEarningsCreditedAt?: string;
+  completionBonusGrantedAt?: string;
   consumerReview?: {
     rating: number;
     comment?: string;
+    traits?: string[];
     createdAt: string;
   };
   driverReview?: {
     rating: number;
     comment?: string;
+    traits?: string[];
     createdAt: string;
   };
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'negotiating' | 'rejected';

@@ -35,8 +35,15 @@ export async function handleSubmitReview(req: any, res: any) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const { bookingId, rating, comment } = req.body || {};
+    const { bookingId, rating, comment, traits } = req.body || {};
     const normalizedRating = Number(rating);
+    const normalizedTraits = Array.isArray(traits)
+      ? traits
+          .filter((trait) => typeof trait === "string")
+          .map((trait) => trait.trim())
+          .filter(Boolean)
+          .slice(0, 6)
+      : [];
 
     if (!bookingId || !Number.isFinite(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
       return res.status(400).json({ error: "A valid booking ID and rating between 1 and 5 are required." });
@@ -99,6 +106,7 @@ export async function handleSubmitReview(req: any, res: any) {
     const reviewPayload = {
       rating: normalizedRating,
       comment: typeof comment === "string" ? comment.trim() : "",
+      traits: normalizedTraits,
       createdAt: now,
     };
 

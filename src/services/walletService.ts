@@ -334,5 +334,5 @@ export const walletService = {
 
       return true;
     });
-  }
+  },
 };

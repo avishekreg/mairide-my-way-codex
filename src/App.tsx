@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Component } from 'react';
+import React, { useState, useEffect, useRef, Component } from 'react';
 import { 
   BrowserRouter as Router, 
   Routes, 
@@ -231,6 +231,37 @@ const normalizeSearchText = (value?: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const routeTextMatches = (candidate: string, searchValue: string) => {
+  if (!searchValue) return true;
+  if (!candidate) return false;
+  if (candidate.includes(searchValue) || searchValue.includes(candidate)) return true;
+
+  const candidateTokens = candidate
+    .split(/[,\s]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+  const searchTokens = searchValue
+    .split(/[,\s]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+
+  if (!searchTokens.length) return true;
+  return searchTokens.every((searchToken) =>
+    candidateTokens.some((candidateToken) => candidateToken.includes(searchToken) || searchToken.includes(candidateToken))
+  );
+};
+
+const getRideDuplicateKey = (ride: Partial<Ride>) => {
+  const origin = normalizeSearchText(ride.origin || '');
+  const destination = normalizeSearchText(ride.destination || '');
+  const departureTime = ride.departureTime || '';
+  const driverId = ride.driverId || '';
+  return `${driverId}__${origin}__${destination}__${departureTime}`;
+};
+
+const isVisibleInActiveRideViews = (record: { dashboardVisible?: boolean | null }) =>
+  record.dashboardVisible !== false;
+
 const fileToDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -386,6 +417,9 @@ const BRAND_NAME = "MaiRide my way";
 const BRAND_TAGLINE = "";
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v2.0.0-beta';
+const APP_NAV_HOME_EVENT = 'mairide:navigate-home';
+const APP_DIALOG_EVENT = 'mairide:dialog';
+const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
 const CONSENT_VERSION = 'consent-v1';
 const GOOGLE_MAPS_API_KEY =
   import.meta.env.VITE_GOOGLE_MAPS_API_KEY &&
@@ -426,6 +460,187 @@ type VerificationMarker = {
   id: string;
   label: string;
   geoTag: { lat: number; lng: number; timestamp: number };
+};
+
+type AppDialogTone = 'info' | 'success' | 'warning' | 'error';
+
+type AppDialogDetail = {
+  title?: string;
+  message: string;
+  tone?: AppDialogTone;
+};
+
+const getPendingNegotiationActor = (booking: Booking): 'driver' | 'consumer' | null => {
+  const negotiatedFare =
+    typeof booking.negotiatedFare === 'number'
+      ? booking.negotiatedFare
+      : Number(booking.negotiatedFare);
+
+  if (!Number.isFinite(negotiatedFare) || booking.negotiationStatus !== 'pending') {
+    return null;
+  }
+
+  if (booking.negotiationActor === 'driver') {
+    return 'driver';
+  }
+
+  if (booking.negotiationActor === 'consumer') {
+    return 'consumer';
+  }
+
+  if (booking.driverCounterPending) {
+    return 'driver';
+  }
+
+  return null;
+};
+
+const hasPendingDriverCounterOffer = (booking: Booking) => {
+  return getPendingNegotiationActor(booking) === 'driver';
+};
+
+const hasPendingTravelerCounterOffer = (booking: Booking) => {
+  const negotiatedFare =
+    typeof booking.negotiatedFare === 'number'
+      ? booking.negotiatedFare
+      : Number(booking.negotiatedFare);
+
+  if (!Number.isFinite(negotiatedFare) || booking.negotiationStatus !== 'pending') {
+    return false;
+  }
+
+  return getPendingNegotiationActor(booking) === 'consumer' && negotiatedFare !== booking.fare;
+};
+
+const getNegotiationDisplayFare = (booking: Booking) => {
+  const negotiatedFare =
+    typeof booking.negotiatedFare === 'number'
+      ? booking.negotiatedFare
+      : Number(booking.negotiatedFare);
+
+  if (Number.isFinite(negotiatedFare) && booking.negotiationStatus === 'pending') {
+    return negotiatedFare;
+  }
+
+  return booking.fare;
+};
+
+const getBookingStateLabel = (booking: Booking) => {
+  if (hasPendingDriverCounterOffer(booking)) return 'counter offer';
+  if (hasPendingTravelerCounterOffer(booking)) return 'your offer pending';
+  return booking.status;
+};
+
+const getListedFare = (booking: Booking) => {
+  const listedFare = Number((booking as any).listedFare);
+  if (Number.isFinite(listedFare) && listedFare > 0) {
+    return listedFare;
+  }
+  return booking.fare;
+};
+
+const shouldShowNegotiatedFareLine = (booking: Booking) => {
+  const listedFare = getListedFare(booking);
+  const displayFare = getNegotiationDisplayFare(booking);
+  return Math.abs(displayFare - listedFare) > 0.001;
+};
+
+const getBookingThreadKey = (booking: Partial<Booking>) => {
+  const rideId = booking.rideId || '';
+  if (rideId) {
+    return `${rideId}__${booking.consumerId || ''}`;
+  }
+  const driverId = booking.driverId || '';
+  const consumerId = booking.consumerId || '';
+  const origin = normalizeSearchText(booking.origin || '');
+  const destination = normalizeSearchText(booking.destination || '');
+  return `${driverId}__${consumerId}__${origin}__${destination}`;
+};
+
+const getRecordTimestamp = (record: { updatedAt?: string; createdAt?: string }) =>
+  new Date(record.updatedAt || record.createdAt || 0).getTime();
+
+const dedupeBookingsByThread = <T extends Booking>(bookings: T[]) => {
+  const latestByThread = new Map<string, T>();
+
+  bookings.forEach((booking) => {
+    const threadKey = getBookingThreadKey(booking);
+    const existing = latestByThread.get(threadKey);
+    if (!existing || getRecordTimestamp(booking) >= getRecordTimestamp(existing)) {
+      latestByThread.set(threadKey, booking);
+    }
+  });
+
+  return Array.from(latestByThread.values());
+};
+
+const primaryActionButtonClass =
+  "rounded-xl font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 active:shadow-sm";
+
+const secondaryActionButtonClass =
+  "rounded-xl font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:shadow-sm";
+
+const inferDialogTone = (message: string): AppDialogTone => {
+  const lowered = message.toLowerCase();
+  if (lowered.includes('success') || lowered.includes('submitted') || lowered.includes('created') || lowered.includes('copied')) {
+    return 'success';
+  }
+  if (lowered.includes('failed') || lowered.includes('error') || lowered.includes('invalid') || lowered.includes('rejected')) {
+    return 'error';
+  }
+  if (lowered.includes('please') || lowered.includes('warning') || lowered.includes('cannot')) {
+    return 'warning';
+  }
+  return 'info';
+};
+
+const showAppDialog = (message: string, tone?: AppDialogTone, title?: string) => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent<AppDialogDetail>(APP_DIALOG_EVENT, {
+      detail: {
+        message,
+        tone: tone || inferDialogTone(message),
+        title,
+      },
+    })
+  );
+};
+
+const canUseBrowserNotifications = () =>
+  typeof window !== 'undefined' && 'Notification' in window;
+
+const ensureBrowserNotificationPermission = async () => {
+  if (!canUseBrowserNotifications()) return 'denied';
+  if (Notification.permission === 'granted') return 'granted';
+  if (Notification.permission === 'denied') return 'denied';
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return 'denied';
+  }
+};
+
+const sendBrowserNotification = async (
+  title: string,
+  body: string,
+  options?: { tag?: string; requirePermissionPrompt?: boolean }
+) => {
+  if (!canUseBrowserNotifications()) return false;
+  const permission = options?.requirePermissionPrompt
+    ? await ensureBrowserNotificationPermission()
+    : Notification.permission;
+  if (permission !== 'granted') return false;
+  try {
+    new Notification(title, {
+      body,
+      tag: options?.tag,
+      icon: '/logo.png',
+    });
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const buildVerificationMarkers = (driverDetails?: UserProfile['driverDetails'] | null): VerificationMarker[] => {
@@ -594,11 +809,16 @@ const parseApiResponse = async (response: Response, fallback: string) => {
 const hasSubmittedBookingReview = (booking: Booking, reviewerRole: 'consumer' | 'driver') =>
   reviewerRole === 'consumer' ? !!booking.consumerReview : !!booking.driverReview;
 
-const submitBookingReview = async (bookingId: string, rating: number, comment: string) => {
+const submitBookingReview = async (
+  bookingId: string,
+  rating: number,
+  comment: string,
+  traits: string[]
+) => {
   const token = await getAccessToken();
   const response = await axios.post(
     '/api/bookings?action=submit-review',
-    { bookingId, rating, comment },
+    { bookingId, rating, comment, traits },
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -639,15 +859,94 @@ const AppFooter = () => (
   </footer>
 );
 
+const AppDialogHost = () => {
+  const [dialog, setDialog] = useState<AppDialogDetail | null>(null);
+
+  useEffect(() => {
+    const handleDialog = (event: Event) => {
+      const customEvent = event as CustomEvent<AppDialogDetail>;
+      if (customEvent.detail?.message) {
+        setDialog(customEvent.detail);
+      }
+    };
+
+    window.addEventListener(APP_DIALOG_EVENT, handleDialog);
+    return () => window.removeEventListener(APP_DIALOG_EVENT, handleDialog);
+  }, []);
+
+  if (!dialog) return null;
+
+  const toneStyles: Record<AppDialogTone, { chip: string; button: string; icon: React.ReactNode }> = {
+    info: {
+      chip: 'bg-mairide-primary/10 text-mairide-primary',
+      button: 'bg-mairide-primary hover:bg-mairide-accent',
+      icon: <MessageSquare className="w-6 h-6" />,
+    },
+    success: {
+      chip: 'bg-green-100 text-green-700',
+      button: 'bg-green-600 hover:bg-green-700',
+      icon: <CheckCircle2 className="w-6 h-6" />,
+    },
+    warning: {
+      chip: 'bg-orange-100 text-orange-700',
+      button: 'bg-mairide-accent hover:bg-mairide-primary',
+      icon: <AlertTriangle className="w-6 h-6" />,
+    },
+    error: {
+      chip: 'bg-red-100 text-red-700',
+      button: 'bg-red-600 hover:bg-red-700',
+      icon: <AlertCircle className="w-6 h-6" />,
+    },
+  };
+
+  const tone = dialog.tone || 'info';
+  const styles = toneStyles[tone];
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-mairide-primary/30 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl', styles.chip)}>
+            {styles.icon}
+          </div>
+          <button
+            onClick={() => setDialog(null)}
+            className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="mt-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+            {dialog.title || 'MaiRide Update'}
+          </p>
+          <p className="mt-3 text-base leading-7 text-mairide-primary">{dialog.message}</p>
+        </div>
+        <button
+          onClick={() => setDialog(null)}
+          className={cn('mt-6 w-full rounded-2xl py-3 text-sm font-bold text-white transition-colors', styles.button)}
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile | null, onLogout: () => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
+  const handleHomeNavigation = () => {
+    window.dispatchEvent(new CustomEvent(APP_NAV_HOME_EVENT, { detail: { role: profile?.role } }));
+    navigate('/');
+    setIsOpen(false);
+  };
 
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
-          <div className="flex items-center cursor-pointer" onClick={() => navigate('/')}>
+          <div className="flex items-center cursor-pointer" onClick={handleHomeNavigation}>
             <img src={LOGO_URL} className="w-12 h-12 object-contain mr-2" alt="MaiRide Logo" />
             <span className="text-xl font-black tracking-tighter text-mairide-primary">
               {BRAND_NAME}
@@ -655,7 +954,7 @@ const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile 
           </div>
           
           <div className="hidden md:flex items-center space-x-6">
-            <button onClick={() => navigate('/')} className="text-mairide-primary hover:text-mairide-accent font-medium">Home</button>
+            <button onClick={handleHomeNavigation} className="text-mairide-primary hover:text-mairide-accent font-medium">Home</button>
             <button onClick={() => navigate('/support')} className="text-mairide-primary hover:text-mairide-accent font-medium">Support</button>
             {profile?.role === 'admin' && (
               <button onClick={() => navigate('/admin')} className="text-mairide-primary hover:text-mairide-accent font-medium">Admin Panel</button>
@@ -694,7 +993,7 @@ const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile 
             className="md:hidden bg-white border-t border-gray-100 overflow-hidden"
           >
             <div className="px-4 pt-2 pb-6 space-y-1">
-              <button onClick={() => { navigate('/'); setIsOpen(false); }} className="block w-full text-left px-3 py-2 text-gray-600 font-medium">Home</button>
+              <button onClick={handleHomeNavigation} className="block w-full text-left px-3 py-2 text-gray-600 font-medium">Home</button>
               <button onClick={() => { navigate('/support'); setIsOpen(false); }} className="block w-full text-left px-3 py-2 text-gray-600 font-medium">Support</button>
               {profile?.role === 'admin' && (
                 <button onClick={() => { navigate('/admin'); setIsOpen(false); }} className="block w-full text-left px-3 py-2 text-gray-600 font-medium">Admin Panel</button>
@@ -770,6 +1069,13 @@ const formatPhoneForDisplay = (value?: string) => {
   return `+91 ${digits}`;
 };
 
+const getDialablePhone = (value?: string) => {
+  const digits = sanitizeIndianPhoneDigits(value || '');
+  if (digits.length === 10) return `+91${digits}`;
+  const normalized = normalizePhoneForAuth(value || '');
+  return normalized ? `+${normalized}` : '';
+};
+
 const sanitizeAadhaarDigits = (value: string) => String(value || '').replace(/[^\d]/g, '').slice(0, 12);
 
 const splitAadhaarDigits = (value: string) => {
@@ -838,6 +1144,86 @@ const maskPhoneNumber = (value: string) => {
   if (!digits) return '';
   if (digits.length <= 4) return digits;
   return `${digits[0]}${'*'.repeat(Math.max(digits.length - 4, 0))}${digits.slice(-3)}`;
+};
+
+const ContactUnlockCard = ({
+  label,
+  phoneNumber,
+}: {
+  label: string;
+  phoneNumber?: string;
+}) => {
+  const dialable = getDialablePhone(phoneNumber);
+  const display = formatPhoneForDisplay(phoneNumber);
+
+  return (
+    <div className="mt-2 bg-green-50 p-3 rounded-xl flex items-center justify-between gap-3 text-green-700">
+      <div className="flex items-center space-x-2 min-w-0">
+        <Phone className="w-4 h-4 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-green-700/70">{label}</p>
+          {dialable ? (
+            <a href={`tel:${dialable}`} className="font-bold underline decoration-green-300 underline-offset-4 break-all hover:text-green-800 transition-colors">
+              {display}
+            </a>
+          ) : (
+            <span className="font-bold">{display}</span>
+          )}
+        </div>
+      </div>
+      {dialable ? (
+        <a
+          href={`tel:${dialable}`}
+          className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-green-700 border border-green-100 hover:bg-green-100 transition-colors"
+        >
+          Call Now
+        </a>
+      ) : null}
+    </div>
+  );
+};
+
+const formatRideDeparture = (ride: Partial<Ride>) => {
+  const dayLabel = ride.departureDayLabel?.trim();
+  const clock = ride.departureClock?.trim();
+
+  if (dayLabel && clock) {
+    return `${dayLabel} at ${clock}`;
+  }
+
+  if (dayLabel) {
+    return dayLabel;
+  }
+
+  if (ride.departureTime) {
+    const date = new Date(ride.departureTime);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleString();
+    }
+  }
+
+  return 'Departure time to be confirmed';
+};
+
+const isFutureRide = (ride: Partial<Ride>) => {
+  if (!ride.departureTime) return false;
+  const departure = new Date(ride.departureTime);
+  if (Number.isNaN(departure.getTime())) return false;
+  return departure.getTime() > Date.now();
+};
+
+const isRideWithinPlanningWindow = (ride: Partial<Ride>) => {
+  if (!ride.departureTime) return true;
+  const departure = new Date(ride.departureTime);
+  if (Number.isNaN(departure.getTime())) return true;
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endOfDayAfter = new Date(startOfToday);
+  endOfDayAfter.setDate(endOfDayAfter.getDate() + 2);
+  endOfDayAfter.setHours(23, 59, 59, 999);
+
+  return departure >= startOfToday && departure <= endOfDayAfter;
 };
 
 const findUserProfileByPhone = async (value: string) => {
@@ -950,6 +1336,34 @@ const AuthPage = ({
       setAuthMode('signup');
     }
   }, [user]);
+
+  useEffect(() => {
+    if (step !== 'otp' || typeof window === 'undefined' || !('OTPCredential' in window) || !('credentials' in navigator)) {
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    (async () => {
+      try {
+        const credential = await (navigator.credentials as any).get({
+          otp: { transport: ['sms'] },
+          signal: abortController.signal,
+        });
+
+        const code = credential?.code;
+        if (typeof code === 'string' && code.trim()) {
+          setOtp(code.trim().slice(0, 6));
+        }
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          console.debug('WebOTP autofill unavailable:', error);
+        }
+      }
+    })();
+
+    return () => abortController.abort();
+  }, [step, sessionId]);
 
   const handleSendEmailOtp = async () => {
     if (!normalizedSignupEmail || !isValidEmailValue(normalizedSignupEmail)) return;
@@ -1921,13 +2335,15 @@ const CameraCapture = ({ onCapture, onCancel, title }: { onCapture: (image: stri
 const WalletDashboard = ({ profile }: { profile: UserProfile }) => {
   const [stats, setStats] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [driverCompletedBookings, setDriverCompletedBookings] = useState<Booking[]>([]);
+  const [showEarningsDetail, setShowEarningsDetail] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchWalletData = async () => {
       setIsLoading(true);
       try {
-        const [s, txSnapshot] = await Promise.all([
+        const requests: Promise<any>[] = [
           walletService.getReferralStats(profile.uid),
           getDocs(query(
             collection(db, 'transactions'), 
@@ -1935,9 +2351,30 @@ const WalletDashboard = ({ profile }: { profile: UserProfile }) => {
             orderBy('createdAt', 'desc'),
             limit(10)
           ))
-        ]);
+        ];
+
+        if (profile.role === 'driver') {
+          requests.push(
+            getDocs(query(
+              collection(db, 'bookings'),
+              where('driverId', '==', profile.uid),
+              orderBy('createdAt', 'desc'),
+              limit(20)
+            ))
+          );
+        }
+
+        const [s, txSnapshot, driverBookingSnapshot] = await Promise.all(requests);
         setStats(s);
         setTransactions(txSnapshot.docs.map(doc => doc.data() as Transaction));
+        if (profile.role === 'driver' && driverBookingSnapshot) {
+          const bookings = driverBookingSnapshot.docs
+            .map((doc: any) => doc.data() as Booking)
+            .filter((booking: Booking) => Boolean(booking.rideEndedAt || booking.status === 'completed'));
+          setDriverCompletedBookings(bookings);
+        } else {
+          setDriverCompletedBookings([]);
+        }
       } catch (error) {
         console.error("Failed to fetch wallet data:", error);
       } finally {
@@ -1992,6 +2429,25 @@ const WalletDashboard = ({ profile }: { profile: UserProfile }) => {
         </div>
 
         <div className="grid grid-cols-2 gap-4 flex-1">
+          {profile.role === 'driver' && (
+            <button
+              type="button"
+              onClick={() => setShowEarningsDetail((prev) => !prev)}
+              className="col-span-2 bg-white p-4 rounded-3xl border border-mairide-secondary text-left hover:shadow-md transition-all"
+            >
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Total Earnings</p>
+                  <p className="text-2xl font-black text-mairide-primary">{formatCurrency(profile.driverDetails?.totalEarnings || 0)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Completed rides</p>
+                  <p className="text-xl font-black text-mairide-accent">{driverCompletedBookings.length}</p>
+                  <p className="mt-2 text-xs font-bold text-mairide-primary">{showEarningsDetail ? 'Hide details' : 'View details'}</p>
+                </div>
+              </div>
+            </button>
+          )}
           <div className="bg-white p-4 rounded-3xl border border-mairide-secondary text-center">
             <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Tier 1</p>
             <p className="text-xl font-black text-mairide-primary">{stats?.tier1 || 0}</p>
@@ -2017,6 +2473,46 @@ const WalletDashboard = ({ profile }: { profile: UserProfile }) => {
           </div>
         </div>
       </div>
+
+      {profile.role === 'driver' && showEarningsDetail && (
+        <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 mb-8 shadow-sm">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-mairide-primary">Earnings Detail</h3>
+              <p className="text-sm text-mairide-secondary">Only completed rides are counted here.</p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-bold text-mairide-secondary uppercase">Total earnings</p>
+              <p className="text-2xl font-black text-mairide-primary">{formatCurrency(profile.driverDetails?.totalEarnings || 0)}</p>
+            </div>
+          </div>
+          {driverCompletedBookings.length ? (
+            <div className="space-y-3">
+              {driverCompletedBookings.map((booking) => (
+                <div key={booking.id} className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/30">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-mairide-primary">{booking.origin} → {booking.destination}</p>
+                      <p className="text-sm text-mairide-secondary">Traveler: {booking.consumerName}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary mt-2">
+                        {booking.rideEndedAt ? new Date(booking.rideEndedAt).toLocaleString() : new Date(booking.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Ride earning</p>
+                      <p className="text-xl font-black text-mairide-accent">{formatCurrency(booking.fare)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-mairide-bg p-6 text-center text-mairide-secondary italic">
+              Completed rides will appear here once journeys are fully closed.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-4">
         <h3 className="text-lg font-bold text-mairide-primary flex items-center">
@@ -2774,18 +3270,29 @@ const RideReviewModal = ({
   booking: Booking;
   reviewerRole: 'consumer' | 'driver';
   onClose: () => void;
-  onSubmit: (payload: { rating: number; comment: string }) => Promise<void>;
+  onSubmit: (payload: { rating: number; comment: string; traits: string[] }) => Promise<void>;
   isSubmitting: boolean;
 }) => {
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
+  const [selectedTraits, setSelectedTraits] = useState<string[]>([]);
   const counterpartLabel = reviewerRole === 'consumer' ? booking.driverName : booking.consumerName;
   const title = reviewerRole === 'consumer' ? 'Rate Your Driver' : 'Rate Your Traveler';
+  const quickTraits =
+    reviewerRole === 'consumer'
+      ? ['On time', 'Professional', 'Clean car', 'Polite', 'Safe driving', 'Smooth communication']
+      : ['On time', 'Polite', 'Clear communication', 'Pickup ready', 'Respectful', 'Easy coordination'];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rating) return;
-    await onSubmit({ rating, comment: comment.trim() });
+    await onSubmit({ rating, comment: comment.trim(), traits: selectedTraits });
+  };
+
+  const toggleTrait = (trait: string) => {
+    setSelectedTraits((current) =>
+      current.includes(trait) ? current.filter((item) => item !== trait) : [...current, trait]
+    );
   };
 
   return (
@@ -2835,6 +3342,30 @@ const RideReviewModal = ({
           </div>
 
           <div>
+            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-mairide-secondary">Quick Highlights</p>
+            <div className="flex flex-wrap gap-3">
+              {quickTraits.map((trait) => {
+                const active = selectedTraits.includes(trait);
+                return (
+                  <button
+                    key={trait}
+                    type="button"
+                    onClick={() => toggleTrait(trait)}
+                    className={cn(
+                      'rounded-full border px-4 py-2 text-sm font-semibold transition-all',
+                      active
+                        ? 'border-mairide-accent bg-mairide-accent/10 text-mairide-accent'
+                        : 'border-mairide-secondary/40 bg-mairide-bg text-mairide-secondary hover:border-mairide-accent/40 hover:text-mairide-primary'
+                    )}
+                  >
+                    {trait}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
             <label className="mb-3 block text-xs font-bold uppercase tracking-widest text-mairide-secondary">
               Review Comment (Optional)
             </label>
@@ -2862,20 +3393,38 @@ const RideReviewModal = ({
 
 const TravelerDashboardSummary = ({
   bookings,
+  rideStatusById = {},
+  ridesResolved = false,
   onAcceptCounter,
   onRejectCounter,
+  counterFares,
+  setCounterFares,
+  onCounter,
   onPayWithCoins,
   onPayOnline,
+  onOpenBooking,
 }: {
   bookings: Booking[];
+  rideStatusById?: Record<string, Ride['status']>;
+  ridesResolved?: boolean;
   onAcceptCounter: (booking: Booking) => void;
   onRejectCounter: (booking: Booking) => void;
+  counterFares: { [key: string]: string };
+  setCounterFares: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
+  onCounter: (booking: Booking, fare: number) => void;
   onPayWithCoins: (booking: Booking) => void;
   onPayOnline: (booking: Booking) => void;
+  onOpenBooking: (booking: Booking) => void;
 }) => {
-  const activeBookings = bookings.filter((booking) =>
-    ['pending', 'confirmed', 'negotiating'].includes(booking.status)
-  );
+  const activeBookings = bookings.filter((booking) => {
+    if ((booking as any).rideRetired) return false;
+    if (booking.negotiationStatus === 'rejected') return false;
+    if (ridesResolved) {
+      const rideStatus = rideStatusById[booking.rideId];
+      if (!rideStatus || rideStatus === 'cancelled') return false;
+    }
+    return ['pending', 'confirmed', 'negotiating'].includes(booking.status);
+  });
 
   if (!activeBookings.length) return null;
 
@@ -2888,7 +3437,16 @@ const TravelerDashboardSummary = ({
         </span>
       </div>
       <div className="space-y-4">
-        {activeBookings.map((booking) => (
+        {activeBookings.map((booking) => {
+          const pendingActor = getPendingNegotiationActor(booking);
+          const hasDriverCounterOffer = pendingActor === 'driver';
+          const hasTravelerCounterOffer = pendingActor === 'consumer';
+          const displayFare = getNegotiationDisplayFare(booking);
+          const listedFare = getListedFare(booking);
+          const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
+          const statusLabel = getBookingStateLabel(booking);
+
+          return (
           <div key={booking.id} className="bg-white border border-mairide-secondary rounded-[28px] p-6 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -2904,24 +3462,93 @@ const TravelerDashboardSummary = ({
                 <p className="text-sm text-mairide-secondary">Driver: {booking.driverName}</p>
                 </div>
               </div>
-              <span className={cn(
-                "px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest",
-                booking.status === 'negotiating' ? "bg-orange-100 text-orange-700" :
-                booking.status === 'confirmed' ? "bg-green-100 text-green-700" :
-                "bg-mairide-bg text-mairide-primary"
-              )}>
-                {booking.status}
-              </span>
+              <div className="text-right">
+                <p className="text-xl font-black text-mairide-accent">{formatCurrency(displayFare)}</p>
+                <p className={cn(
+                  "text-[10px] font-bold uppercase tracking-widest",
+                  hasDriverCounterOffer || hasTravelerCounterOffer || booking.status === 'negotiating' ? "text-orange-700" :
+                  booking.status === 'confirmed' ? "text-green-700" :
+                  "text-mairide-secondary"
+                )}>
+                  {statusLabel}
+                </p>
+              </div>
             </div>
-            {booking.status === 'negotiating' && (
+            <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-mairide-secondary">Listed fare</span>
+                <span className="text-base font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-sm text-mairide-secondary">
+                  {hasDriverCounterOffer ? 'Driver counter fare' : hasTravelerCounterOffer ? 'Your offered fare' : 'Current request fare'}
+                </span>
+                <span className={cn(
+                  "text-lg font-black",
+                  showNegotiatedFareLine ? "text-mairide-accent" : "text-mairide-primary"
+                )}>
+                  {formatCurrency(displayFare)}
+                </span>
+              </div>
+            </div>
+            {hasDriverCounterOffer && (
               <div className="mt-4 rounded-2xl border border-mairide-accent/20 bg-mairide-accent/10 p-4">
-                <p className="font-bold text-mairide-primary">Counter offer received: {formatCurrency(booking.negotiatedFare || booking.fare)}</p>
-                <div className="flex gap-3 mt-4">
-                  <button onClick={() => onAcceptCounter(booking)} className="flex-1 bg-mairide-primary text-white py-3 rounded-xl font-bold">
+                <p className="font-bold text-mairide-primary">Counter offer received: {formatCurrency(displayFare)}</p>
+                <div className="mt-4 flex flex-col md:flex-row gap-3">
+                  <button onClick={() => onAcceptCounter(booking)} className={cn("flex-1 bg-mairide-primary text-white py-3", primaryActionButtonClass)}>
                     Accept Counter Offer
                   </button>
-                  <button onClick={() => onRejectCounter(booking)} className="flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3 rounded-xl font-bold">
+                  <button onClick={() => onRejectCounter(booking)} className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3", secondaryActionButtonClass)}>
                     Reject
+                  </button>
+                </div>
+                <div className="mt-4 flex flex-col md:flex-row gap-3">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Counter fare"
+                    className="flex-1 rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                    value={counterFares[booking.id] || ''}
+                    onChange={(e) => setCounterFares((prev) => ({ ...prev, [booking.id]: e.target.value }))}
+                  />
+                  <button
+                    onClick={() => onCounter(booking, Number(counterFares[booking.id]))}
+                    className={cn("bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
+                  >
+                    Send Counter
+                  </button>
+                </div>
+              </div>
+            )}
+            {!hasDriverCounterOffer && booking.status !== 'confirmed' && (
+              <div className={cn(
+                "mt-4 rounded-2xl p-4",
+                hasTravelerCounterOffer ? "border border-orange-200 bg-orange-50" : "border border-mairide-secondary/20 bg-mairide-bg"
+              )}>
+                {hasTravelerCounterOffer ? (
+                  <>
+                    <p className="font-bold text-mairide-primary">Your offer is awaiting the driver&apos;s response.</p>
+                    <p className="mt-2 text-sm text-mairide-secondary">
+                      Offered fare: <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>
+                    </p>
+                  </>
+                ) : (
+                  <p className="font-bold text-mairide-primary">You can update your offer while the booking is still pending.</p>
+                )}
+                <div className="mt-4 flex flex-col md:flex-row gap-3">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Counter fare"
+                    className="flex-1 rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                    value={counterFares[booking.id] || ''}
+                    onChange={(e) => setCounterFares((prev) => ({ ...prev, [booking.id]: e.target.value }))}
+                  />
+                  <button
+                    onClick={() => onCounter(booking, Number(counterFares[booking.id]))}
+                    className={cn("bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
+                  >
+                    Send Counter Offer
                   </button>
                 </div>
               </div>
@@ -2932,12 +3559,15 @@ const TravelerDashboardSummary = ({
                   <span className="text-sm text-mairide-secondary">Platform Fee + GST</span>
                   <span className="font-bold text-mairide-primary">{formatCurrency(booking.serviceFee + booking.gstAmount)}</span>
                 </div>
+                <p className="text-xs text-mairide-secondary">
+                  MaiCoins can only offset the platform fee. They cannot be used to pay the driver&apos;s ride fare.
+                </p>
                 {!booking.feePaid ? (
                   <div className="flex gap-3 mt-4">
-                    <button onClick={() => onPayWithCoins(booking)} className="flex-1 bg-mairide-primary text-white py-3 rounded-xl font-bold">
+                    <button onClick={() => onPayWithCoins(booking)} className={cn("flex-1 bg-mairide-primary text-white py-3", primaryActionButtonClass)}>
                       Pay with Maicoins
                     </button>
-                    <button onClick={() => onPayOnline(booking)} className="flex-1 bg-white border border-mairide-primary text-mairide-primary py-3 rounded-xl font-bold">
+                    <button onClick={() => onPayOnline(booking)} className={cn("flex-1 bg-white border border-mairide-primary text-mairide-primary py-3", secondaryActionButtonClass)}>
                       Pay Online
                     </button>
                   </div>
@@ -2946,6 +3576,9 @@ const TravelerDashboardSummary = ({
                     Traveler payment submitted
                   </div>
                 )}
+                {booking.feePaid && booking.driverFeePaid ? (
+                  <ContactUnlockCard label="Driver contact" phoneNumber={booking.driverPhone} />
+                ) : null}
               </div>
             )}
             {booking.status === 'confirmed' && booking.feePaid && booking.driverFeePaid && !booking.rideStartedAt && booking.rideStartOtp && (
@@ -2966,6 +3599,114 @@ const TravelerDashboardSummary = ({
                 </p>
               </div>
             )}
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => onOpenBooking(booking)}
+                className="text-sm font-bold text-mairide-accent hover:text-mairide-primary transition-colors"
+              >
+                View Full Booking Details
+              </button>
+            </div>
+          </div>
+        )})}
+      </div>
+    </div>
+  );
+};
+
+const TravelerCounterOffersSummary = ({
+  bookings,
+  rideStatusById = {},
+  ridesResolved = false,
+  onAcceptCounter,
+  onRejectCounter,
+}: {
+  bookings: Booking[];
+  rideStatusById?: Record<string, Ride['status']>;
+  ridesResolved?: boolean;
+  onAcceptCounter: (booking: Booking) => void;
+  onRejectCounter: (booking: Booking) => void;
+}) => {
+  const counterOffers = bookings.filter((booking) => {
+    if ((booking as any).rideRetired) return false;
+    if (ridesResolved) {
+      const rideStatus = rideStatusById[booking.rideId];
+      if (!rideStatus || rideStatus === 'cancelled') return false;
+    }
+    if (['completed', 'cancelled', 'rejected'].includes(booking.status)) return false;
+    if (booking.negotiationStatus === 'rejected') return false;
+    return hasPendingDriverCounterOffer(booking);
+  });
+
+  if (!counterOffers.length) return null;
+
+  return (
+    <div className="mb-12 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-mairide-primary">Live Driver Counter Offers</h2>
+        <span className="text-xs font-bold uppercase tracking-widest text-mairide-accent">
+          {counterOffers.length} Live
+        </span>
+      </div>
+      <div className="space-y-4">
+        {counterOffers.map((booking) => (
+          <div key={booking.id} className="bg-white border border-mairide-secondary rounded-[28px] p-6 shadow-sm">
+            {(() => {
+              const listedFare = getListedFare(booking);
+              const counterFare = getNegotiationDisplayFare(booking);
+              const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
+              return (
+                <>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center shrink-0">
+                  {booking.driverPhotoUrl ? (
+                    <img src={booking.driverPhotoUrl} alt={booking.driverName} className="w-full h-full object-cover" />
+                  ) : (
+                    <Car className="w-6 h-6 text-mairide-accent" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-mairide-primary">{booking.origin} → {booking.destination}</p>
+                  <p className="text-sm text-mairide-secondary">Driver: {booking.driverName}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-black text-mairide-accent">{formatCurrency(counterFare)}</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-700">Counter Offer</p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-mairide-secondary">
+                  {showNegotiatedFareLine ? 'Listed fare' : 'Ride fare'}
+                </span>
+                <span className="text-base font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
+              </div>
+              {showNegotiatedFareLine && (
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-sm text-mairide-secondary">Driver counter fare</span>
+                  <span className="text-lg font-black text-mairide-accent">{formatCurrency(counterFare)}</span>
+                </div>
+              )}
+            </div>
+            <div className="mt-4 flex flex-col md:flex-row gap-3">
+              <button
+                onClick={() => onAcceptCounter(booking)}
+                className={cn("flex-1 bg-mairide-primary text-white py-3", primaryActionButtonClass)}
+              >
+                Accept Offer
+              </button>
+              <button
+                onClick={() => onRejectCounter(booking)}
+                className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3", secondaryActionButtonClass)}
+              >
+                Reject
+              </button>
+            </div>
+                </>
+              );
+            })()}
           </div>
         ))}
       </div>
@@ -2996,7 +3737,11 @@ const DriverDashboardSummary = ({
   onStartRide: (request: Booking, otp: string) => void;
   onEndRide: (request: Booking, otp: string) => void;
 }) => {
-  const liveRequests = requests.filter((request) => ['pending', 'negotiating', 'confirmed'].includes(request.status));
+  const liveRequests = requests.filter((request) => {
+    if ((request as any).rideRetired) return false;
+    if (request.negotiationStatus === 'rejected') return false;
+    return ['pending', 'negotiating', 'confirmed'].includes(request.status);
+  });
   const [startOtpInputs, setStartOtpInputs] = useState<{ [key: string]: string }>({});
   const [endOtpInputs, setEndOtpInputs] = useState<{ [key: string]: string }>({});
   if (!liveRequests.length) return null;
@@ -3010,7 +3755,20 @@ const DriverDashboardSummary = ({
         </span>
       </div>
       <div className="space-y-4">
-        {liveRequests.map((request) => (
+        {liveRequests.map((request) => {
+          const pendingActor = getPendingNegotiationActor(request);
+          const travelerCounterPending = pendingActor === 'consumer';
+          const driverCounterPending = pendingActor === 'driver';
+          const displayFare = getNegotiationDisplayFare(request);
+          const listedFare = getListedFare(request);
+          const requestedOrigin = request.requestedOrigin || request.origin;
+          const requestedDestination = request.requestedDestination || request.destination;
+          const showsDetour =
+            Boolean(request.requiresDetour) &&
+            (normalizeSearchText(requestedOrigin) !== normalizeSearchText(request.origin) ||
+              normalizeSearchText(requestedDestination) !== normalizeSearchText(request.destination));
+
+          return (
           <div key={request.id} className="bg-white border border-mairide-secondary rounded-[28px] p-6 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
@@ -3018,15 +3776,60 @@ const DriverDashboardSummary = ({
                 <p className="text-sm text-mairide-secondary">Traveler: {request.consumerName}</p>
               </div>
               <div className="text-right">
-                <p className="text-xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{request.status}</p>
+                <p className="text-xl font-black text-mairide-accent">{formatCurrency(displayFare)}</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+                  {driverCounterPending ? 'awaiting traveler' : travelerCounterPending ? 'traveler counter' : request.status}
+                </p>
               </div>
             </div>
-            {request.status === 'pending' && (
+            <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-mairide-secondary">Listed fare</span>
+                <span className="text-base font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-sm text-mairide-secondary">
+                  {travelerCounterPending ? 'Traveler offered fare' : driverCounterPending ? 'Your counter fare' : 'Current request fare'}
+                </span>
+                <span className="text-lg font-black text-mairide-accent">{formatCurrency(displayFare)}</span>
+              </div>
+            </div>
+            {showsDetour && (
+              <div className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-mairide-accent" /><p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Traveler Detour Request</p></div>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Your listed route</p>
+                    <p className="mt-1 text-sm font-semibold text-mairide-primary">{request.origin} → {request.destination}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler requested route</p>
+                    <p className="mt-1 text-sm font-semibold text-mairide-primary">{requestedOrigin} → {requestedDestination}</p>
+                  </div>
+                </div>
+                <div className="mt-3 rounded-xl bg-white/80 p-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Decision Impact</p>
+                  <p className="mt-1 text-sm font-semibold text-mairide-primary">This booking changes your listed route. Please review the detour carefully before you accept, reject, or counter.</p>
+                </div>
+              </div>
+            )}
+            {driverCounterPending && (
+              <div className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                <p className="font-bold text-mairide-primary">Your counter offer has been sent.</p>
+                <p className="mt-2 text-sm text-mairide-secondary">
+                  Waiting for the traveler to accept or reject <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>.
+                </p>
+              </div>
+            )}
+            {(request.status === 'pending' || travelerCounterPending) && !driverCounterPending && (
               <div className="mt-4 space-y-4">
                 <div className="flex gap-3">
-                  <button onClick={() => onAccept(request)} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold">Accept Request</button>
-                  <button onClick={() => onReject(request)} className="flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3 rounded-xl font-bold">Reject</button>
+                  <button onClick={() => onAccept(request)} className={cn("flex-1 bg-green-600 text-white py-3", primaryActionButtonClass)}>
+                    {travelerCounterPending ? 'Accept Offer' : 'Accept Request'}
+                  </button>
+                  <button onClick={() => onReject(request)} className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3", secondaryActionButtonClass)}>
+                    Reject
+                  </button>
                 </div>
                 <div className="flex gap-3">
                   <input
@@ -3036,7 +3839,7 @@ const DriverDashboardSummary = ({
                     onChange={(e) => setCounterFares((prev) => ({ ...prev, [request.id]: e.target.value }))}
                     className="flex-1 p-3 bg-mairide-bg border border-mairide-secondary rounded-xl outline-none"
                   />
-                  <button onClick={() => onCounter(request, Number(counterFares[request.id]))} className="bg-mairide-primary text-white px-6 py-3 rounded-xl font-bold">
+                  <button onClick={() => onCounter(request, Number(counterFares[request.id]))} className={cn("bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}>
                     Send Counter
                   </button>
                 </div>
@@ -3048,12 +3851,15 @@ const DriverDashboardSummary = ({
                   <span className="text-sm text-mairide-secondary">Platform Fee + GST</span>
                   <span className="font-bold text-mairide-primary">{formatCurrency(request.serviceFee + request.gstAmount)}</span>
                 </div>
+                <p className="text-xs text-mairide-secondary">
+                  MaiCoins can only offset the platform fee. They cannot be used to pay the driver&apos;s ride fare.
+                </p>
                 {!request.driverFeePaid ? (
                   <div className="flex gap-3 mt-4">
-                    <button onClick={() => onPayWithCoins(request)} className="flex-1 bg-mairide-primary text-white py-3 rounded-xl font-bold">
+                    <button onClick={() => onPayWithCoins(request)} className={cn("flex-1 bg-mairide-primary text-white py-3", primaryActionButtonClass)}>
                       Pay with Maicoins
                     </button>
-                    <button onClick={() => onPayOnline(request)} className="flex-1 bg-white border border-mairide-primary text-mairide-primary py-3 rounded-xl font-bold">
+                    <button onClick={() => onPayOnline(request)} className={cn("flex-1 bg-white border border-mairide-primary text-mairide-primary py-3", secondaryActionButtonClass)}>
                       Pay Online
                     </button>
                   </div>
@@ -3062,6 +3868,9 @@ const DriverDashboardSummary = ({
                     Driver payment submitted
                   </div>
                 )}
+                {request.feePaid && request.driverFeePaid ? (
+                  <ContactUnlockCard label="Traveler contact" phoneNumber={request.consumerPhone} />
+                ) : null}
               </div>
             )}
             {request.status === 'confirmed' && request.feePaid && request.driverFeePaid && !request.rideStartedAt && (
@@ -3079,7 +3888,7 @@ const DriverDashboardSummary = ({
                   />
                   <button
                     onClick={() => onStartRide(request, startOtpInputs[request.id] || '')}
-                    className="bg-mairide-primary text-white px-6 py-3 rounded-xl font-bold"
+                    className={cn("bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
                   >
                     Start Ride
                   </button>
@@ -3101,7 +3910,7 @@ const DriverDashboardSummary = ({
                   />
                   <button
                     onClick={() => onEndRide(request, endOtpInputs[request.id] || '')}
-                    className="bg-green-700 text-white px-6 py-3 rounded-xl font-bold"
+                    className={cn("bg-green-700 text-white px-6 py-3", primaryActionButtonClass)}
                   >
                     End Ride
                   </button>
@@ -3109,7 +3918,7 @@ const DriverDashboardSummary = ({
               </div>
             )}
           </div>
-        ))}
+        )})}
       </div>
     </div>
   );
@@ -3366,7 +4175,10 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setBookings(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      setBookings(
+        dedupeBookingsByThread(list)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
       setLoading(false);
     });
     return () => unsubscribe();
@@ -3435,31 +4247,61 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
 
   const handleNegotiation = async (bookingId: string, action: 'accepted' | 'rejected', negotiatedFare?: number) => {
     try {
+      const bookingRef = doc(db, 'bookings', bookingId);
+      const bookingSnap = await getDoc(bookingRef);
+      const bookingData = bookingSnap.exists() ? (bookingSnap.data() as Booking) : null;
+      if (!bookingData) {
+        throw new Error('Booking not found.');
+      }
+
+      const threadSnapshot = await getDocs(
+        query(
+          collection(db, 'bookings'),
+          where('rideId', '==', bookingData.rideId),
+          where('consumerId', '==', bookingData.consumerId)
+        )
+      );
+      const threadBookings = threadSnapshot.docs
+        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        .filter((booking) => getBookingThreadKey(booking) === getBookingThreadKey(bookingData));
+      const updatedAt = new Date().toISOString();
+
       if (action === 'accepted' && negotiatedFare) {
-        const bookingRef = doc(db, 'bookings', bookingId);
-        const bookingSnap = await getDoc(bookingRef);
-        const bookingData = bookingSnap.exists() ? (bookingSnap.data() as Booking) : null;
         const { baseFee, gstAmount, totalFee } = calculateServiceFee(negotiatedFare, config || undefined);
         const totalPrice = negotiatedFare + totalFee;
-        await updateDoc(bookingRef, {
-          fare: negotiatedFare,
-          serviceFee: baseFee,
-          gstAmount,
-          totalPrice,
-          status: 'confirmed',
-          negotiationStatus: 'accepted'
-        });
-        if (bookingData?.rideId) {
+        await Promise.all(
+          (threadBookings.length ? threadBookings : [{ id: bookingId, ...bookingData } as Booking]).map((booking) =>
+            updateDoc(doc(db, 'bookings', booking.id), {
+              fare: negotiatedFare,
+              serviceFee: baseFee,
+              gstAmount,
+              totalPrice,
+              status: 'confirmed',
+              negotiationStatus: 'accepted',
+              negotiationActor: 'driver',
+              driverCounterPending: false,
+              updatedAt,
+            })
+          )
+        );
+        if (bookingData.rideId) {
           await updateDoc(doc(db, 'rides', bookingData.rideId), {
             status: 'full',
           });
         }
         alert("Counter offer accepted! Booking confirmed.");
       } else {
-        await updateDoc(doc(db, 'bookings', bookingId), {
-          status: 'rejected',
-          negotiationStatus: 'rejected'
-        });
+        await Promise.all(
+          (threadBookings.length ? threadBookings : [{ id: bookingId, ...bookingData } as Booking]).map((booking) =>
+            updateDoc(doc(db, 'bookings', booking.id), {
+              status: 'rejected',
+              negotiationStatus: 'rejected',
+              negotiationActor: 'driver',
+              driverCounterPending: false,
+              updatedAt,
+            })
+          )
+        );
         alert("Counter offer rejected.");
       }
     } catch (error) {
@@ -3467,12 +4309,20 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     }
   };
 
-  const handleSubmitReview = async ({ rating, comment }: { rating: number; comment: string }) => {
+  const handleSubmitReview = async ({
+    rating,
+    comment,
+    traits,
+  }: {
+    rating: number;
+    comment: string;
+    traits: string[];
+  }) => {
     if (!reviewBooking) return;
 
     setIsSubmittingReview(true);
     try {
-      await submitBookingReview(reviewBooking.id, rating, comment);
+      await submitBookingReview(reviewBooking.id, rating, comment, traits);
       alert('Your ride review has been submitted successfully.');
       setReviewBooking(null);
     } catch (error: any) {
@@ -3563,7 +4413,16 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
       </div>
       <div className="space-y-6">
         {bookings.length > 0 ? (
-          bookings.map((booking) => (
+          bookings.map((booking) => {
+            const pendingActor = getPendingNegotiationActor(booking);
+            const hasDriverCounterOffer = pendingActor === 'driver';
+            const hasTravelerCounterOffer = pendingActor === 'consumer';
+            const displayFare = getNegotiationDisplayFare(booking);
+            const listedFare = getListedFare(booking);
+            const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
+            const statusLabel = getBookingStateLabel(booking);
+
+            return (
             <div key={booking.id} className="bg-white p-8 rounded-[32px] border border-mairide-secondary shadow-sm hover:shadow-md transition-all">
               <div className="flex justify-between items-start mb-6">
                 <div className="flex items-start gap-4">
@@ -3578,10 +4437,7 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                   <h3 className="font-bold text-xl text-mairide-primary mb-1">{booking.origin} → {booking.destination}</h3>
                   <p className="text-sm text-mairide-secondary">Driver: {booking.driverName}</p>
                   {booking.feePaid && booking.driverFeePaid ? (
-                    <div className="mt-2 bg-green-50 p-3 rounded-xl flex items-center space-x-2 text-green-700">
-                      <Phone className="w-4 h-4" />
-                      <span className="font-bold">{booking.driverPhone || 'Not provided'}</span>
-                    </div>
+                    <ContactUnlockCard label="Driver contact" phoneNumber={booking.driverPhone} />
                   ) : booking.status === 'confirmed' ? (
                     <div className="mt-2 bg-orange-50 p-3 rounded-xl flex items-center space-x-2 text-orange-700 text-xs">
                       <Lock className="w-4 h-4" />
@@ -3594,36 +4450,63 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                 <div className={cn(
                   "px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest",
                   booking.status === 'confirmed' ? "bg-green-100 text-green-700" :
-                  booking.status === 'pending' ? "bg-orange-100 text-orange-700" :
+                  (hasDriverCounterOffer || hasTravelerCounterOffer || booking.status === 'pending') ? "bg-orange-100 text-orange-700" :
                   "bg-red-100 text-red-700"
                 )}>
-                  {booking.status}
+                  {statusLabel}
                 </div>
               </div>
 
-              {booking.status === 'negotiating' && (
+              <div className="bg-mairide-bg p-6 rounded-2xl mb-6">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-mairide-secondary">Listed fare</span>
+                  <span className="font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
+                </div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-mairide-secondary">
+                    {hasDriverCounterOffer ? 'Driver counter fare' : hasTravelerCounterOffer ? 'Your offered fare' : 'Current request fare'}
+                  </span>
+                  <span className={cn("font-bold", showNegotiatedFareLine ? "text-mairide-accent text-xl" : "text-mairide-primary text-lg")}>
+                    {formatCurrency(displayFare)}
+                  </span>
+                </div>
+              </div>
+
+              {hasDriverCounterOffer && (
                 <div className="mb-6 p-6 bg-mairide-accent/10 border border-mairide-accent rounded-2xl">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <Bot className="w-6 h-6 text-mairide-accent" />
-                    <div>
-                      <h4 className="font-bold text-mairide-primary">Counter Offer from Driver</h4>
-                      <p className="text-sm text-mairide-secondary">The driver has proposed a new fare of <span className="font-bold text-mairide-accent">{formatCurrency(booking.negotiatedFare)}</span></p>
-                    </div>
-                  </div>
+                  <p className="font-bold text-mairide-primary mb-2">Counter offer received: {formatCurrency(displayFare)}</p>
                   <div className="flex space-x-3">
                     <button 
                       onClick={() => handleNegotiation(booking.id, 'accepted', booking.negotiatedFare)}
-                      className="flex-1 bg-mairide-primary text-white py-3 rounded-xl font-bold text-sm hover:bg-mairide-accent transition-colors"
+                      className={cn("flex-1 bg-mairide-primary text-white py-3 text-sm", primaryActionButtonClass)}
                     >
-                      Accept Offer
+                      Accept Counter Offer
                     </button>
                     <button 
                       onClick={() => handleNegotiation(booking.id, 'rejected')}
-                      className="flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3 rounded-xl font-bold text-sm hover:bg-mairide-bg transition-colors"
+                      className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3 text-sm", secondaryActionButtonClass)}
                     >
                       Reject
                     </button>
                   </div>
+                </div>
+              )}
+
+              {!hasDriverCounterOffer && booking.status !== 'confirmed' && (
+                <div className={cn(
+                  "mb-6 p-6 rounded-2xl",
+                  hasTravelerCounterOffer ? "bg-mairide-accent/10 border border-mairide-accent" : "bg-mairide-bg border border-mairide-secondary/20"
+                )}>
+                  {hasTravelerCounterOffer ? (
+                    <>
+                      <p className="font-bold text-mairide-primary">Your counter offer has been sent.</p>
+                      <p className="mt-2 text-sm text-mairide-secondary">
+                        Waiting for the driver to accept or reject <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="font-bold text-mairide-primary">You can update your offer while the booking is still pending.</p>
+                  )}
                 </div>
               )}
 
@@ -3704,6 +4587,18 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                           {booking.consumerReview.comment && (
                             <p className="mt-1 text-sm italic text-mairide-secondary">"{booking.consumerReview.comment}"</p>
                           )}
+                          {!!booking.consumerReview.traits?.length && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {booking.consumerReview.traits.map((trait) => (
+                                <span
+                                  key={trait}
+                                  className="rounded-full bg-mairide-accent/10 px-3 py-1 text-xs font-bold text-mairide-accent"
+                                >
+                                  {trait}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </>
                       ) : (
                         <p className="mt-2 text-sm text-mairide-secondary">
@@ -3723,7 +4618,7 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                 </div>
               )}
             </div>
-          ))
+          )})
         ) : (
           <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-mairide-secondary">
             <Car className="w-12 h-12 text-mairide-secondary mx-auto mb-4" />
@@ -3753,10 +4648,19 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
   );
 };
 
-const MyRides = ({ profile }: { profile: UserProfile }) => {
+const MyRides = ({
+  profile,
+  hiddenRideIds = [],
+  onRideRetired,
+}: {
+  profile: UserProfile;
+  hiddenRideIds?: string[];
+  onRideRetired?: (rideId: string) => void;
+}) => {
   const [rides, setRides] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancellingRideId, setCancellingRideId] = useState<string | null>(null);
+  const [pendingCancelRide, setPendingCancelRide] = useState<any | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -3766,45 +4670,92 @@ const MyRides = ({ profile }: { profile: UserProfile }) => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setRides(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      setRides(
+        list
+          .filter((ride) => ride.status !== 'cancelled' && !hiddenRideIds.includes(ride.id))
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [profile.uid]);
+  }, [profile.uid, hiddenRideIds]);
 
-  const handleCancelRideOffer = async (ride: any) => {
+  const confirmCancelRideOffer = async (ride: any) => {
     if (ride.status !== 'available') {
-      alert('Only active unbooked ride offers can be cancelled.');
-      return;
-    }
-
-    if (!window.confirm('Cancel this ride offer? Travelers will no longer be able to book it.')) {
+      showAppDialog('Only active unbooked ride offers can be cancelled.', 'warning');
       return;
     }
 
     setCancellingRideId(ride.id);
     try {
-      const bookingSnapshot = await getDocs(
-        query(collection(db, 'bookings'), where('rideId', '==', ride.id))
-      );
-      const bookings = bookingSnapshot.docs.map((snapshotDoc) => snapshotDoc.data() as Booking);
-      const hasActiveBooking = bookings.some((booking) =>
-        ['pending', 'confirmed', 'negotiating', 'completed'].includes(booking.status)
-      );
+      const bookingSnapshot = await getDocs(query(collection(db, 'bookings'), where('rideId', '==', ride.id)));
+      const hasLockedTrip = bookingSnapshot.docs.some((bookingDoc) => {
+        const booking = bookingDoc.data() as Booking;
+        return (
+          booking.status === 'confirmed' ||
+          booking.feePaid ||
+          booking.driverFeePaid ||
+          !!booking.rideStartedAt ||
+          !!booking.rideEndedAt
+        );
+      });
 
-      if (hasActiveBooking) {
-        alert('This ride already has booking activity and cannot be cancelled now.');
+      if (hasLockedTrip) {
+        showAppDialog(
+          'This trip is already confirmed and locked for travel. Drivers cannot cancel it now. Please contact MaiRide customer support for an override if cancellation is unavoidable.',
+          'warning'
+        );
         return;
       }
 
-      await updateDoc(doc(db, 'rides', ride.id), {
-        status: 'cancelled',
-      });
-      alert('Ride offer cancelled successfully.');
+      if (window.location.hostname === 'localhost') {
+        await axios.post('/api/user/cancel-ride', {
+          rideId: ride.id,
+          driverId: profile.uid,
+          driverPhone: profile.phoneNumber || '',
+        });
+        setRides((prev) => prev.filter((existingRide) => existingRide.id !== ride.id));
+        onRideRetired?.(ride.id);
+        showAppDialog('Ride offer cancelled. All live requests for this ride have been cleared.', 'success');
+        setPendingCancelRide(null);
+        return;
+      }
+      const updatedAt = new Date().toISOString();
+
+      await Promise.all(
+        bookingSnapshot.docs.map(async (bookingDoc) => {
+          const booking = { id: bookingDoc.id, ...(bookingDoc.data() as Booking) };
+          if (!['pending', 'confirmed', 'negotiating'].includes(booking.status)) return;
+          await updateDoc(doc(db, 'bookings', booking.id), {
+            status: 'cancelled',
+            negotiationStatus: 'rejected',
+            negotiationActor: booking.negotiationActor || 'driver',
+            rideRetired: true,
+            retiredAt: updatedAt,
+            driverPhone: profile.phoneNumber || '',
+            updatedAt,
+          });
+        })
+      );
+
+      await Promise.all(
+        [ride.id].map((currentRideId) =>
+          updateDoc(doc(db, 'rides', currentRideId), {
+            status: 'cancelled',
+            updatedAt,
+          })
+        )
+      );
+
+      setRides((prev) => prev.filter((currentRide) => currentRide.id !== ride.id));
+      onRideRetired?.(ride.id);
+      showAppDialog('Ride offer cancelled. All live requests linked to it were cleared.', 'success');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `rides/${ride.id}`);
+      const message = getApiErrorMessage(error, 'Failed to cancel ride offer');
+      showAppDialog(message, 'error');
     } finally {
       setCancellingRideId(null);
+      setPendingCancelRide(null);
     }
   };
 
@@ -3835,7 +4786,7 @@ const MyRides = ({ profile }: { profile: UserProfile }) => {
                   <span className="font-bold text-mairide-primary">{ride.seatsAvailable} seats left</span>
                   {ride.status === 'available' && (
                     <button
-                      onClick={() => handleCancelRideOffer(ride)}
+                      onClick={() => setPendingCancelRide(ride)}
                       disabled={cancellingRideId === ride.id}
                       className="px-4 py-2 rounded-xl border border-red-200 text-red-700 text-xs font-bold hover:bg-red-50 disabled:opacity-50"
                     >
@@ -3853,6 +4804,41 @@ const MyRides = ({ profile }: { profile: UserProfile }) => {
           </div>
         )}
       </div>
+      {pendingCancelRide && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-mairide-primary/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-700">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <button
+                onClick={() => setPendingCancelRide(null)}
+                className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="mt-4 text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Cancel Ride Offer</p>
+            <p className="mt-3 text-base leading-7 text-mairide-primary">
+              This will withdraw the ride offer and clear any live traveler requests attached to it. You can post a fresh offer later whenever you are ready.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setPendingCancelRide(null)}
+                className="flex-1 rounded-2xl border border-mairide-secondary py-3 text-sm font-bold text-mairide-primary"
+              >
+                Keep Offer
+              </button>
+              <button
+                onClick={() => confirmCancelRideOffer(pendingCancelRide)}
+                className="flex-1 rounded-2xl bg-red-600 py-3 text-sm font-bold text-white hover:bg-red-700"
+              >
+                Cancel Ride
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -3878,7 +4864,10 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
     const unsubscribeBookings = onSnapshot(bookingsQuery, (snapshot) => {
       const list: Booking[] = [];
       snapshot.forEach((docSnapshot) => list.push({ id: docSnapshot.id, ...(docSnapshot.data() as Booking) }));
-      setBookings(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      setBookings(
+        dedupeBookingsByThread(list)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
       setLoadingBookings(false);
     });
 
@@ -3917,12 +4906,20 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
     };
   });
 
-  const handleSubmitReview = async ({ rating, comment }: { rating: number; comment: string }) => {
+  const handleSubmitReview = async ({
+    rating,
+    comment,
+    traits,
+  }: {
+    rating: number;
+    comment: string;
+    traits: string[];
+  }) => {
     if (!reviewBooking) return;
 
     setIsSubmittingReview(true);
     try {
-      await submitBookingReview(reviewBooking.id, rating, comment);
+      await submitBookingReview(reviewBooking.id, rating, comment, traits);
       alert('Your traveler review has been submitted successfully.');
       setReviewBooking(null);
     } catch (error: any) {
@@ -4018,6 +5015,18 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
               {booking.driverReview?.comment && (
                 <p className="mt-3 text-sm italic text-mairide-secondary">"{booking.driverReview.comment}"</p>
               )}
+              {!!booking.driverReview?.traits?.length && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {booking.driverReview.traits.map((trait) => (
+                    <span
+                      key={trait}
+                      className="rounded-full bg-mairide-accent/10 px-3 py-1 text-xs font-bold text-mairide-accent"
+                    >
+                      {trait}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))
         ) : (
@@ -4081,17 +5090,44 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
   const [counterFares, setCounterFares] = useState<{[key: string]: string}>({});
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
 
+  const loadRequestThread = async (seedBooking: Booking) => {
+    const threadSnapshot = await getDocs(
+      query(
+        collection(db, 'bookings'),
+        where('rideId', '==', seedBooking.rideId),
+        where('consumerId', '==', seedBooking.consumerId)
+      )
+    );
+
+    return threadSnapshot.docs
+      .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+      .filter((booking) => getBookingThreadKey(booking) === getBookingThreadKey(seedBooking));
+  };
+
   const handleCounterOffer = async (requestId: string, fare: number) => {
     if (!fare || fare <= 0) {
       alert("Please enter a valid fare.");
       return;
     }
     try {
-      await updateDoc(doc(db, 'bookings', requestId), {
-        negotiatedFare: fare,
-        negotiationStatus: 'pending',
-        status: 'negotiating'
-      });
+      const request = requests.find((booking) => booking.id === requestId);
+      if (!request) {
+        throw new Error('Booking request not found.');
+      }
+      const updatedAt = new Date().toISOString();
+      const threadBookings = await loadRequestThread(request);
+      await Promise.all(
+        (threadBookings.length ? threadBookings : [request]).map((booking) =>
+          updateDoc(doc(db, 'bookings', booking.id), {
+            negotiatedFare: fare,
+            negotiationStatus: 'pending',
+            negotiationActor: 'driver',
+            driverCounterPending: true,
+            status: 'negotiating',
+            updatedAt,
+          })
+        )
+      );
       alert("Counter offer sent to traveler!");
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${requestId}`);
@@ -4107,7 +5143,16 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setRequests(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      setRequests(
+        dedupeBookingsByThread(list)
+          .filter(
+            (booking) =>
+              !(booking as any).rideRetired &&
+              booking.negotiationStatus !== 'rejected' &&
+              ['pending', 'confirmed', 'negotiating'].includes(booking.status)
+          )
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'bookings');
@@ -4120,26 +5165,53 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       const bookingRef = doc(db, 'bookings', requestId);
       const bookingSnap = await getDoc(bookingRef);
       const bookingData = bookingSnap.exists() ? (bookingSnap.data() as Booking) : null;
+      if (!bookingData) {
+        throw new Error('Booking request not found.');
+      }
+      const threadBookings = await loadRequestThread(bookingData);
+      const updatedAt = new Date().toISOString();
+      const activeThread = (threadBookings.length ? threadBookings : [bookingData]).filter((booking) =>
+        ['pending', 'confirmed', 'negotiating'].includes(booking.status)
+      );
 
-      await updateDoc(bookingRef, { 
-        status,
-        driverPhone: profile.phoneNumber || ''
-      });
+      if (status === 'rejected') {
+        await Promise.all(
+          activeThread.map((booking) =>
+            updateDoc(doc(db, 'bookings', booking.id), {
+              status: 'rejected',
+              negotiationStatus: 'rejected',
+              negotiationActor: booking.negotiationActor || 'driver',
+              driverCounterPending: false,
+              driverPhone: profile.phoneNumber || '',
+              updatedAt,
+            })
+          )
+        );
+        alert(`Booking ${status}!`);
+        return;
+      }
+
+      await Promise.all(
+        activeThread.map((booking) =>
+          updateDoc(doc(db, 'bookings', booking.id), {
+            status,
+            driverPhone: profile.phoneNumber || '',
+            driverCounterPending: false,
+            negotiationStatus:
+              booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
+            fare:
+              hasPendingTravelerCounterOffer(booking) && booking.negotiatedFare
+                ? booking.negotiatedFare
+                : booking.fare,
+            updatedAt,
+          })
+        )
+      );
       
       if (status === 'confirmed') {
         if (bookingData?.rideId) {
           await updateDoc(doc(db, 'rides', bookingData.rideId), {
             status: 'full',
-          });
-        }
-        // Update driver's total earnings
-        const driverRef = doc(db, 'users', driverId);
-        const driverSnap = await getDoc(driverRef);
-        if (driverSnap.exists()) {
-          const driverData = driverSnap.data() as UserProfile;
-          const currentEarnings = driverData.driverDetails?.totalEarnings || 0;
-          await updateDoc(driverRef, {
-            'driverDetails.totalEarnings': currentEarnings + fare
           });
         }
         // Trigger referral bonus pending state
@@ -4166,6 +5238,7 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       driverPaymentTransactionId: payload.transactionId,
       driverPaymentReceiptUrl: receiptUrl,
       driverPaymentSubmittedAt: new Date().toISOString(),
+      driverPhone: profile.phoneNumber || '',
     });
     await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
     await maybeActivateRideLifecycle(booking.id);
@@ -4200,7 +5273,8 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
         driverFeePaid: true,
         driverMaiCoinsUsed: coinsToUse,
         driverPaymentMode: 'maicoins',
-        paymentStatus: 'paid'
+        paymentStatus: 'paid',
+        driverPhone: profile.phoneNumber || '',
       });
 
       // Trigger referral bonus activation
@@ -4231,15 +5305,33 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
         {requests.length > 0 ? (
           requests.map((request) => (
             <div key={request.id} className="bg-white p-8 rounded-[32px] border border-mairide-secondary shadow-sm hover:shadow-md transition-shadow">
+              {(() => {
+                const pendingActor = getPendingNegotiationActor(request);
+                const driverCounterPending = pendingActor === 'driver';
+                const travelerCounterPending = pendingActor === 'consumer';
+                const displayFare = getNegotiationDisplayFare(request);
+                const listedFare = getListedFare(request);
+                const showNegotiatedFareLine = shouldShowNegotiatedFareLine(request);
+                const requestedOrigin = request.requestedOrigin || request.origin;
+                const requestedDestination = request.requestedDestination || request.destination;
+                const showsDetour =
+                  Boolean(request.requiresDetour) &&
+                  (normalizeSearchText(requestedOrigin) !== normalizeSearchText(request.origin) ||
+                    normalizeSearchText(requestedDestination) !== normalizeSearchText(request.destination));
+                const statusLabel = driverCounterPending
+                  ? 'awaiting traveler'
+                  : travelerCounterPending
+                    ? 'traveler counter'
+                    : request.status;
+
+                return (
+                  <>
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <h3 className="font-bold text-xl text-mairide-primary mb-1">{request.origin} → {request.destination}</h3>
                   <p className="text-sm text-mairide-secondary">Traveler: {request.consumerName}</p>
                   {request.feePaid && request.driverFeePaid ? (
-                    <div className="mt-2 bg-green-50 p-3 rounded-xl flex items-center space-x-2 text-green-700">
-                      <Phone className="w-4 h-4" />
-                      <span className="font-bold">{request.consumerPhone || 'Not provided'}</span>
-                    </div>
+                    <ContactUnlockCard label="Traveler contact" phoneNumber={request.consumerPhone} />
                   ) : request.status === 'confirmed' ? (
                     <div className="mt-2 bg-orange-50 p-3 rounded-xl flex items-center space-x-2 text-orange-700 text-xs">
                       <Lock className="w-4 h-4" />
@@ -4249,30 +5341,70 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
                   <p className="text-[10px] font-bold text-mairide-secondary uppercase mt-2">{new Date(request.createdAt).toLocaleString()}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-2xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
-                  <p className="text-[10px] font-bold text-mairide-secondary uppercase">Your Earnings</p>
+                  <p className="text-2xl font-black text-mairide-accent">{formatCurrency(displayFare)}</p>
+                  <p className="text-[10px] font-bold text-mairide-secondary uppercase">{statusLabel}</p>
                 </div>
               </div>
               
               <div className="bg-mairide-bg p-6 rounded-2xl mb-6">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm text-mairide-secondary">Platform Fee</span>
-                  <span className="font-bold text-mairide-primary">{formatCurrency(request.serviceFee)}</span>
+                  <span className="text-sm text-mairide-secondary">Listed fare</span>
+                  <span className="font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm text-mairide-secondary">GST (18%)</span>
-                  <span className="font-bold text-mairide-primary">{formatCurrency(request.gstAmount)}</span>
+                  <span className="text-sm text-mairide-secondary">
+                    {travelerCounterPending ? 'Traveler offered fare' : driverCounterPending ? 'Your counter fare' : 'Current request fare'}
+                  </span>
+                  <span className={cn("font-bold", showNegotiatedFareLine ? "text-mairide-accent text-xl" : "text-mairide-primary text-lg")}>
+                    {formatCurrency(displayFare)}
+                  </span>
                 </div>
               </div>
 
-              {request.status === 'pending' ? (
+              {showsDetour && (
+                <div className="mb-6 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                  <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-mairide-accent" /><p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Traveler Detour Request</p></div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Your listed route</p>
+                      <p className="mt-1 text-sm font-semibold text-mairide-primary">{request.origin} → {request.destination}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler requested route</p>
+                      <p className="mt-1 text-sm font-semibold text-mairide-primary">{requestedOrigin} → {requestedDestination}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-xl bg-white/80 p-3">
+                    <p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Decision Impact</p>
+                    <p className="mt-1 text-sm font-semibold text-mairide-primary">This traveler wants a pickup and/or drop adjustment from your listed route. Review the detour carefully before you accept, reject, or counter.</p>
+                  </div>
+                </div>
+              )}
+
+              {driverCounterPending ? (
+                <div className="bg-mairide-bg p-6 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <Clock className="w-5 h-5 text-mairide-accent" />
+                    <div>
+                      <p className="font-bold text-mairide-primary">Your counter offer has been sent.</p>
+                      <p className="text-xs text-mairide-secondary">Waiting for the traveler to accept or reject {formatCurrency(displayFare)}</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => handleAction(request.id, 'rejected', request.fare, request.driverId)}
+                    className="text-xs font-bold text-red-600 hover:underline"
+                  >
+                    Cancel Request
+                  </button>
+                </div>
+              ) : (request.status === 'pending' || travelerCounterPending) ? (
                 <div className="space-y-4">
                   <div className="flex space-x-4">
                     <button 
                       onClick={() => handleAction(request.id, 'confirmed', request.fare, request.driverId)}
                       className="flex-1 bg-green-600 text-white py-4 rounded-2xl font-bold hover:bg-green-700 transition-colors shadow-lg shadow-green-100"
                     >
-                      Accept Request
+                      {travelerCounterPending ? 'Accept Offer' : 'Accept Request'}
                     </button>
                     <button 
                       onClick={() => handleAction(request.id, 'rejected', request.fare, request.driverId)}
@@ -4304,22 +5436,6 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
                     </div>
                   </div>
                 </div>
-              ) : request.status === 'negotiating' ? (
-                <div className="bg-mairide-bg p-6 rounded-2xl flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <Clock className="w-5 h-5 text-mairide-accent" />
-                    <div>
-                      <p className="font-bold text-mairide-primary">Counter Offer Sent</p>
-                      <p className="text-xs text-mairide-secondary">Waiting for traveler to respond to {formatCurrency(request.negotiatedFare)}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => handleAction(request.id, 'rejected', request.fare, request.driverId)}
-                    className="text-xs font-bold text-red-600 hover:underline"
-                  >
-                    Cancel Request
-                  </button>
-                </div>
               ) : !request.driverFeePaid ? (
                 <div className="flex space-x-4">
                   <button 
@@ -4342,6 +5458,9 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
                   <span>Platform Fee Submitted {request.driverMaiCoinsUsed > 0 && `(Used ${request.driverMaiCoinsUsed} Maicoins)`}</span>
                 </div>
               )}
+                  </>
+                );
+              })()}
             </div>
           ))
         ) : (
@@ -4397,24 +5516,91 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [drivers, setDrivers] = useState<UserProfile[]>([]);
   const [selectedRide, setSelectedRide] = useState<any | null>(null);
+  const [pendingFutureRideAction, setPendingFutureRideAction] = useState<{
+    ride: any;
+    requestedFare?: number;
+    mode: 'booking' | 'counter';
+  } | null>(null);
   const [isBooking, setIsBooking] = useState(false);
+  const [travelerCounterFare, setTravelerCounterFare] = useState('');
+  const [dashboardCounterFares, setDashboardCounterFares] = useState<{ [key: string]: string }>({});
   const [autocompleteFrom, setAutocompleteFrom] = useState<any | null>(null);
   const [autocompleteTo, setAutocompleteTo] = useState<any | null>(null);
   const [searchLocationFrom, setSearchLocationFrom] = useState<{ lat: number, lng: number } | null>(null);
   const [searchLocationTo, setSearchLocationTo] = useState<{ lat: number, lng: number } | null>(null);
   const [directionsResponse, setDirectionsResponse] = useState<any | null>(null);
+  const [rideStatusById, setRideStatusById] = useState<Record<string, Ride['status']>>({});
+  const [ridesResolved, setRidesResolved] = useState(false);
+  const seenDriverCounterNotificationsRef = useRef<Record<string, string>>({});
+  const hasHydratedDriverCountersRef = useRef(false);
+
+  useEffect(() => {
+    const handleHomeNavigation = () => setActiveTab('search');
+    window.addEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
+    return () => window.removeEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
+  }, []);
 
   useEffect(() => {
     const q = query(collection(db, 'bookings'), where('consumerId', '==', profile.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: Booking[] = [];
       snapshot.forEach((snapshotDoc) => list.push({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
-      setDashboardBookings(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      setDashboardBookings(
+        dedupeBookingsByThread(
+          list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        )
+      );
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'bookings');
     });
     return () => unsubscribe();
   }, [profile.uid]);
+
+  useEffect(() => {
+    const currentKeys = dashboardBookings.reduce((acc: Record<string, string>, booking) => {
+      if (hasPendingDriverCounterOffer(booking)) {
+        acc[booking.id] = `${booking.negotiationActor}|${booking.negotiatedFare}|${(booking as any).updatedAt || booking.createdAt || ''}`;
+      }
+      return acc;
+    }, {});
+
+    if (!hasHydratedDriverCountersRef.current) {
+      seenDriverCounterNotificationsRef.current = currentKeys;
+      hasHydratedDriverCountersRef.current = true;
+      return;
+    }
+
+    dashboardBookings.forEach((booking) => {
+      if (!hasPendingDriverCounterOffer(booking)) return;
+      const nextKey = currentKeys[booking.id];
+      const previousKey = seenDriverCounterNotificationsRef.current[booking.id];
+      if (nextKey && nextKey !== previousKey) {
+        void sendBrowserNotification(
+          'MaiRide Counter Offer',
+          `${booking.driverName} proposed ${formatCurrency(getNegotiationDisplayFare(booking))} for ${booking.origin} to ${booking.destination}.`,
+          { tag: `traveler-counter-${booking.id}` }
+        );
+      }
+    });
+
+    seenDriverCounterNotificationsRef.current = currentKeys;
+  }, [dashboardBookings]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'rides'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ridesList = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
+      const nextStatusMap = ridesList.reduce((acc: Record<string, Ride['status']>, ride: Ride) => {
+        acc[ride.id] = ride.status;
+        return acc;
+      }, {});
+      setRideStatusById(nextStatusMap);
+      setRidesResolved(true);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'rides');
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (selectedRide && selectedRide.originLocation && selectedRide.destinationLocation && isLoaded && window.google) {
@@ -4531,9 +5717,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         where('status', '==', 'available')
       );
       const querySnapshot = await getDocs(q);
-      const rideList: any[] = [];
+      const rideMap = new Map<string, any>();
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
+        const data = doc.data() as Ride;
 
         const normalizedSearchFrom = normalizeSearchText(search.from);
         const normalizedSearchTo = normalizeSearchText(search.to);
@@ -4585,16 +5771,14 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           corridorMatch ||
           (originDistance !== null
             ? originDistance <= 120
-            : normalizedOrigin.includes(normalizedSearchFrom) ||
-              normalizedSearchFrom.includes(normalizedOrigin));
+            : routeTextMatches(normalizedOrigin, normalizedSearchFrom));
 
         const destinationMatches =
           !search.to ||
           corridorMatch ||
           (destinationDistance !== null
             ? destinationDistance <= 120
-            : normalizedDestination.includes(normalizedSearchTo) ||
-              normalizedSearchTo.includes(normalizedDestination));
+            : routeTextMatches(normalizedDestination, normalizedSearchTo));
 
         const nearbyToTraveler =
           !userLocation ||
@@ -4604,13 +5788,30 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
             userLocation.lng,
             data.originLocation.lat,
             data.originLocation.lng
-          ) <= 150;
+          ) <= 500;
 
-        if (originMatches && destinationMatches && nearbyToTraveler) {
-          rideList.push({ id: doc.id, ...data });
+        const withinPlanningWindow = isRideWithinPlanningWindow(data);
+        const isAdvancePlanningSearch = Boolean(search.from || search.to || searchLocationFrom || searchLocationTo);
+
+        if (
+          originMatches &&
+          destinationMatches &&
+          withinPlanningWindow &&
+          (isAdvancePlanningSearch ? true : nearbyToTraveler)
+        ) {
+          const nextRide = { id: doc.id, ...data };
+          const dedupeKey = getRideDuplicateKey(nextRide);
+          const existingRide = rideMap.get(dedupeKey);
+          if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {
+            rideMap.set(dedupeKey, nextRide);
+          }
         }
       });
-      setRides(rideList);
+      setRides(
+        Array.from(rideMap.values()).sort(
+          (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
+        )
+      );
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, 'rides');
     } finally {
@@ -4618,11 +5819,18 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
   };
 
-  const handleBookRide = async (ride: any) => {
+  const handleBookRide = async (ride: any, requestedFare?: number) => {
     setIsBooking(true);
     try {
-      const { baseFee, gstAmount, totalFee } = calculateServiceFee(ride.price, config || undefined);
-      const totalPrice = ride.price + totalFee;
+      const proposedFare = requestedFare && requestedFare > 0 ? requestedFare : ride.price;
+      const { baseFee, gstAmount, totalFee } = calculateServiceFee(proposedFare, config || undefined);
+      const totalPrice = proposedFare + totalFee;
+      const updatedAt = new Date().toISOString();
+      const requestedOrigin = (search.from || ride.origin).trim();
+      const requestedDestination = (search.to || ride.destination).trim();
+      const requiresDetour =
+        normalizeSearchText(requestedOrigin) !== normalizeSearchText(ride.origin) ||
+        normalizeSearchText(requestedDestination) !== normalizeSearchText(ride.destination);
       
       const bookingData = {
         rideId: ride.id,
@@ -4634,20 +5842,65 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         driverPhotoUrl: ride.driverPhotoUrl || '',
         origin: ride.origin,
         destination: ride.destination,
-        fare: ride.price,
+        listedOrigin: ride.origin,
+        listedDestination: ride.destination,
+        requestedOrigin,
+        requestedDestination,
+        requiresDetour,
+        listedFare: ride.price,
+        fare: proposedFare,
         seatsBooked: 1, // Default to 1 seat for now
         serviceFee: baseFee,
         gstAmount: gstAmount,
         totalPrice: totalPrice,
         status: 'pending',
         paymentStatus: 'pending',
-        createdAt: new Date().toISOString(),
-        maiCoinsUsed: 0
+        createdAt: updatedAt,
+        updatedAt,
+        maiCoinsUsed: 0,
+        negotiatedFare: requestedFare && requestedFare > 0 && requestedFare !== ride.price ? requestedFare : undefined,
+        negotiationStatus: requestedFare && requestedFare > 0 && requestedFare !== ride.price ? 'pending' : undefined,
+        negotiationActor: requestedFare && requestedFare > 0 && requestedFare !== ride.price ? 'consumer' : undefined,
+        driverCounterPending: false,
       };
 
-      await addDoc(collection(db, 'bookings'), bookingData);
+      const existingThreadSnapshot = await getDocs(
+        query(
+          collection(db, 'bookings'),
+          where('rideId', '==', ride.id),
+          where('consumerId', '==', profile.uid)
+        )
+      );
+      const activeThreadBookings = existingThreadSnapshot.docs
+        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        .filter((booking) => ['pending', 'confirmed', 'negotiating'].includes(booking.status));
+
+      if (activeThreadBookings.length) {
+        await Promise.all(
+          activeThreadBookings.map((booking) =>
+            updateDoc(doc(db, 'bookings', booking.id), {
+              ...bookingData,
+              updatedAt,
+            })
+          )
+        );
+      } else {
+        await addDoc(collection(db, 'bookings'), bookingData);
+      }
+      if (requestedFare && requestedFare > 0 && requestedFare !== ride.price) {
+        void sendBrowserNotification(
+          'MaiRide Counter Offer',
+          `You offered ${formatCurrency(proposedFare)} for ${ride.origin} to ${ride.destination}.`,
+          { tag: `traveler-sent-counter-${ride.id}`, requirePermissionPrompt: true }
+        );
+      }
       
-      alert("Booking request sent! Once confirmed, you'll be notified.");
+      alert(
+        requestedFare && requestedFare > 0 && requestedFare !== ride.price
+          ? "Counter offer sent to the driver."
+          : "Booking request sent! Once confirmed, you'll be notified."
+      );
+      setTravelerCounterFare('');
       setSelectedRide(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'bookings');
@@ -4656,27 +5909,240 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
   };
 
+  const requestRideBooking = (ride: any, requestedFare?: number) => {
+    const isCounter = Boolean(requestedFare && requestedFare > 0 && requestedFare !== ride.price);
+    if (isFutureRide(ride)) {
+      setPendingFutureRideAction({
+        ride,
+        requestedFare,
+        mode: isCounter ? 'counter' : 'booking',
+      });
+      return;
+    }
+
+    void handleBookRide(ride, requestedFare);
+  };
+
   const handleTravelerNegotiation = async (booking: Booking, action: 'accepted' | 'rejected') => {
     try {
+      if (window.location.hostname === 'localhost') {
+        await axios.post('/api/user/traveler-respond-booking', {
+          bookingId: booking.id,
+          consumerId: profile.uid,
+          action,
+        });
+
+        const updatedAt = new Date().toISOString();
+        const threadSnapshot = await getDocs(
+          query(
+            collection(db, 'bookings'),
+            where('rideId', '==', booking.rideId),
+            where('consumerId', '==', booking.consumerId)
+          )
+        );
+        const threadBookings = threadSnapshot.docs
+          .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+          .filter((candidate) => getBookingThreadKey(candidate) === getBookingThreadKey(booking));
+
+        if (action === 'accepted' && booking.negotiatedFare) {
+          const { baseFee, gstAmount, totalFee } = calculateServiceFee(booking.negotiatedFare, config || undefined);
+          await Promise.all(
+            (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
+              updateDoc(doc(db, 'bookings', candidate.id), {
+                fare: booking.negotiatedFare,
+                serviceFee: baseFee,
+                gstAmount,
+                totalPrice: booking.negotiatedFare + totalFee,
+                status: 'confirmed',
+                negotiationStatus: 'accepted',
+                negotiationActor: 'driver',
+                driverCounterPending: false,
+                updatedAt,
+              })
+            )
+          );
+        } else {
+          await Promise.all(
+            (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
+              updateDoc(doc(db, 'bookings', candidate.id), {
+                status: 'rejected',
+                negotiationStatus: 'rejected',
+                negotiationActor: 'driver',
+                driverCounterPending: false,
+                updatedAt,
+              })
+            )
+          );
+        }
+
+        setDashboardBookings((prev) =>
+          prev.map((candidate) =>
+            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+              ? {
+                  ...candidate,
+                  status: action === 'accepted' ? 'confirmed' : 'rejected',
+                  fare: action === 'accepted' && booking.negotiatedFare ? booking.negotiatedFare : candidate.fare,
+                  negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+                  negotiationActor: 'driver',
+                  driverCounterPending: false,
+                  updatedAt,
+                }
+              : candidate
+          )
+        );
+        alert(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.');
+        return;
+      }
+
+      const threadSnapshot = await getDocs(
+        query(
+          collection(db, 'bookings'),
+          where('rideId', '==', booking.rideId),
+          where('consumerId', '==', booking.consumerId)
+        )
+      );
+      const threadBookings = threadSnapshot.docs
+        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        .filter((candidate) => ['pending', 'confirmed', 'negotiating'].includes(candidate.status));
+
       if (action === 'accepted' && booking.negotiatedFare) {
         const { baseFee, gstAmount, totalFee } = calculateServiceFee(booking.negotiatedFare, config || undefined);
-        await updateDoc(doc(db, 'bookings', booking.id), {
-          fare: booking.negotiatedFare,
-          serviceFee: baseFee,
-          gstAmount,
-          totalPrice: booking.negotiatedFare + totalFee,
-          status: 'confirmed',
-          negotiationStatus: 'accepted',
-        });
+        await Promise.all(
+          (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
+            updateDoc(doc(db, 'bookings', candidate.id), {
+              fare: booking.negotiatedFare,
+              serviceFee: baseFee,
+              gstAmount,
+              totalPrice: booking.negotiatedFare + totalFee,
+              status: 'confirmed',
+              negotiationStatus: 'accepted',
+              negotiationActor: 'driver',
+              driverCounterPending: false,
+              updatedAt: new Date().toISOString(),
+            })
+          )
+        );
         alert('Counter offer accepted.');
         return;
       }
 
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        status: 'rejected',
-        negotiationStatus: 'rejected',
-      });
+      await Promise.all(
+        (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
+          updateDoc(doc(db, 'bookings', candidate.id), {
+            status: 'rejected',
+            negotiationStatus: 'rejected',
+            negotiationActor: 'driver',
+            driverCounterPending: false,
+            rideRetired: true,
+            retiredAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+        )
+      );
       alert('Counter offer rejected.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+    }
+  };
+
+  const handleTravelerCounterOffer = async (booking: Booking, fare: number) => {
+    if (!fare || fare <= 0) {
+      showAppDialog('Please enter a valid counter fare.', 'warning');
+      return;
+    }
+
+    try {
+      if (window.location.hostname === 'localhost') {
+        await axios.post('/api/user/traveler-counter-booking', {
+          bookingId: booking.id,
+          consumerId: profile.uid,
+          fare,
+        });
+
+        const updatedAt = new Date().toISOString();
+        const threadSnapshot = await getDocs(
+          query(
+            collection(db, 'bookings'),
+            where('rideId', '==', booking.rideId),
+            where('consumerId', '==', booking.consumerId)
+          )
+        );
+        const threadBookings = threadSnapshot.docs
+          .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+          .filter((candidate) => getBookingThreadKey(candidate) === getBookingThreadKey(booking));
+
+        await Promise.all(
+          (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
+            updateDoc(doc(db, 'bookings', candidate.id), {
+              negotiatedFare: fare,
+              negotiationStatus: 'pending',
+              negotiationActor: 'consumer',
+              driverCounterPending: false,
+              status: 'negotiating',
+              rideRetired: false,
+              updatedAt,
+            })
+          )
+        );
+
+        setDashboardBookings((prev) =>
+          prev.map((candidate) =>
+            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+              ? {
+                  ...candidate,
+                  negotiatedFare: fare,
+                  negotiationStatus: 'pending',
+                  negotiationActor: 'consumer',
+                  driverCounterPending: false,
+                  status: 'negotiating',
+                  rideRetired: false,
+                  updatedAt,
+                }
+              : candidate
+          )
+        );
+        setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
+        void sendBrowserNotification(
+          'MaiRide Counter Offer',
+          `You countered with ${formatCurrency(fare)} for ${booking.origin} to ${booking.destination}.`,
+          { tag: `traveler-dashboard-counter-${booking.id}`, requirePermissionPrompt: true }
+        );
+        showAppDialog('Counter offer sent to the driver.', 'success');
+        return;
+      }
+
+      const updatedAt = new Date().toISOString();
+      const threadSnapshot = await getDocs(
+        query(
+          collection(db, 'bookings'),
+          where('rideId', '==', booking.rideId),
+          where('consumerId', '==', booking.consumerId)
+        )
+      );
+      const threadBookings = threadSnapshot.docs
+        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        .filter((candidate) => ['pending', 'confirmed', 'negotiating'].includes(candidate.status));
+
+      await Promise.all(
+        (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
+          updateDoc(doc(db, 'bookings', candidate.id), {
+            negotiatedFare: fare,
+            negotiationStatus: 'pending',
+            negotiationActor: 'consumer',
+            driverCounterPending: false,
+            status: 'negotiating',
+            rideRetired: false,
+            updatedAt,
+          })
+        )
+      );
+      setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
+      void sendBrowserNotification(
+        'MaiRide Counter Offer',
+        `You countered with ${formatCurrency(fare)} for ${booking.origin} to ${booking.destination}.`,
+        { tag: `traveler-dashboard-counter-${booking.id}`, requirePermissionPrompt: true }
+      );
+      showAppDialog('Counter offer sent to the driver.', 'success');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
     }
@@ -4924,10 +6390,16 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
           <TravelerDashboardSummary
             bookings={dashboardBookings}
+            rideStatusById={rideStatusById}
+            ridesResolved={ridesResolved}
             onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
             onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
+            counterFares={dashboardCounterFares}
+            setCounterFares={setDashboardCounterFares}
+            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
             onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
             onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
+            onOpenBooking={() => setActiveTab('history')}
           />
 
           <div className="bg-white rounded-3xl shadow-xl p-6 mb-12 border border-mairide-secondary">
@@ -5060,13 +6532,26 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
                           <Star className="w-3 h-3 mr-1 fill-current" />
                           {Number(ride.driverRating ?? ride.rating ?? 5).toFixed(1)}
                         </div>
+                        {isFutureRide(ride) && (
+                          <div className="flex items-center text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">
+                            Future ride
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center text-sm text-mairide-secondary space-x-2">
                         <span>{ride.origin}</span>
                         <ChevronRight className="w-4 h-4" />
                         <span>{ride.destination}</span>
                       </div>
-                      <p className="text-xs text-mairide-secondary mt-1">Departs: {new Date(ride.departureTime).toLocaleString()}</p>
+                      <div className={cn(
+                        "mt-2 inline-flex items-center rounded-full px-3 py-1 text-xs font-bold",
+                        isFutureRide(ride)
+                          ? "bg-orange-50 text-orange-700 border border-orange-200"
+                          : "bg-mairide-bg text-mairide-primary border border-mairide-secondary"
+                      )}>
+                        <Clock className="w-3.5 h-3.5 mr-2" />
+                        Departure: {formatRideDeparture(ride)}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center justify-between md:flex-col md:items-end gap-2">
@@ -5092,12 +6577,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
           <AnimatePresence>
             {selectedRide && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-black/60 backdrop-blur-sm">
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9 }}
-                  className="bg-white w-full max-w-md rounded-[40px] p-8 shadow-2xl border border-mairide-secondary overflow-hidden relative"
+                  className="bg-white my-6 w-full max-w-md rounded-[40px] p-8 shadow-2xl border border-mairide-secondary overflow-y-auto max-h-[calc(100vh-3rem)] relative"
                 >
                   <button 
                     onClick={() => setSelectedRide(null)}
@@ -5130,6 +6615,25 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
                         <span className="text-xs font-bold text-mairide-secondary uppercase">Route</span>
                         <span className="font-bold text-mairide-primary text-right">{selectedRide.origin} → {selectedRide.destination}</span>
                       </div>
+                      <div className="flex justify-between items-center mb-4">
+                        <span className="text-xs font-bold text-mairide-secondary uppercase">Likely Departure</span>
+                        <span className={cn(
+                          "text-right rounded-2xl px-3 py-2 text-sm font-black",
+                          isFutureRide(selectedRide)
+                            ? "bg-orange-100 text-orange-700"
+                            : "bg-white text-mairide-primary border border-mairide-secondary"
+                        )}>
+                          {formatRideDeparture(selectedRide)}
+                        </span>
+                      </div>
+                      {isFutureRide(selectedRide) && (
+                        <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 mb-4">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-orange-700">Advance booking</p>
+                          <p className="mt-1 text-sm text-orange-800">
+                            This ride is scheduled for a future departure. Please confirm the date and likely start time carefully before continuing.
+                          </p>
+                        </div>
+                      )}
                       <div className="h-px bg-mairide-secondary/20 my-4" />
                       <div className="flex justify-between items-center mb-2">
                         <span className="text-sm text-mairide-secondary">Platform Fee</span>
@@ -5148,6 +6652,30 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
                         You are only committing to the MaiRide maintenance fee plus GST here. The ride fare itself is not collected by the platform in this step.
                       </p>
                     </div>
+
+                    <div className="bg-mairide-bg p-6 rounded-3xl">
+                      <p className="text-xs font-bold text-mairide-secondary uppercase mb-3">Want to negotiate?</p>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <div className="relative flex-1">
+                          <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 text-mairide-secondary w-5 h-5" />
+                          <input
+                            type="number"
+                            min="1"
+                            placeholder="Enter your counter fare"
+                            className="w-full pl-12 pr-4 py-4 bg-white border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                            value={travelerCounterFare}
+                            onChange={(e) => setTravelerCounterFare(e.target.value)}
+                          />
+                        </div>
+                        <button
+                          onClick={() => requestRideBooking(selectedRide, Number(travelerCounterFare))}
+                          disabled={isBooking || !travelerCounterFare || Number(travelerCounterFare) <= 0}
+                          className="bg-mairide-primary text-white px-6 py-4 rounded-2xl font-bold hover:bg-mairide-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Send Counter Offer
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex space-x-3 mb-4">
@@ -5162,7 +6690,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
                       <span>View on Map</span>
                     </button>
                     <button 
-                      onClick={() => handleBookRide(selectedRide)}
+                      onClick={() => requestRideBooking(selectedRide)}
                       disabled={isBooking}
                       className="flex-[2] bg-mairide-accent text-white py-5 rounded-3xl font-bold text-lg hover:bg-mairide-primary transition-all flex items-center justify-center space-x-3 shadow-xl shadow-mairide-accent/20"
                     >
@@ -5179,6 +6707,55 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
                   <p className="text-[10px] text-center text-mairide-secondary mt-4 px-4">
                     Once the driver accepts, both sides must submit the MaiRide platform fee payment proof before contact details are unlocked.
                   </p>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {pendingFutureRideAction && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-4 bg-black/60 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.92 }}
+                  className="my-6 w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-700">
+                      <Clock className="w-6 h-6" />
+                    </div>
+                    <button
+                      onClick={() => setPendingFutureRideAction(null)}
+                      className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <p className="mt-4 text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Confirm future ride</p>
+                  <h3 className="mt-2 text-2xl font-black tracking-tight text-mairide-primary">
+                    {formatRideDeparture(pendingFutureRideAction.ride)}
+                  </h3>
+                  <p className="mt-3 text-sm leading-7 text-mairide-primary">
+                    This is an advance trip, not an immediate departure. Please confirm you want to {pendingFutureRideAction.mode === 'counter' ? 'send a counter offer' : 'book this ride'} for the scheduled future date and time.
+                  </p>
+                  <div className="mt-6 flex gap-3">
+                    <button
+                      onClick={() => setPendingFutureRideAction(null)}
+                      className="flex-1 rounded-2xl border border-mairide-secondary py-3 text-sm font-bold text-mairide-primary"
+                    >
+                      Go Back
+                    </button>
+                    <button
+                      onClick={() => {
+                        const nextAction = pendingFutureRideAction;
+                        setPendingFutureRideAction(null);
+                        void handleBookRide(nextAction.ride, nextAction.requestedFare);
+                      }}
+                      className="flex-1 rounded-2xl bg-mairide-accent py-3 text-sm font-bold text-white hover:bg-mairide-primary"
+                    >
+                      Confirm & Continue
+                    </button>
+                  </div>
                 </motion.div>
               </div>
             )}
@@ -5206,8 +6783,15 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
   const [isOnline, setIsOnline] = useState(profile.driverDetails?.isOnline || false);
-  const [newRide, setNewRide] = useState({ origin: '', destination: '', price: '', seats: '4' });
+  const [newRide, setNewRide] = useState({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
   const [showOfferForm, setShowOfferForm] = useState(false);
+
+  useEffect(() => {
+    const handleHomeNavigation = () => setActiveTab('dashboard');
+    window.addEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
+    return () => window.removeEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
+  }, []);
+  const [isPostingRide, setIsPostingRide] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'requests' | 'history' | 'wallet' | 'support' | 'profile'>('dashboard');
 
   if (loadError || authFailure) {
@@ -5237,6 +6821,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [requests, setRequests] = useState<Booking[]>([]);
   const [counterFares, setCounterFares] = useState<{ [key: string]: string }>({});
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
+  const [retiredRideIds, setRetiredRideIds] = useState<string[]>([]);
+  const seenTravelerCounterNotificationsRef = useRef<Record<string, string>>({});
+  const hasHydratedTravelerCountersRef = useRef(false);
 
   useEffect(() => {
     // Listen for online travelers
@@ -5265,12 +6852,52 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: Booking[] = [];
       snapshot.forEach((snapshotDoc) => list.push({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
-      setRequests(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      setRequests(
+        dedupeBookingsByThread(list)
+          .filter(
+            (booking) =>
+              !retiredRideIds.includes(booking.rideId) &&
+              !(booking as any).rideRetired &&
+              booking.negotiationStatus !== 'rejected' &&
+              ['pending', 'confirmed', 'negotiating'].includes(booking.status)
+          )
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'bookings');
     });
     return () => unsubscribe();
-  }, [profile.uid]);
+  }, [profile.uid, retiredRideIds]);
+
+  useEffect(() => {
+    const currentKeys = requests.reduce((acc: Record<string, string>, booking) => {
+      if (hasPendingTravelerCounterOffer(booking)) {
+        acc[booking.id] = `${booking.negotiationActor}|${booking.negotiatedFare}|${(booking as any).updatedAt || booking.createdAt || ''}`;
+      }
+      return acc;
+    }, {});
+
+    if (!hasHydratedTravelerCountersRef.current) {
+      seenTravelerCounterNotificationsRef.current = currentKeys;
+      hasHydratedTravelerCountersRef.current = true;
+      return;
+    }
+
+    requests.forEach((booking) => {
+      if (!hasPendingTravelerCounterOffer(booking)) return;
+      const nextKey = currentKeys[booking.id];
+      const previousKey = seenTravelerCounterNotificationsRef.current[booking.id];
+      if (nextKey && nextKey !== previousKey) {
+        void sendBrowserNotification(
+          'MaiRide Counter Offer',
+          `${booking.consumerName} offered ${formatCurrency(getNegotiationDisplayFare(booking))} for ${booking.origin} to ${booking.destination}.`,
+          { tag: `driver-counter-${booking.id}` }
+        );
+      }
+    });
+
+    seenTravelerCounterNotificationsRef.current = currentKeys;
+  }, [requests]);
 
   useEffect(() => {
     if ("geolocation" in navigator) {
@@ -5307,54 +6934,265 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
   };
 
-  const handlePostRide = async () => {
-    if (!newRide.origin || !newRide.destination || !newRide.price) return;
+  const geocodeAddress = async (address: string) => {
+    if (!window.google || !window.google.maps) return null;
+    const geocoder = new window.google.maps.Geocoder();
     try {
-      await addDoc(collection(db, 'rides'), {
+      const result = await geocoder.geocode({ address });
+      const location = result.results?.[0]?.geometry?.location;
+      if (!location) return null;
+      return {
+        lat: location.lat(),
+        lng: location.lng(),
+      };
+    } catch (error) {
+      console.error('Address geocoding failed:', error);
+      return null;
+    }
+  };
+
+  const buildScheduledDeparture = (dayKey: string, timeValue: string) => {
+    const scheduledDate = new Date();
+    if (dayKey === 'tomorrow') {
+      scheduledDate.setDate(scheduledDate.getDate() + 1);
+    } else if (dayKey === 'dayAfter') {
+      scheduledDate.setDate(scheduledDate.getDate() + 2);
+    }
+
+    const [hours, minutes] = (timeValue || '09:00').split(':').map(Number);
+    scheduledDate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0);
+    return scheduledDate.toISOString();
+  };
+
+  const formatDepartureDayLabel = (dayKey: string) => {
+    if (dayKey === 'tomorrow') return 'Tomorrow';
+    if (dayKey === 'dayAfter') return 'Day After';
+    return 'Today';
+  };
+
+  const loadRelatedBookingThread = async (seedBooking: Booking) => {
+    const snapshot = await getDocs(
+      query(
+        collection(db, 'bookings'),
+        where('consumerId', '==', seedBooking.consumerId),
+        where('driverId', '==', seedBooking.driverId)
+      )
+    );
+
+    const threadKey = getBookingThreadKey(seedBooking);
+    const threadBookings = snapshot.docs
+      .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+      .filter((booking) => getBookingThreadKey(booking) === threadKey)
+      .filter((booking) => ['pending', 'confirmed', 'negotiating'].includes(booking.status));
+
+    return threadBookings.length ? threadBookings : [seedBooking];
+  };
+
+  const handlePostRide = async () => {
+    const origin = newRide.origin.trim();
+    const destination = newRide.destination.trim();
+    const priceValue = Number(newRide.price);
+    const seatsValue = Number(newRide.seats);
+
+    if (!origin || !destination) {
+      alert('Please select both origin and destination before posting your offer.');
+      return;
+    }
+
+    if (!Number.isFinite(priceValue) || priceValue <= 0) {
+      alert('Please enter a valid ride price greater than zero.');
+      return;
+    }
+
+    if (!Number.isFinite(seatsValue) || seatsValue < 1) {
+      alert('Please choose at least one available seat.');
+      return;
+    }
+
+    setIsPostingRide(true);
+    try {
+      const resolvedOriginLocation = originLocation || userLocation || await geocodeAddress(origin);
+      const resolvedDestinationLocation = destinationLocation || await geocodeAddress(destination);
+
+      if (!resolvedOriginLocation) {
+        alert('Please allow location access or select a valid origin from the suggestions.');
+        return;
+      }
+
+      if (!resolvedDestinationLocation) {
+        alert('Please select a valid destination from the suggestions.');
+        return;
+      }
+
+      const ridePayload = {
         driverId: profile.uid,
         driverName: profile.displayName,
         driverPhotoUrl: getResolvedUserPhoto(profile),
         driverRating: getResolvedUserRating(profile),
-        origin: newRide.origin,
-        destination: newRide.destination,
-        originLocation: originLocation || userLocation,
-        destinationLocation: destinationLocation,
-        price: Number(newRide.price),
-        seatsAvailable: Number(newRide.seats),
+        origin,
+        destination,
+        originLocation: resolvedOriginLocation,
+        destinationLocation: resolvedDestinationLocation,
+        price: priceValue,
+        seatsAvailable: seatsValue,
         status: 'available',
-        departureTime: new Date().toISOString(),
+        departureDay: newRide.departureDay,
+        departureDayLabel: formatDepartureDayLabel(newRide.departureDay),
+        departureClock: newRide.departureClock,
+        departureNote: 'Planned departure time may vary based on traffic, road, and operational conditions.',
+        departureTime: buildScheduledDeparture(newRide.departureDay, newRide.departureClock),
         createdAt: new Date().toISOString()
-      });
-      setNewRide({ origin: '', destination: '', price: '', seats: '4' });
+      };
+
+      if (window.location.hostname === 'localhost') {
+        await axios.post('/api/user/create-ride', ridePayload);
+      } else {
+        await addDoc(collection(db, 'rides'), ridePayload);
+      }
+      setNewRide({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
+      setOriginLocation(null);
+      setDestinationLocation(null);
       setShowOfferForm(false);
       alert("Ride offer posted successfully!");
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'rides');
+    } finally {
+      setIsPostingRide(false);
     }
   };
 
   const handleDriverAction = async (request: Booking, status: 'confirmed' | 'rejected') => {
     try {
-      await updateDoc(doc(db, 'bookings', request.id), {
-        status,
-        driverPhone: profile.phoneNumber || '',
-      });
+      if (status === 'rejected' && window.location.hostname === 'localhost') {
+        await axios.post('/api/user/reject-booking', {
+          bookingId: request.id,
+          driverId: profile.uid,
+          driverPhone: profile.phoneNumber || '',
+        });
+
+        const threadBookings = await loadRelatedBookingThread(request);
+        const updatedAt = new Date().toISOString();
+        await Promise.all(
+          threadBookings.map((booking) =>
+            updateDoc(doc(db, 'bookings', booking.id), {
+              status: 'rejected',
+              negotiationStatus: 'rejected',
+              negotiationActor: booking.negotiationActor || request.negotiationActor || 'driver',
+              driverCounterPending: false,
+              rideRetired: true,
+              retiredAt: updatedAt,
+              driverPhone: profile.phoneNumber || '',
+              updatedAt,
+            })
+          )
+        );
+
+        setRequests((prev) =>
+          prev.filter(
+            (booking) =>
+              getBookingThreadKey(booking) !== getBookingThreadKey(request)
+          )
+        );
+        showAppDialog('Traveler offer rejected.', 'success');
+        return;
+      }
+
+      const threadBookings = await loadRelatedBookingThread(request);
+      if (status === 'rejected') {
+        const updatedAt = new Date().toISOString();
+        await Promise.all(
+          threadBookings.map((booking) =>
+            updateDoc(doc(db, 'bookings', booking.id), {
+              status: 'rejected',
+              negotiationStatus: 'rejected',
+              negotiationActor: booking.negotiationActor || request.negotiationActor || 'driver',
+              driverCounterPending: false,
+              rideRetired: true,
+              retiredAt: updatedAt,
+              driverPhone: profile.phoneNumber || '',
+              updatedAt,
+            })
+          )
+        );
+
+        setRequests((prev) =>
+          prev.filter(
+            (booking) =>
+              !(booking.rideId === request.rideId && booking.consumerId === request.consumerId)
+          )
+        );
+        alert('Traveler offer rejected.');
+        return;
+      }
+
+      const acceptedFare =
+        hasPendingTravelerCounterOffer(request) && request.negotiatedFare
+          ? request.negotiatedFare
+          : request.fare;
+      const { baseFee, gstAmount, totalFee } = calculateServiceFee(acceptedFare, config || undefined);
+
+      if (status === 'confirmed' && window.location.hostname === 'localhost') {
+        const updatedAt = new Date().toISOString();
+        const threadBookings = await loadRelatedBookingThread(request);
+        await Promise.all(
+          threadBookings.map((booking) =>
+            updateDoc(doc(db, 'bookings', booking.id), {
+              status,
+              fare: acceptedFare,
+              serviceFee: baseFee,
+              gstAmount,
+              totalPrice: acceptedFare + totalFee,
+              negotiationStatus:
+                booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
+              negotiationActor: booking.negotiationActor,
+              driverCounterPending: false,
+              driverPhone: profile.phoneNumber || '',
+              updatedAt,
+            })
+          )
+        );
+      }
+
+      await Promise.all(
+        threadBookings.map((booking) =>
+          updateDoc(doc(db, 'bookings', booking.id), {
+            status,
+            fare: acceptedFare,
+            serviceFee: baseFee,
+            gstAmount,
+            totalPrice: acceptedFare + totalFee,
+            negotiationStatus:
+              booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
+            negotiationActor: booking.negotiationActor,
+            driverCounterPending: false,
+            driverPhone: profile.phoneNumber || '',
+            updatedAt: new Date().toISOString(),
+          })
+        )
+      );
 
       if (status === 'confirmed') {
         await updateDoc(doc(db, 'rides', request.rideId), {
           status: 'full',
         });
-        const driverRef = doc(db, 'users', profile.uid);
-        const driverSnap = await getDoc(driverRef);
-        if (driverSnap.exists()) {
-          const driverData = driverSnap.data() as UserProfile;
-          const currentEarnings = driverData.driverDetails?.totalEarnings || 0;
-          await updateDoc(driverRef, {
-            'driverDetails.totalEarnings': currentEarnings + request.fare,
-          });
-        }
         await walletService.onRideStart(profile.uid);
       }
+
+      setRequests((prev) =>
+        prev.map((booking) =>
+          getBookingThreadKey(booking) === getBookingThreadKey(request)
+            ? {
+                ...booking,
+                status,
+                fare: acceptedFare,
+                negotiationStatus:
+                  booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
+                driverCounterPending: false,
+                updatedAt: new Date().toISOString(),
+              }
+            : booking
+        )
+      );
 
       alert(`Booking ${status}.`);
     } catch (error) {
@@ -5369,11 +7207,61 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
 
     try {
-      await updateDoc(doc(db, 'bookings', request.id), {
-        negotiatedFare: fare,
-        negotiationStatus: 'pending',
-        status: 'negotiating',
-      });
+      if (window.location.hostname === 'localhost') {
+        await axios.post('/api/user/counter-booking', {
+          bookingId: request.id,
+          driverId: profile.uid,
+          fare,
+        });
+
+        const updatedAt = new Date().toISOString();
+        const threadBookings = await loadRelatedBookingThread(request);
+        await Promise.all(
+          threadBookings.map((booking) =>
+            updateDoc(doc(db, 'bookings', booking.id), {
+              negotiatedFare: fare,
+              negotiationStatus: 'pending',
+              negotiationActor: 'driver',
+              driverCounterPending: true,
+              status: 'negotiating',
+              updatedAt,
+            })
+          )
+        );
+
+        setRequests((prev) =>
+          prev.map((booking) =>
+            getBookingThreadKey(booking) === getBookingThreadKey(request)
+              ? {
+                  ...booking,
+                  negotiatedFare: fare,
+                  negotiationStatus: 'pending',
+                  negotiationActor: 'driver',
+                  driverCounterPending: true,
+                  status: 'negotiating',
+                  updatedAt,
+                }
+              : booking
+          )
+        );
+        showAppDialog('Counter offer sent to traveler.', 'success');
+        return;
+      }
+
+      const threadBookings = await loadRelatedBookingThread(request);
+      const updatedAt = new Date().toISOString();
+      await Promise.all(
+        threadBookings.map((booking) =>
+          updateDoc(doc(db, 'bookings', booking.id), {
+            negotiatedFare: fare,
+            negotiationStatus: 'pending',
+            negotiationActor: 'driver',
+            driverCounterPending: true,
+            status: 'negotiating',
+            updatedAt,
+          })
+        )
+      );
       alert('Counter offer sent to traveler.');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
@@ -5395,6 +7283,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         driverPaymentTransactionId: payload.transactionId,
         driverPaymentReceiptUrl: receiptUrl,
         driverPaymentSubmittedAt: new Date().toISOString(),
+        driverPhone: profile.phoneNumber || '',
       });
       await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
       await maybeActivateRideLifecycle(booking.id);
@@ -5433,6 +7322,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         driverMaiCoinsUsed: coinsToUse,
         driverPaymentMode: 'maicoins',
         paymentStatus: 'paid',
+        driverPhone: profile.phoneNumber || '',
       });
 
       await walletService.onMaintenanceFeePaid(profile.uid, booking.id);
@@ -5480,16 +7370,30 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
 
     try {
+      const completedAt = new Date().toISOString();
       await updateDoc(doc(db, 'bookings', booking.id), {
         rideLifecycleStatus: 'completed',
-        rideEndedAt: new Date().toISOString(),
-        rideEndOtpVerifiedAt: new Date().toISOString(),
+        rideEndedAt: completedAt,
+        rideEndOtpVerifiedAt: completedAt,
         status: 'completed',
+        driverEarningsCreditedAt: booking.driverEarningsCreditedAt || completedAt,
       });
 
       await updateDoc(doc(db, 'rides', booking.rideId), {
         status: 'completed',
       });
+
+      if (!booking.driverEarningsCreditedAt) {
+        const driverRef = doc(db, 'users', booking.driverId);
+        const driverSnap = await getDoc(driverRef);
+        if (driverSnap.exists()) {
+          const driverData = driverSnap.data() as UserProfile;
+          const currentEarnings = driverData.driverDetails?.totalEarnings || 0;
+          await updateDoc(driverRef, {
+            'driverDetails.totalEarnings': currentEarnings + booking.fare,
+          });
+        }
+      }
 
       alert('Ride completed successfully. Go online again whenever you are ready for the next trip.');
     } catch (error) {
@@ -5718,7 +7622,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             </div>
 
             <DriverDashboardSummary
-              requests={requests}
+              requests={requests.filter((request) => !retiredRideIds.includes(request.rideId))}
               onAccept={(request) => handleDriverAction(request, 'confirmed')}
               onReject={(request) => handleDriverAction(request, 'rejected')}
               counterFares={counterFares}
@@ -5834,25 +7738,66 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-mairide-primary mb-2">Seats Available</label>
-                    <select 
+                    <div className="relative">
+                      <select 
+                        className="w-full appearance-none py-4 pl-4 pr-12 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                        value={newRide.seats}
+                        onChange={e => setNewRide({ ...newRide, seats: e.target.value })}
+                      >
+                        {[1, 2, 3, 4, 5, 6].map(n => (
+                          <option key={n} value={n}>
+                            {n} {n === 1 ? 'Seat' : 'Seats'}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronRight className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 rotate-90 text-mairide-secondary" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-mairide-primary mb-2">Journey Day</label>
+                    <div className="relative">
+                      <select
+                        className="w-full appearance-none py-4 pl-4 pr-12 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                        value={newRide.departureDay}
+                        onChange={e => setNewRide({ ...newRide, departureDay: e.target.value })}
+                      >
+                        <option value="today">Today</option>
+                        <option value="tomorrow">Tomorrow</option>
+                        <option value="dayAfter">Day After</option>
+                      </select>
+                      <ChevronRight className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 rotate-90 text-mairide-secondary" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-mairide-primary mb-2">Likely Start Time</label>
+                    <input
+                      type="time"
                       className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                      value={newRide.seats}
-                      onChange={e => setNewRide({ ...newRide, seats: e.target.value })}
-                    >
-                      {[1, 2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{n} Seats</option>)}
-                    </select>
+                      value={newRide.departureClock}
+                      onChange={e => setNewRide({ ...newRide, departureClock: e.target.value })}
+                    />
+                    <p className="mt-2 text-xs text-mairide-secondary">
+                      This is the likely start time only and may vary due to traffic, road conditions, weather, and operational delays.
+                    </p>
                   </div>
                 </div>
                 <button 
                   onClick={handlePostRide}
-                  className="w-full bg-mairide-accent text-white py-4 rounded-2xl font-bold hover:bg-mairide-primary transition-all"
+                  disabled={isPostingRide}
+                  className="w-full bg-mairide-accent text-white py-4 rounded-2xl font-bold hover:bg-mairide-primary transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Post Ride Offer
+                  {isPostingRide ? 'Posting Offer...' : 'Post Ride Offer'}
                 </button>
               </motion.div>
             )}
 
-            <MyRides profile={profile} />
+            <MyRides
+              profile={profile}
+              hiddenRideIds={retiredRideIds}
+              onRideRetired={(rideId) =>
+                setRetiredRideIds((prev) => (prev.includes(rideId) ? prev : [...prev, rideId]))
+              }
+            />
           </div>
         </>
       )}
@@ -7522,6 +9467,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     message: string;
     tone: 'success' | 'error' | 'info';
   } | null>(null);
+  const [forceCancellingRideId, setForceCancellingRideId] = useState<string | null>(null);
   const selectedDriverMarkers = buildVerificationMarkers(selectedDriver?.driverDetails);
 
   useEffect(() => {
@@ -7557,6 +9503,65 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     });
     return () => unsubscribe();
   }, []);
+
+  const handleAdminForceCancelRide = async (booking: any) => {
+    const rideId = booking.rideId || booking.ride_id;
+    if (!rideId) {
+      setAdminNotice({
+        title: 'Ride not found',
+        message: 'This booking is missing a linked ride reference, so support cannot cancel it from here.',
+        tone: 'error',
+      });
+      return;
+    }
+
+    setForceCancellingRideId(rideId);
+    try {
+      const headers = await getAdminRequestHeaders(profile.email);
+      await axios.post('/api/admin/force-cancel-ride', {
+        rideId,
+        bookingId: booking.id,
+        reason: 'Cancelled by MaiRide customer support',
+      }, { headers });
+
+      setBookings((prev) =>
+        prev.map((currentBooking) =>
+          (currentBooking.rideId || currentBooking.ride_id) === rideId
+            ? {
+                ...currentBooking,
+                status: 'cancelled',
+                rideRetired: true,
+                negotiationStatus: 'rejected',
+                forceCancelledByAdmin: true,
+              }
+            : currentBooking
+        )
+      );
+      setRides((prev) =>
+        prev.map((ride) =>
+          ride.id === rideId
+            ? {
+                ...ride,
+                status: 'cancelled',
+              }
+            : ride
+        )
+      );
+      setAdminNotice({
+        title: 'Ride cancelled',
+        message: 'MaiRide support override has cancelled this ride and retired its linked bookings.',
+        tone: 'success',
+      });
+    } catch (error: any) {
+      setAdminNotice({
+        title: 'Cancellation failed',
+        message: getApiErrorMessage(error, 'We could not cancel this ride from the admin panel right now.'),
+        tone: 'error',
+      });
+    } finally {
+      setForceCancellingRideId(null);
+    }
+  };
 
   useEffect(() => {
     if (!('geolocation' in navigator)) return;
@@ -8520,6 +10525,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     <th className="px-8 py-4">Fare</th>
                     <th className="px-8 py-4">Status</th>
                     <th className="px-8 py-4">Date</th>
+                    <th className="px-8 py-4">Support Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-mairide-secondary">
@@ -8551,6 +10557,22 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                       </td>
                       <td className="px-8 py-6">
                         <p className="text-xs text-mairide-secondary">{new Date(booking.createdAt).toLocaleDateString()}</p>
+                      </td>
+                      <td className="px-8 py-6">
+                        {booking.status !== 'cancelled' && booking.rideLifecycleStatus !== 'completed' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleAdminForceCancelRide(booking)}
+                            disabled={forceCancellingRideId === (booking.rideId || booking.ride_id)}
+                            className="rounded-xl border border-red-200 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            {forceCancellingRideId === (booking.rideId || booking.ride_id) ? 'Cancelling...' : 'Force cancel'}
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+                            No action
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -9790,6 +11812,23 @@ const App = () => {
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
 
   useEffect(() => {
+    const originalAlert = window.alert.bind(window);
+    window.alert = ((message?: any) => {
+      const normalizedMessage =
+        typeof message === 'string'
+          ? message
+          : message instanceof Error
+            ? message.message
+            : JSON.stringify(message);
+      showAppDialog(normalizedMessage);
+    }) as typeof window.alert;
+
+    return () => {
+      window.alert = originalAlert;
+    };
+  }, []);
+
+  useEffect(() => {
     const log = (msg: string) => setDebugInfo(prev => [...prev.slice(-4), `${new Date().toLocaleTimeString()}: ${msg}`]);
     
     log(`Initializing Maps with key: ${GOOGLE_MAPS_API_KEY.substring(0, 8)}...`);
@@ -9817,17 +11856,20 @@ const App = () => {
 
   if (!user) return (
     <ErrorBoundary>
-      <AuthPage 
-        user={user}
-        authMode={authMode} 
-        setAuthMode={setAuthMode} 
-        notRegisteredError={notRegisteredError} 
-        setNotRegisteredError={setNotRegisteredError}
-        role={role}
-        setRole={setRole}
-        referralCodeInput={referralCodeInput}
-        setReferralCodeInput={setReferralCodeInput}
-      />
+      <>
+        <AuthPage 
+          user={user}
+          authMode={authMode} 
+          setAuthMode={setAuthMode} 
+          notRegisteredError={notRegisteredError} 
+          setNotRegisteredError={setNotRegisteredError}
+          role={role}
+          setRole={setRole}
+          referralCodeInput={referralCodeInput}
+          setReferralCodeInput={setReferralCodeInput}
+        />
+        <AppDialogHost />
+      </>
     </ErrorBoundary>
   );
 
@@ -9852,6 +11894,7 @@ const App = () => {
             <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} />
           </div>
           <AppFooter />
+          <AppDialogHost />
         </div>
       </ErrorBoundary>
     );
@@ -9878,6 +11921,7 @@ const App = () => {
           </main>
           <AppFooter />
           <Chatbot />
+          <AppDialogHost />
         </div>
       </Router>
     </ErrorBoundary>

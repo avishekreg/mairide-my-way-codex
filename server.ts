@@ -4,6 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import authHandler from "./api/auth.ts";
+import bookingsHandler from "./api/bookings.ts";
+import userHandler from "./api/user.ts";
 import { handleCompleteSignup } from "./api/_lib/signup.ts";
 import { handleSubmitReview } from "./api/_lib/reviews.ts";
 import {
@@ -12,6 +14,7 @@ import {
   handleVerifyOtp,
 } from "./api/_lib/otp.ts";
 import {
+  handleAdminForceCancelRide,
   handleAdminCreateUser,
   handleAdminDeleteUser,
   handleAdminGetConfig,
@@ -19,7 +22,14 @@ import {
   handleAdminSaveConfig,
   handleAdminUpdatePassword,
   handleHealth,
+  handleUserCancelRide,
+  handleUserCreateRide,
+  handleUserCounterBooking,
   handleUserChangePassword,
+  handleUserRejectBooking,
+  handleUserTravelerCounterBooking,
+  handleUserTravelerRespondBooking,
+  requireAdminStaff,
   requireSuperAdmin,
 } from "./api/_lib/backend.ts";
 import { handleResolvePhoneLogin } from "./api/auth.ts";
@@ -63,7 +73,18 @@ async function startServer() {
     if (!(await requireSuperAdmin(req, res))) return;
     return handleAdminSaveConfig(req, res);
   });
+  app.post("/api/admin/force-cancel-ride", async (req, res) => {
+    if (!(await requireAdminStaff(req, res))) return;
+    return handleAdminForceCancelRide(req, res);
+  });
   app.post("/api/user/change-password", handleUserChangePassword);
+  app.post("/api/user/create-ride", handleUserCreateRide);
+  app.post("/api/user/reject-booking", handleUserRejectBooking);
+  app.post("/api/user/cancel-ride", handleUserCancelRide);
+  app.post("/api/user/counter-booking", handleUserCounterBooking);
+  app.post("/api/user/traveler-counter-booking", handleUserTravelerCounterBooking);
+  app.post("/api/user/traveler-respond-booking", handleUserTravelerRespondBooking);
+  app.all("/api/user", userHandler);
   app.all("/api/auth", authHandler);
   app.post("/api/auth/send-otp", handleSendOtp);
   app.post("/api/auth/send-email-otp", handleSendEmailOtp);
@@ -71,6 +92,7 @@ async function startServer() {
   app.post("/api/auth/complete-signup", handleCompleteSignup);
   app.post("/api/auth/resolve-phone-login", handleResolvePhoneLogin);
   app.post("/api/bookings/submit-review", handleSubmitReview);
+  app.all("/api/bookings", bookingsHandler);
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
