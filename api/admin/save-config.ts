@@ -1,6 +1,12 @@
-import adminHandler from "../admin.ts";
+import { handleAdminSaveConfig, requireSuperAdmin } from "../_lib/backend.ts";
 
 export default async function handler(req: any, res: any) {
-  req.query = { ...(req.query || {}), action: "save-config" };
-  return adminHandler(req, res);
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const allowed = await requireSuperAdmin(req, res);
+  if (!allowed) return;
+
+  return handleAdminSaveConfig(req, res);
 }
