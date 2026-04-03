@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import authHandler from "./api/auth.ts";
 import bookingsHandler from "./api/bookings.ts";
 import paymentsHandler from "./api/payments.ts";
-import adminHandler from "./api/admin.ts";
+import adminHandler from "./api/admin/[action].ts";
 import userHandler from "./api/user.ts";
 import { handleCompleteSignup } from "./api/_lib/signup.ts";
 import { handleSubmitReview } from "./api/_lib/reviews.ts";
@@ -89,7 +89,7 @@ async function startServer() {
     if (!(await requireAdminStaff(req, res))) return;
     return handleAdminForceCancelRide(req, res);
   });
-  app.all("/api/admin", adminHandler);
+  app.all("/api/admin/:action", adminHandler);
   app.post("/api/user/change-password", handleUserChangePassword);
   app.post("/api/user/create-ride", handleUserCreateRide);
   app.post("/api/user/reject-booking", handleUserRejectBooking);

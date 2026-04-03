@@ -10,7 +10,7 @@ import {
   handleAdminVerifyDriver,
   requireAdminStaff,
   requireSuperAdmin,
-} from "./_lib/backend.ts";
+} from "../_lib/backend.ts";
 
 type Handler = (req: any, res: any) => Promise<any>;
 
