@@ -7,6 +7,9 @@ import authHandler from "./api/auth.ts";
 import bookingsHandler from "./api/bookings.ts";
 import paymentsHandler from "./api/payments.ts";
 import adminHandler from "./api/admin-api.ts";
+import adminConfigHandler from "./api/admin-config.ts";
+import adminTransactionsHandler from "./api/admin-transactions.ts";
+import verifyDriverHandler from "./api/verify-driver.ts";
 import userHandler from "./api/user.ts";
 import completeDriverOnboardingHandler from "./api/complete-driver-onboarding.ts";
 import deleteUserHandler from "./api/delete-user.ts";
@@ -46,6 +49,9 @@ async function startServer() {
 
   app.get("/api/health", handleHealth);
   app.post("/api/delete-user", deleteUserHandler);
+  app.all("/api/admin-config", adminConfigHandler);
+  app.get("/api/admin-transactions", adminTransactionsHandler);
+  app.post("/api/verify-driver", verifyDriverHandler);
   app.post("/api/upload-driver-doc", uploadDriverDocHandler);
   app.all("/api/admin-api", adminHandler);
   app.post("/api/user/change-password", handleUserChangePassword);

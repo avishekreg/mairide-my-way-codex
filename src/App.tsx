@@ -828,6 +828,9 @@ const CONSENT_VERSION = 'consent-v1';
 const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const adminApiPath = (action: string) => `/api/admin-api?action=${encodeURIComponent(action)}`;
+const adminConfigPath = "/api/admin-config";
+const adminTransactionsPath = "/api/admin-transactions";
+const adminVerifyDriverPath = "/api/verify-driver";
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
@@ -9668,7 +9671,7 @@ const AdminConfigView = () => {
 
   const saveConfig = async (payload: Partial<AppConfig>) => {
     const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
-    const response = await axios.post(adminApiPath('save-config'), payload, {
+    const response = await axios.post(adminConfigPath, payload, {
       headers
     });
     if (response.data?.config) {
@@ -9682,7 +9685,7 @@ const AdminConfigView = () => {
       try {
         const defaults = buildDefaultConfig();
         const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
-        const response = await axios.get(adminApiPath('config'), { headers });
+        const response = await axios.get(adminConfigPath, { headers });
         if (response.data?.config) {
           setFormData({ ...defaults, ...response.data.config });
         } else {
@@ -10684,7 +10687,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     const loadTransactions = async () => {
       try {
         const headers = await getAdminRequestHeaders(profile.email);
-        const response = await axios.get(adminApiPath('transactions'), { headers });
+        const response = await axios.get(adminTransactionsPath, { headers });
         if (!active) return;
         setTransactions((response.data?.transactions || []) as Transaction[]);
       } catch (error) {
@@ -10984,7 +10987,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     }
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post(adminApiPath('verify-driver'), {
+      await axios.post(adminVerifyDriverPath, {
         uid: userId,
         verificationStatus: status,
         rejectionReason: status === 'rejected' ? rejectionReason : '',
