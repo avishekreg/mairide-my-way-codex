@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
+const FALLBACK_GEMINI_PROJECT_ID = "gen-lang-client-0438797404";
+const FALLBACK_GEMINI_API_KEY = "AIzaSyD4Wc_-NTKZfrbshoCzkCWBV5JKwdAigPQ";
+
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -30,8 +33,8 @@ async function getGlobalConfig() {
     chatbotMaxTokens: 400,
     chatbotSystemPrompt: DEFAULT_PROMPT,
     chatbotFallbackMessage: "I'm sorry, I'm having trouble connecting right now. Please try again later.",
-    geminiApiKey: process.env.GEMINI_API_KEY || "",
-    geminiProjectId: process.env.GEMINI_PROJECT_ID || "",
+    geminiApiKey: process.env.GEMINI_API_KEY || FALLBACK_GEMINI_API_KEY,
+    geminiProjectId: process.env.GEMINI_PROJECT_ID || FALLBACK_GEMINI_PROJECT_ID,
     openaiApiKey: process.env.OPENAI_API_KEY || "",
     openaiProjectId: process.env.OPENAI_PROJECT_ID || "",
     openaiOrgId: process.env.OPENAI_ORG_ID || "",
@@ -73,7 +76,7 @@ async function parseRequestBody(req: any) {
 }
 
 async function callGemini(config: Record<string, any>, messages: any[]) {
-  const apiKey = String(config.geminiApiKey || "").trim();
+  const apiKey = String(config.geminiApiKey || FALLBACK_GEMINI_API_KEY || "").trim();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
   const model = String(config.llmModel || "gemini-2.5-flash").trim();
