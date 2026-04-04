@@ -188,6 +188,11 @@ export interface AppConfig {
   chatbotTemperature?: number;
   chatbotMaxTokens?: number;
   chatbotFallbackMessage?: string;
+  chatbotDefaultLanguage?: string;
+  chatbotVoiceOutputEnabled?: boolean;
+  chatbotVoiceInputEnabled?: boolean;
+  chatbotTtsRate?: number;
+  chatbotTtsPitch?: number;
   geminiApiKey?: string;
   geminiProjectId?: string;
   openaiApiKey?: string;

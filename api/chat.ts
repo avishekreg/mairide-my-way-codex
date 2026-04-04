@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
-const FALLBACK_GEMINI_PROJECT_ID = "gen-lang-client-0438797404";
-const FALLBACK_GEMINI_API_KEY = "AIzaSyD4Wc_-NTKZfrbshoCzkCWBV5JKwdAigPQ";
+const FALLBACK_GEMINI_PROJECT_ID = "";
+const FALLBACK_GEMINI_API_KEY = "";
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -24,7 +24,12 @@ async function getGlobalConfig() {
     chatbotTemperature: 0.3,
     chatbotMaxTokens: 400,
     chatbotSystemPrompt: DEFAULT_PROMPT,
-    chatbotFallbackMessage: "MaiRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
+    chatbotFallbackMessage: "Mai Ira is temporarily unavailable. Please use the Support section if you need urgent help.",
+    chatbotDefaultLanguage: "en-IN",
+    chatbotVoiceOutputEnabled: true,
+    chatbotVoiceInputEnabled: true,
+    chatbotTtsRate: 0.95,
+    chatbotTtsPitch: 1.02,
     geminiApiKey: process.env.GEMINI_API_KEY || FALLBACK_GEMINI_API_KEY,
     geminiProjectId: process.env.GEMINI_PROJECT_ID || FALLBACK_GEMINI_PROJECT_ID,
     openaiApiKey: process.env.OPENAI_API_KEY || "",
@@ -54,7 +59,39 @@ async function getGlobalConfig() {
 }
 
 const DEFAULT_PROMPT =
-  "You are MaiRide's official in-app assistant. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing. Keep responses concise, helpful, and action-oriented.";
+  "You are MaiRide's official in-app assistant, Mai Ira. Sound warm, human, empathetic, and concise. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing. Keep responses practical and action-oriented.";
+
+function getLanguageInstruction(language?: string) {
+  const normalized = String(language || "en-IN").trim().toLowerCase();
+  if (normalized.startsWith("hi")) {
+    return "Reply in natural Hindi suitable for Indian riders and drivers.";
+  }
+  if (normalized.startsWith("bn")) {
+    return "Reply in natural Bengali suitable for Indian riders and drivers.";
+  }
+  if (normalized.startsWith("ta")) {
+    return "Reply in natural Tamil suitable for Indian riders and drivers.";
+  }
+  if (normalized.startsWith("te")) {
+    return "Reply in natural Telugu suitable for Indian riders and drivers.";
+  }
+  if (normalized.startsWith("mr")) {
+    return "Reply in natural Marathi suitable for Indian riders and drivers.";
+  }
+  if (normalized.startsWith("gu")) {
+    return "Reply in natural Gujarati suitable for Indian riders and drivers.";
+  }
+  if (normalized.startsWith("kn")) {
+    return "Reply in natural Kannada suitable for Indian riders and drivers.";
+  }
+  if (normalized.startsWith("ml")) {
+    return "Reply in natural Malayalam suitable for Indian riders and drivers.";
+  }
+  if (normalized.startsWith("pa")) {
+    return "Reply in natural Punjabi suitable for Indian riders and drivers.";
+  }
+  return "Reply in Indian English with a friendly, supportive tone.";
+}
 
 function normalizeMessages(messages: any[] = []) {
   return messages
@@ -66,11 +103,11 @@ function buildStaticMaiRideReply(rawMessage: string) {
   const message = String(rawMessage || "").trim().toLowerCase();
 
   if (!message) {
-    return "Hello. I can help with MaiRide rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions.";
+    return "Hi, I’m Mai Ira. I can help with MaiRide rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions.";
   }
 
   if (/(^|\b)(hi|hello|hey|namaste|hola)(\b|$)/.test(message)) {
-    return "Hello. I’m the MaiRide Assistant. I can help with ride booking, pricing, negotiation flow, payment steps, support, and booking status.";
+    return "Hi, I’m Mai Ira. I can help with ride booking, pricing, negotiation flow, payment steps, support, and booking status.";
   }
 
   if (message.includes("price") || message.includes("fare") || message.includes("cost")) {
@@ -123,12 +160,13 @@ async function parseRequestBody(req: any) {
   }
 }
 
-async function callGemini(config: Record<string, any>, messages: any[]) {
+async function callGemini(config: Record<string, any>, messages: any[], language?: string) {
   const apiKey = String(config.geminiApiKey || FALLBACK_GEMINI_API_KEY || "").trim();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
   const model = String(config.llmModel || "gemini-2.5-flash").trim();
   const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
+  const languageInstruction = getLanguageInstruction(language);
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
 
@@ -139,7 +177,7 @@ async function callGemini(config: Record<string, any>, messages: any[]) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: systemPrompt }],
+          parts: [{ text: `${systemPrompt}\n\n${languageInstruction}` }],
         },
         contents: messages.map((message) => ({
           role: message.role === "assistant" ? "model" : "user",
@@ -168,12 +206,13 @@ async function callGemini(config: Record<string, any>, messages: any[]) {
   return text;
 }
 
-async function callOpenAI(config: Record<string, any>, messages: any[]) {
+async function callOpenAI(config: Record<string, any>, messages: any[], language?: string) {
   const apiKey = String(config.openaiApiKey || "").trim();
   if (!apiKey) throw new Error("OpenAI API key is not configured.");
 
   const model = String(config.llmModel || "gpt-4o-mini").trim();
   const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
+  const languageInstruction = getLanguageInstruction(language);
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
 
@@ -190,7 +229,7 @@ async function callOpenAI(config: Record<string, any>, messages: any[]) {
     headers,
     body: JSON.stringify({
       model,
-      instructions: systemPrompt,
+      instructions: `${systemPrompt}\n\n${languageInstruction}`,
       input: messages.map((message) => ({
         role: message.role,
         content: [{ type: "input_text", text: message.content }],
@@ -214,12 +253,13 @@ async function callOpenAI(config: Record<string, any>, messages: any[]) {
   return text;
 }
 
-async function callClaude(config: Record<string, any>, messages: any[]) {
+async function callClaude(config: Record<string, any>, messages: any[], language?: string) {
   const apiKey = String(config.claudeApiKey || "").trim();
   if (!apiKey) throw new Error("Claude API key is not configured.");
 
   const model = String(config.llmModel || "claude-3-5-haiku-latest").trim();
   const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
+  const languageInstruction = getLanguageInstruction(language);
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
 
@@ -232,7 +272,7 @@ async function callClaude(config: Record<string, any>, messages: any[]) {
     },
     body: JSON.stringify({
       model,
-      system: systemPrompt,
+      system: `${systemPrompt}\n\n${languageInstruction}`,
       max_tokens: maxTokens,
       temperature,
       messages: messages.map((message) => ({
@@ -267,6 +307,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const body = await parseRequestBody(req);
+    const language = String(body?.language || config.chatbotDefaultLanguage || "en-IN");
     const incomingMessages = normalizeMessages(body?.messages || []);
     const message = String(body?.message || "").trim();
     const messages =
@@ -285,13 +326,13 @@ export default async function handler(req: any, res: any) {
     try {
       switch (provider) {
         case "gemini":
-          reply = await callGemini(config, messages);
+          reply = await callGemini(config, messages, language);
           break;
         case "openai":
-          reply = await callOpenAI(config, messages);
+          reply = await callOpenAI(config, messages, language);
           break;
         case "claude":
-          reply = await callClaude(config, messages);
+          reply = await callClaude(config, messages, language);
           break;
         default:
           return res.status(400).json({ error: "Unsupported LLM provider" });
@@ -307,7 +348,7 @@ export default async function handler(req: any, res: any) {
     console.error("Chat route failed:", error);
     return res.status(500).json({
       error: error?.message || "A server error has occurred",
-      message: error?.message || "MaiRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
+      message: error?.message || "Mai Ira is temporarily unavailable. Please use the Support section if you need urgent help.",
     });
   }
 }

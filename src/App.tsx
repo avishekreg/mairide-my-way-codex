@@ -97,6 +97,10 @@ import {
   Navigation,
   MessageSquare,
   Send,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
   PlusCircle,
   TrendingUp,
   LineChart as LineChartIcon,
@@ -9060,43 +9064,190 @@ const Chatbot = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>(String(config.chatbotDefaultLanguage || 'en-IN'));
+  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(config.chatbotVoiceOutputEnabled !== false);
+  const [voiceInputEnabled, setVoiceInputEnabled] = useState(config.chatbotVoiceInputEnabled !== false);
+  const [ttsRate, setTtsRate] = useState(Number(config.chatbotTtsRate ?? 0.95));
+  const [ttsPitch, setTtsPitch] = useState(Number(config.chatbotTtsPitch ?? 1.02));
+  const [voiceInputSupported, setVoiceInputSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const chatApiPath = '/api/chat';
 
-  const buildStaticMaiRideReply = (rawMessage: string) => {
+  useEffect(() => {
+    setSelectedLanguage(String(config.chatbotDefaultLanguage || 'en-IN'));
+    setVoiceOutputEnabled(config.chatbotVoiceOutputEnabled !== false);
+    setVoiceInputEnabled(config.chatbotVoiceInputEnabled !== false);
+    setTtsRate(Number(config.chatbotTtsRate ?? 0.95));
+    setTtsPitch(Number(config.chatbotTtsPitch ?? 1.02));
+  }, [
+    config.chatbotDefaultLanguage,
+    config.chatbotVoiceOutputEnabled,
+    config.chatbotVoiceInputEnabled,
+    config.chatbotTtsRate,
+    config.chatbotTtsPitch,
+  ]);
+
+  const languageOptions = useMemo(
+    () => [
+      { value: 'en-IN', label: 'English' },
+      { value: 'hi-IN', label: 'Hindi' },
+      { value: 'bn-IN', label: 'Bengali' },
+      { value: 'ta-IN', label: 'Tamil' },
+      { value: 'te-IN', label: 'Telugu' },
+      { value: 'mr-IN', label: 'Marathi' },
+      { value: 'gu-IN', label: 'Gujarati' },
+      { value: 'kn-IN', label: 'Kannada' },
+      { value: 'ml-IN', label: 'Malayalam' },
+      { value: 'pa-IN', label: 'Punjabi' },
+    ],
+    []
+  );
+
+  const getLanguageLabel = (language: string) =>
+    languageOptions.find((item) => item.value === language)?.label || 'English';
+
+  const pickPreferredVoice = (voices: SpeechSynthesisVoice[]) => {
+    const femaleHint = /(female|woman|aditi|priya|samantha|veena|karen|zira)/i;
+    const languagePrefix = selectedLanguage.split('-')[0]?.toLowerCase();
+    const exact = voices.filter((voice) => voice.lang?.toLowerCase() === selectedLanguage.toLowerCase());
+    const byPrefix = voices.filter((voice) => voice.lang?.toLowerCase().startsWith(languagePrefix));
+    const pool = exact.length ? exact : byPrefix.length ? byPrefix : voices;
+    const female = pool.find((voice) => femaleHint.test(voice.name));
+    return female || pool[0] || null;
+  };
+
+  const speakReply = (text: string) => {
+    if (!voiceOutputEnabled || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = selectedLanguage;
+      utterance.rate = Number.isFinite(ttsRate) ? Math.max(0.75, Math.min(1.15, ttsRate)) : 0.95;
+      utterance.pitch = Number.isFinite(ttsPitch) ? Math.max(0.8, Math.min(1.2, ttsPitch)) : 1.0;
+      const preferredVoice = pickPreferredVoice(window.speechSynthesis.getVoices() || []);
+      if (preferredVoice) utterance.voice = preferredVoice;
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      console.error('Voice output failed:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setVoiceInputSupported(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = selectedLanguage;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+    recognition.onresult = (event: any) => {
+      const transcript = event?.results?.[0]?.[0]?.transcript;
+      if (typeof transcript === 'string' && transcript.trim()) {
+        setInput((prev) => (prev ? `${prev} ${transcript.trim()}` : transcript.trim()));
+      }
+    };
+
+    recognitionRef.current = recognition;
+    setVoiceInputSupported(true);
+
+    return () => {
+      try {
+        recognition.stop();
+      } catch {
+        // no-op
+      }
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = selectedLanguage;
+    }
+  }, [selectedLanguage]);
+
+  const buildStaticMaiRideReply = (rawMessage: string, language: string) => {
+    const lang = String(language || '').toLowerCase();
     const message = String(rawMessage || '').trim().toLowerCase();
+    const hindi = lang.startsWith('hi');
 
     if (!message) {
-      return "Hello. I can help with MaiRide rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions.";
+      return hindi
+        ? "नमस्ते, मैं Mai Ira हूँ। मैं राइड, किराया, बुकिंग फ्लो, सपोर्ट और स्टेटस अपडेट में आपकी मदद कर सकती हूँ।"
+        : "Hi, I’m Mai Ira. I can help with rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions.";
     }
 
     if (/(^|\\b)(hi|hello|hey|namaste)(\\b|$)/.test(message)) {
-      return "Hello. I’m the MaiRide Assistant. I can help with ride booking, pricing, booking status, payment steps, support, and service regions.";
+      return hindi
+        ? "नमस्ते, मैं Mai Ira हूँ। आप बुकिंग, पेमेंट, नेगोशिएशन और सपोर्ट में जो भी मदद चाहें, मैं साथ हूँ।"
+        : "Hi, I’m Mai Ira from MaiRide. I can help with bookings, pricing, payments, support, and live ride status.";
     }
 
     if (message.includes('book') || message.includes('booking flow')) {
-      return "To book a ride, search available rides, open the ride card, review route and departure timing, then send a booking request or counter offer. Once one side accepts, both parties complete the platform-fee payment and contact details unlock automatically.";
+      return hindi
+        ? "बुकिंग के लिए: राइड सर्च करें, रूट और टाइम चेक करें, फिर request या counter offer भेजें। किसी एक पक्ष के accept करते ही platform fee payment के बाद contact details unlock हो जाती हैं।"
+        : "Booking flow: search rides, open a ride card, verify route and departure timing, then send a booking request or counter offer. Once either side accepts, both parties complete platform-fee payment and contact details unlock automatically.";
     }
 
     if (message.includes('price') || message.includes('fare') || message.includes('cost')) {
-      return "MaiRide shows the listed ride fare on each offer card. Platform fee and GST are shown separately before confirmation. During negotiation, both parties can counter until one side accepts or rejects.";
+      return hindi
+        ? "राइड कार्ड पर listed fare दिखता है। Confirmation से पहले platform fee और GST अलग से दिखते हैं। नेगोशिएशन accept/reject होने तक चलता रहता है।"
+        : "The ride card shows the listed fare. Platform fee and GST are shown separately before confirmation. Negotiation stays active until one side accepts or rejects.";
     }
 
     if (message.includes('status')) {
-      return "You can check booking status from your active booking or ride card. Common states are pending, counter offer, confirmed, paid, started, and completed.";
+      return hindi
+        ? "बुकिंग स्टेटस active card से ट्रैक कर सकते हैं: pending, counter offer, confirmed, paid, started, completed."
+        : "You can track status from your active booking/ride card: pending, counter offer, confirmed, paid, started, and completed.";
     }
 
     if (message.includes('support') || message.includes('ticket')) {
-      return "For help, please use the Support section in the app so the MaiRide team can track your issue properly. If a ride needs cancellation after confirmation, customer support or admin action is required.";
+      return hindi
+        ? "किसी भी समस्या के लिए Support सेक्शन से ticket बनाएं। Post-confirmation cancellation के लिए support/admin override की जरूरत होती है।"
+        : "For any issue, please open a ticket from Support so the team can resolve it quickly. For post-confirmation cancellation, support/admin override is required.";
     }
 
     if (message.includes('region') || message.includes('service area')) {
-      return "MaiRide currently shows route-based ride offers when there is an active approved driver offer matching your search and timing window.";
+      return hindi
+        ? "MaiRide route और timing match के आधार पर active approved driver offers दिखाता है।"
+        : "MaiRide shows route-based offers when there is an active approved driver matching your route and timing window.";
     }
 
     if (message.includes('admin')) {
-      return "Admin actions include driver verification, user management, ride oversight, transactions, config management, and support handling, depending on role access.";
+      return hindi
+        ? "Admin actions में driver verification, user management, rides oversight, transactions, config और support workflows शामिल हैं।"
+        : "Admin actions include driver verification, user management, ride oversight, transactions, config, and support workflows.";
     }
 
-    return "I can help with MaiRide rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions. Please ask a MaiRide-specific question.";
+    return hindi
+      ? "मैं MaiRide से जुड़ी मदद के लिए हूँ: rides, fares, booking flow, status tracking, support tickets और admin actions."
+      : "I can help with MaiRide rides, fares, booking flow, status tracking, support tickets, service regions, and admin actions.";
+  };
+
+  const toggleVoiceInput = () => {
+    if (!voiceInputEnabled) return;
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+    try {
+      if (isListening) {
+        recognition.stop();
+      } else {
+        recognition.start();
+      }
+    } catch (error) {
+      console.error('Voice input toggle failed:', error);
+      setIsListening(false);
+    }
   };
 
   const handleSend = async () => {
@@ -9115,26 +9266,38 @@ const Chatbot = () => {
     setIsTyping(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      const text = buildStaticMaiRideReply(currentInput);
+      const transcript = [...messages, userMsg]
+        .slice(-10)
+        .map((message) => ({ role: message.role, content: message.content }));
+      const response = await axios.post(chatApiPath, {
+        messages: transcript,
+        language: selectedLanguage,
+      });
+      const text = String(response?.data?.message || '').trim();
+      const finalText = text || buildStaticMaiRideReply(currentInput, selectedLanguage);
 
       const botMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: text,
+        content: finalText,
         createdAt: new Date().toISOString()
       };
 
       setMessages(prev => [...prev, botMsg]);
+      speakReply(finalText);
     } catch (error) {
       console.error("Chatbot Error:", error);
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: buildStaticMaiRideReply(currentInput),
+        content:
+          getApiErrorMessage(error, '')?.trim() ||
+          config.chatbotFallbackMessage ||
+          buildStaticMaiRideReply(currentInput, selectedLanguage),
         createdAt: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMsg]);
+      speakReply(errorMsg.content);
     } finally {
       setIsTyping(false);
     }
@@ -9156,19 +9319,44 @@ const Chatbot = () => {
                   <Bot className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-white font-bold">MaiRide Assistant</h3>
+                  <h3 className="text-white font-bold">Mai Ira</h3>
                   <p className="text-white/60 text-[10px] uppercase tracking-wider">Online</p>
                 </div>
               </div>
-              <button onClick={() => setIsOpen(false)} className="text-white/60 hover:text-white">
-                <X className="w-6 h-6" />
-              </button>
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedLanguage}
+                  onChange={(e) => setSelectedLanguage(e.target.value)}
+                  className="bg-white/10 text-white text-xs rounded-lg px-2 py-1 border border-white/20 outline-none"
+                  title="Assistant language"
+                >
+                  {languageOptions.map((option) => (
+                    <option key={option.value} value={option.value} className="text-mairide-primary">
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setVoiceOutputEnabled(prev => !prev)}
+                  className="text-white/70 hover:text-white transition-colors"
+                  title={voiceOutputEnabled ? 'Disable voice replies' : 'Enable voice replies'}
+                >
+                  {voiceOutputEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                </button>
+                <button onClick={() => setIsOpen(false)} className="text-white/60 hover:text-white">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-mairide-bg">
               {messages.length === 0 && (
                 <div className="text-center py-8">
-                  <p className="text-mairide-secondary text-sm italic serif">How can I help you today?</p>
+                  <p className="text-mairide-secondary text-sm italic serif">
+                    {selectedLanguage.startsWith('hi')
+                      ? 'आज मैं आपकी कैसे मदद कर सकती हूँ?'
+                      : `How can I help you today? (${getLanguageLabel(selectedLanguage)})`}
+                  </p>
                 </div>
               )}
               {messages.map(msg => (
@@ -9212,6 +9400,20 @@ const Chatbot = () => {
               >
                 <Send className="w-5 h-5" />
               </button>
+              {voiceInputSupported && voiceInputEnabled && (
+                <button
+                  onClick={toggleVoiceInput}
+                  className={cn(
+                    "p-2 rounded-xl transition-transform",
+                    isListening
+                      ? "bg-red-500 text-white hover:scale-105"
+                      : "bg-mairide-primary text-white hover:scale-105"
+                  )}
+                  title={isListening ? 'Stop listening' : 'Speak your message'}
+                >
+                  {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                </button>
+              )}
             </div>
           </motion.div>
         )}
@@ -10025,6 +10227,11 @@ const AdminConfigView = () => {
     chatbotTemperature: 0.3,
     chatbotMaxTokens: 400,
     chatbotFallbackMessage: "MaiRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
+    chatbotDefaultLanguage: 'en-IN',
+    chatbotVoiceOutputEnabled: true,
+    chatbotVoiceInputEnabled: true,
+    chatbotTtsRate: 0.95,
+    chatbotTtsPitch: 1.02,
     appBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
     publicApiBaseUrl: typeof window !== 'undefined' ? `${window.location.origin}/api` : '',
     environmentLabel: typeof window !== 'undefined' ? window.location.hostname : 'localhost',
@@ -10547,6 +10754,71 @@ const AdminConfigView = () => {
                   max="2000"
                   value={formData.chatbotMaxTokens ?? 400}
                   onChange={e => setFormData({ ...formData, chatbotMaxTokens: Number(e.target.value) })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Default Chat Language</label>
+                <select
+                  value={formData.chatbotDefaultLanguage || 'en-IN'}
+                  onChange={e => setFormData({ ...formData, chatbotDefaultLanguage: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="en-IN">English (India)</option>
+                  <option value="hi-IN">Hindi</option>
+                  <option value="bn-IN">Bengali</option>
+                  <option value="ta-IN">Tamil</option>
+                  <option value="te-IN">Telugu</option>
+                  <option value="mr-IN">Marathi</option>
+                  <option value="gu-IN">Gujarati</option>
+                  <option value="kn-IN">Kannada</option>
+                  <option value="ml-IN">Malayalam</option>
+                  <option value="pa-IN">Punjabi</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Voice Output</label>
+                <select
+                  value={formData.chatbotVoiceOutputEnabled === false ? 'disabled' : 'enabled'}
+                  onChange={e => setFormData({ ...formData, chatbotVoiceOutputEnabled: e.target.value === 'enabled' })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Voice Input (STT)</label>
+                <select
+                  value={formData.chatbotVoiceInputEnabled === false ? 'disabled' : 'enabled'}
+                  onChange={e => setFormData({ ...formData, chatbotVoiceInputEnabled: e.target.value === 'enabled' })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">TTS Speech Rate</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.75"
+                  max="1.15"
+                  value={formData.chatbotTtsRate ?? 0.95}
+                  onChange={e => setFormData({ ...formData, chatbotTtsRate: Number(e.target.value) })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">TTS Pitch</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.8"
+                  max="1.2"
+                  value={formData.chatbotTtsPitch ?? 1.02}
+                  onChange={e => setFormData({ ...formData, chatbotTtsPitch: Number(e.target.value) })}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
               </div>
