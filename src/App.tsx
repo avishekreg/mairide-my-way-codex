@@ -1001,6 +1001,50 @@ const persistCounterOfferThroughCompatStore = async (
   return updatedAt;
 };
 
+const persistNegotiationResolutionThroughCompatStore = async (
+  seedBooking: Booking,
+  actor: 'driver' | 'consumer',
+  action: 'accepted' | 'rejected' | 'confirmed',
+  options?: {
+    acceptedFare?: number;
+    driverPhone?: string;
+  }
+) => {
+  const updatedAt = new Date().toISOString();
+  const threadRows = await loadNegotiationThreadBookings(seedBooking);
+  const normalizedAction = action === 'confirmed' ? 'accepted' : action;
+  const nextStatus = normalizedAction === 'accepted' ? 'confirmed' : 'rejected';
+  const nextNegotiationStatus = normalizedAction === 'accepted' ? 'accepted' : 'rejected';
+  const nextFare =
+    normalizedAction === 'accepted'
+      ? options?.acceptedFare ?? getNegotiationDisplayFare(seedBooking)
+      : undefined;
+
+  await Promise.all(
+    threadRows.map((booking) =>
+      updateDoc(doc(db, 'bookings', booking.id), {
+        ...(normalizedAction === 'accepted' && Number.isFinite(nextFare) ? { fare: nextFare } : {}),
+        status: nextStatus,
+        negotiationStatus: nextNegotiationStatus,
+        negotiationActor: actor,
+        driverCounterPending: false,
+        rideRetired: normalizedAction === 'rejected',
+        ...(options?.driverPhone ? { driverPhone: options.driverPhone } : {}),
+        updatedAt,
+      })
+    )
+  );
+
+  if (normalizedAction === 'accepted' && seedBooking.rideId) {
+    await updateDoc(doc(db, 'rides', seedBooking.rideId), {
+      status: 'full',
+      updatedAt,
+    });
+  }
+
+  return updatedAt;
+};
+
 const getNegotiationDisplayFare = (booking: Booking) => {
   const negotiatedFare = Number(getBookingNegotiationField<number | string>(booking, 'negotiatedFare'));
   const negotiationStatus = String(getBookingNegotiationField<string>(booking, 'negotiationStatus') || '');
@@ -5146,7 +5190,34 @@ const finalizeTravelerRazorpayPayment = async (
       showAppDialog(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.', 'success');
       return;
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${bookingId}`);
+      try {
+        const booking = bookings.find((candidate) => candidate.id === bookingId);
+        if (!booking) throw error;
+        const acceptedFare =
+          action === 'accepted' ? negotiatedFare ?? getNegotiationDisplayFare(booking) : undefined;
+        const updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
+          acceptedFare,
+        });
+        setBookings((prev) =>
+          prev.map((candidate) =>
+            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+              ? {
+                  ...candidate,
+                  status: action === 'accepted' ? 'confirmed' : 'rejected',
+                  ...(action === 'accepted' && acceptedFare ? { fare: acceptedFare } : {}),
+                  negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+                  negotiationActor: 'driver',
+                  driverCounterPending: false,
+                  rideRetired: action === 'rejected',
+                  updatedAt,
+                }
+              : candidate
+          )
+        );
+        showAppDialog(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.', 'success');
+      } catch (fallbackError) {
+        handleFirestoreError(fallbackError, OperationType.UPDATE, `bookings/${bookingId}`);
+      }
     }
   };
 
@@ -6991,8 +7062,33 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       );
       showAppDialog(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.', 'success');
     } catch (error: any) {
-      const message = getApiErrorMessage(error, 'Failed to update negotiation.');
-      showAppDialog(message, 'error', 'Negotiation update failed');
+      try {
+        const acceptedFare =
+          action === 'accepted' ? booking.negotiatedFare ?? getNegotiationDisplayFare(booking) : undefined;
+        const updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
+          acceptedFare,
+        });
+        setDashboardBookings((prev) =>
+          prev.map((candidate) =>
+            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+              ? {
+                  ...candidate,
+                  status: action === 'accepted' ? 'confirmed' : 'rejected',
+                  ...(action === 'accepted' && acceptedFare ? { fare: acceptedFare } : {}),
+                  negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+                  negotiationActor: 'driver',
+                  driverCounterPending: false,
+                  rideRetired: action === 'rejected',
+                  updatedAt,
+                }
+              : candidate
+          )
+        );
+        showAppDialog(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.', 'success');
+      } catch (fallbackError: any) {
+        const message = getApiErrorMessage(fallbackError, 'Failed to update negotiation.');
+        showAppDialog(message, 'error', 'Negotiation update failed');
+      }
     }
   };
 
@@ -8122,7 +8218,42 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
       showAppDialog(status === 'confirmed' ? 'Booking confirmed.' : 'Traveler offer rejected.', 'success');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
+      try {
+        const acceptedFare =
+          hasPendingTravelerCounterOffer(request) && request.negotiatedFare
+            ? request.negotiatedFare
+            : getNegotiationDisplayFare(request);
+        const updatedAt = await persistNegotiationResolutionThroughCompatStore(
+          request,
+          hasPendingTravelerCounterOffer(request) ? 'consumer' : 'driver',
+          status,
+          {
+            acceptedFare,
+            driverPhone: profile.phoneNumber || '',
+          }
+        );
+        setRequests((prev) =>
+          status === 'rejected'
+            ? prev.filter((booking) => getBookingThreadKey(booking) !== getBookingThreadKey(request))
+            : prev.map((booking) =>
+                getBookingThreadKey(booking) === getBookingThreadKey(request)
+                  ? {
+                      ...booking,
+                      status,
+                      fare: acceptedFare,
+                      negotiationStatus:
+                        booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
+                      driverCounterPending: false,
+                      driverPhone: profile.phoneNumber || '',
+                      updatedAt,
+                    }
+                  : booking
+              )
+        );
+        showAppDialog(status === 'confirmed' ? 'Booking confirmed.' : 'Traveler offer rejected.', 'success');
+      } catch (fallbackError) {
+        handleFirestoreError(fallbackError, OperationType.UPDATE, `bookings/${request.id}`);
+      }
     }
   };
 
