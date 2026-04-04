@@ -905,13 +905,13 @@ type AppDialogDetail = {
 };
 
 const getBookingNegotiationField = <T,>(booking: Booking, key: string): T | undefined => {
-  const topLevel = (booking as any)?.[key];
-  if (topLevel !== undefined && topLevel !== null && topLevel !== '') {
-    return topLevel as T;
-  }
   const nested = (booking as any)?.data?.[key];
   if (nested !== undefined && nested !== null && nested !== '') {
     return nested as T;
+  }
+  const topLevel = (booking as any)?.[key];
+  if (topLevel !== undefined && topLevel !== null && topLevel !== '') {
+    return topLevel as T;
   }
   return undefined;
 };
@@ -1587,7 +1587,7 @@ const LoadingScreen = () => (
           {BRAND_NAME}
         </h1>
         <p className="text-[10px] text-mairide-secondary mt-2 opacity-50">
-          {APP_VERSION} | All rights reserved MaiRide
+          {APP_VERSION} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
         </p>
       </div>
     </motion.div>
@@ -1598,7 +1598,7 @@ const AppFooter = () => (
   <footer className="px-4 pb-6">
     <div className="max-w-7xl mx-auto flex justify-center">
       <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
-        Release {APP_VERSION} | Copyright {new Date().getFullYear()} MaiRide. All rights reserved.
+        Release {APP_VERSION} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
       </p>
     </div>
   </footer>
@@ -4683,36 +4683,8 @@ const DriverDashboardSummary = ({
                 <span className="text-lg font-black text-mairide-accent">{formatCurrency(displayFare)}</span>
               </div>
             </div>
-            {showsDetour && (
-              <div className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
-                <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-mairide-accent" /><p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Traveler Detour Request</p></div>
-                <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Your listed route</p>
-                    <p className="mt-1 text-sm font-semibold text-mairide-primary">{request.origin} → {request.destination}</p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler requested route</p>
-                    <p className="mt-1 text-sm font-semibold text-mairide-primary">{requestedOrigin} → {requestedDestination}</p>
-                  </div>
-                </div>
-                <div className="mt-3 rounded-xl bg-white/80 p-3">
-                  <p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Decision Impact</p>
-                  <p className="mt-1 text-sm font-semibold text-mairide-primary">This booking changes your listed route. Please review the detour carefully before you accept, reject, or counter.</p>
-                </div>
-              </div>
-            )}
             {(request.status === 'pending' || request.status === 'negotiating' || travelerCounterPending || driverCounterPending) && (
               <div className="mt-4 space-y-4">
-                {driverCounterPending && (
-                  <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
-                    <p className="font-bold text-mairide-primary">Your latest counter offer is active.</p>
-                    <p className="mt-2 text-sm text-mairide-secondary">
-                      The negotiation is still live. You can accept, reject, or revise{' '}
-                      <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span> at any time until the traveler makes a final decision.
-                    </p>
-                  </div>
-                )}
                 <div className="flex gap-3">
                   <button onClick={() => onAccept(request)} className={cn("flex-1 bg-green-600 text-white py-3", primaryActionButtonClass)}>
                     {travelerCounterPending || driverCounterPending ? 'Accept Offer' : 'Accept Request'}
@@ -4733,6 +4705,34 @@ const DriverDashboardSummary = ({
                     Send Counter
                   </button>
                 </div>
+                {showsDetour && (
+                  <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                    <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-mairide-accent" /><p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Traveler Detour Request</p></div>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      <div>
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Your listed route</p>
+                        <p className="mt-1 text-sm font-semibold text-mairide-primary">{request.origin} → {request.destination}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler requested route</p>
+                        <p className="mt-1 text-sm font-semibold text-mairide-primary">{requestedOrigin} → {requestedDestination}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-xl bg-white/80 p-3">
+                      <p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Decision Impact</p>
+                      <p className="mt-1 text-sm font-semibold text-mairide-primary">This booking changes your listed route. Please review the detour carefully before you accept, reject, or counter.</p>
+                    </div>
+                  </div>
+                )}
+                {driverCounterPending && (
+                  <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                    <p className="font-bold text-mairide-primary">Your latest counter offer is active.</p>
+                    <p className="mt-2 text-sm text-mairide-secondary">
+                      The negotiation is still live. You can accept, reject, or revise{' '}
+                      <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span> at any time until the traveler makes a final decision.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
             {request.status === 'confirmed' && (
