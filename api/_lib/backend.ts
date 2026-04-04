@@ -865,11 +865,13 @@ export async function handleUserSearchRides(_req: ReqLike, res: ResLike) {
           const status = row.status || data.status;
           const onboardingComplete = row.onboarding_complete ?? data.onboardingComplete;
           const verificationStatus = row.verification_status || data.verificationStatus;
+          const hasDriverDetails = Boolean(row.driver_details || data.driverDetails);
           return (
             role === "driver" &&
             status === "active" &&
             onboardingComplete === true &&
-            verificationStatus === "approved"
+            hasDriverDetails &&
+            verificationStatus !== "rejected"
           );
         })
         .map((row: any) => row.id)
