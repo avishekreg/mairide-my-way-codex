@@ -1132,22 +1132,29 @@ export async function handleUserRespondBooking(req: ReqLike, res: ResLike) {
     }
 
     const seedData = bookingRow.data || {};
-    const threadKey = getBookingThreadKey(seedData);
     const updatedAt = new Date().toISOString();
-    const { data: candidateRows, error: candidateError } = await supabaseAdmin
-      .from("bookings")
-      .select("*")
-      .eq("driver_id", driverId)
-      .eq("consumer_id", bookingRow.consumer_id || seedData.consumerId);
+    const rideId = bookingRow.ride_id || seedData.rideId;
+    const consumerId = bookingRow.consumer_id || seedData.consumerId;
+    let targetRows = [bookingRow];
 
-    if (candidateError) throw candidateError;
+    if (rideId && consumerId) {
+      const { data: candidateRows, error: candidateError } = await supabaseAdmin
+        .from("bookings")
+        .select("*")
+        .eq("ride_id", rideId)
+        .eq("consumer_id", consumerId);
 
-    const threadRows = (candidateRows || []).filter((row: any) => {
-      const rowData = row.data || {};
-      return getBookingThreadKey(rowData) === threadKey && isActiveBookingStatus(row.status || rowData.status);
-    });
+      if (candidateError) throw candidateError;
 
-    const targetRows = threadRows.length ? threadRows : [bookingRow];
+      const activeRows = (candidateRows || []).filter((row: any) => {
+        const rowData = row.data || {};
+        return isActiveBookingStatus(row.status || rowData.status);
+      });
+
+      if (activeRows.length) {
+        targetRows = activeRows;
+      }
+    }
 
     if (action === "rejected") {
       await Promise.all(
@@ -1279,23 +1286,32 @@ export async function handleUserCounterBooking(req: ReqLike, res: ResLike) {
     }
 
     const seedData = bookingRow.data || {};
-    const threadKey = getBookingThreadKey(seedData);
     const updatedAt = new Date().toISOString();
-    const { data: candidateRows, error: candidateError } = await supabaseAdmin
-      .from("bookings")
-      .select("*")
-      .eq("driver_id", driverId)
-      .eq("consumer_id", bookingRow.consumer_id || seedData.consumerId);
+    const rideId = bookingRow.ride_id || seedData.rideId;
+    const consumerId = bookingRow.consumer_id || seedData.consumerId;
+    let targetRows = [bookingRow];
 
-    if (candidateError) throw candidateError;
+    if (rideId && consumerId) {
+      const { data: candidateRows, error: candidateError } = await supabaseAdmin
+        .from("bookings")
+        .select("*")
+        .eq("ride_id", rideId)
+        .eq("consumer_id", consumerId);
 
-    const threadRows = (candidateRows || []).filter((row: any) => {
-      const rowData = row.data || {};
-      return getBookingThreadKey(rowData) === threadKey && isActiveBookingStatus(row.status || rowData.status);
-    });
+      if (candidateError) throw candidateError;
+
+      const activeRows = (candidateRows || []).filter((row: any) => {
+        const rowData = row.data || {};
+        return isActiveBookingStatus(row.status || rowData.status);
+      });
+
+      if (activeRows.length) {
+        targetRows = activeRows;
+      }
+    }
 
     await Promise.all(
-      (threadRows.length ? threadRows : [bookingRow]).map(async (row: any) => {
+      targetRows.map(async (row: any) => {
         const rowData = row.data || {};
         const nextData = {
           ...rowData,
@@ -1355,23 +1371,32 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
     }
 
     const seedData = bookingRow.data || {};
-    const threadKey = getBookingThreadKey(seedData);
     const updatedAt = new Date().toISOString();
-    const { data: candidateRows, error: candidateError } = await supabaseAdmin
-      .from("bookings")
-      .select("*")
-      .eq("consumer_id", consumerId)
-      .eq("driver_id", bookingRow.driver_id || seedData.driverId);
+    const rideId = bookingRow.ride_id || seedData.rideId;
+    const driverId = bookingRow.driver_id || seedData.driverId;
+    let targetRows = [bookingRow];
 
-    if (candidateError) throw candidateError;
+    if (rideId && driverId) {
+      const { data: candidateRows, error: candidateError } = await supabaseAdmin
+        .from("bookings")
+        .select("*")
+        .eq("ride_id", rideId)
+        .eq("driver_id", driverId);
 
-    const threadRows = (candidateRows || []).filter((row: any) => {
-      const rowData = row.data || {};
-      return getBookingThreadKey(rowData) === threadKey && isActiveBookingStatus(row.status || rowData.status);
-    });
+      if (candidateError) throw candidateError;
+
+      const activeRows = (candidateRows || []).filter((row: any) => {
+        const rowData = row.data || {};
+        return isActiveBookingStatus(row.status || rowData.status);
+      });
+
+      if (activeRows.length) {
+        targetRows = activeRows;
+      }
+    }
 
     await Promise.all(
-      (threadRows.length ? threadRows : [bookingRow]).map(async (row: any) => {
+      targetRows.map(async (row: any) => {
         const rowData = row.data || {};
         const nextData = {
           ...rowData,
@@ -1432,22 +1457,29 @@ export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLik
     }
 
     const seedData = bookingRow.data || {};
-    const threadKey = getBookingThreadKey(seedData);
     const updatedAt = new Date().toISOString();
-    const { data: candidateRows, error: candidateError } = await supabaseAdmin
-      .from("bookings")
-      .select("*")
-      .eq("consumer_id", consumerId)
-      .eq("driver_id", bookingRow.driver_id || seedData.driverId);
+    const rideId = bookingRow.ride_id || seedData.rideId;
+    const driverId = bookingRow.driver_id || seedData.driverId;
+    let targetRows = [bookingRow];
 
-    if (candidateError) throw candidateError;
+    if (rideId && driverId) {
+      const { data: candidateRows, error: candidateError } = await supabaseAdmin
+        .from("bookings")
+        .select("*")
+        .eq("ride_id", rideId)
+        .eq("driver_id", driverId);
 
-    const threadRows = (candidateRows || []).filter((row: any) => {
-      const rowData = row.data || {};
-      return getBookingThreadKey(rowData) === threadKey && isActiveBookingStatus(row.status || rowData.status);
-    });
+      if (candidateError) throw candidateError;
 
-    const targetRows = threadRows.length ? threadRows : [bookingRow];
+      const activeRows = (candidateRows || []).filter((row: any) => {
+        const rowData = row.data || {};
+        return isActiveBookingStatus(row.status || rowData.status);
+      });
+
+      if (activeRows.length) {
+        targetRows = activeRows;
+      }
+    }
 
     if (action === "accepted") {
       const negotiatedFare = Number(seedData.negotiatedFare ?? bookingRow.data?.negotiatedFare);
