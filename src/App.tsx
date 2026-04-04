@@ -10023,7 +10023,7 @@ const AdminConfigView = () => {
     chatbotSystemPrompt: defaultChatbotPrompt,
     chatbotTemperature: 0.3,
     chatbotMaxTokens: 400,
-    chatbotFallbackMessage: "I'm sorry, I'm having trouble connecting right now. Please try again later or contact MaiRide support.",
+    chatbotFallbackMessage: "MaiRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
     appBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
     publicApiBaseUrl: typeof window !== 'undefined' ? `${window.location.origin}/api` : '',
     environmentLabel: typeof window !== 'undefined' ? window.location.hostname : 'localhost',

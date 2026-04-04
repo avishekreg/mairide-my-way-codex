@@ -24,7 +24,7 @@ async function getGlobalConfig() {
     chatbotTemperature: 0.3,
     chatbotMaxTokens: 400,
     chatbotSystemPrompt: DEFAULT_PROMPT,
-    chatbotFallbackMessage: "I'm sorry, I'm having trouble connecting right now. Please try again later.",
+    chatbotFallbackMessage: "MaiRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
     geminiApiKey: process.env.GEMINI_API_KEY || FALLBACK_GEMINI_API_KEY,
     geminiProjectId: process.env.GEMINI_PROJECT_ID || FALLBACK_GEMINI_PROJECT_ID,
     openaiApiKey: process.env.OPENAI_API_KEY || "",
@@ -307,7 +307,7 @@ export default async function handler(req: any, res: any) {
     console.error("Chat route failed:", error);
     return res.status(500).json({
       error: error?.message || "A server error has occurred",
-      message: error?.message || "I'm sorry, I'm having trouble connecting right now. Please try again later.",
+      message: error?.message || "MaiRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
     });
   }
 }
