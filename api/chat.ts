@@ -59,7 +59,18 @@ async function getGlobalConfig() {
 }
 
 const DEFAULT_PROMPT =
-  "You are MaiRide's official in-app assistant, Mai Ira. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Acknowledge user concerns briefly and then give practical next steps. Keep replies concise, clear, and supportive. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.";
+  "You are MaiRide's official in-app assistant, Mai Ira. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Acknowledge user concerns briefly and then give practical next steps. Keep replies concise, clear, and supportive. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. For non-admin users, do not provide admin actions or admin operational guidance. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.";
+
+function isAdminIntent(rawMessage: string) {
+  const message = String(rawMessage || "").toLowerCase();
+  return /(admin|super admin|verify driver|approve driver|reject driver|delete user|config|platform settings|force cancel|override|admin panel|transactions dashboard|revenue panel)/i.test(
+    message
+  );
+}
+
+function getHumanStyleInstruction() {
+  return "Write in a natural, human, supportive way. Keep it conversational and warm, not robotic. Use short sentences and practical steps. Avoid sounding like a policy bot.";
+}
 
 function getLanguageInstruction(language?: string) {
   const normalized = String(language || "en-IN").trim().toLowerCase();
@@ -131,7 +142,7 @@ function buildStaticMaiRideReply(rawMessage: string) {
   }
 
   if (message.includes("admin")) {
-    return "Admin actions include user review, driver verification, ride oversight, transactions, config management, and support handling, depending on your admin role.";
+    return "I can help with admin workflows only for verified admin accounts inside the Admin panel. If you’re not an admin, I can still help with rides, bookings, payments, and support.";
   }
 
   return "I can help with MaiRide rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions. Please ask a MaiRide-specific question and I’ll help.";
@@ -167,6 +178,7 @@ async function callGemini(config: Record<string, any>, messages: any[], language
   const model = String(config.llmModel || "gemini-2.5-flash").trim();
   const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
   const languageInstruction = getLanguageInstruction(language);
+  const humanStyleInstruction = getHumanStyleInstruction();
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
 
@@ -177,7 +189,7 @@ async function callGemini(config: Record<string, any>, messages: any[], language
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: `${systemPrompt}\n\n${languageInstruction}` }],
+          parts: [{ text: `${systemPrompt}\n\n${languageInstruction}\n\n${humanStyleInstruction}` }],
         },
         contents: messages.map((message) => ({
           role: message.role === "assistant" ? "model" : "user",
@@ -213,6 +225,7 @@ async function callOpenAI(config: Record<string, any>, messages: any[], language
   const model = String(config.llmModel || "gpt-4o-mini").trim();
   const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
   const languageInstruction = getLanguageInstruction(language);
+  const humanStyleInstruction = getHumanStyleInstruction();
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
 
@@ -229,7 +242,7 @@ async function callOpenAI(config: Record<string, any>, messages: any[], language
     headers,
     body: JSON.stringify({
       model,
-      instructions: `${systemPrompt}\n\n${languageInstruction}`,
+      instructions: `${systemPrompt}\n\n${languageInstruction}\n\n${humanStyleInstruction}`,
       input: messages.map((message) => ({
         role: message.role,
         content: [{ type: "input_text", text: message.content }],
@@ -260,6 +273,7 @@ async function callClaude(config: Record<string, any>, messages: any[], language
   const model = String(config.llmModel || "claude-3-5-haiku-latest").trim();
   const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
   const languageInstruction = getLanguageInstruction(language);
+  const humanStyleInstruction = getHumanStyleInstruction();
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
 
@@ -272,7 +286,7 @@ async function callClaude(config: Record<string, any>, messages: any[], language
     },
     body: JSON.stringify({
       model,
-      system: `${systemPrompt}\n\n${languageInstruction}`,
+      system: `${systemPrompt}\n\n${languageInstruction}\n\n${humanStyleInstruction}`,
       max_tokens: maxTokens,
       temperature,
       messages: messages.map((message) => ({
@@ -308,6 +322,7 @@ export default async function handler(req: any, res: any) {
 
     const body = await parseRequestBody(req);
     const language = String(body?.language || config.chatbotDefaultLanguage || "en-IN");
+    const userRole = String(body?.userRole || "consumer").toLowerCase();
     const incomingMessages = normalizeMessages(body?.messages || []);
     const message = String(body?.message || "").trim();
     const messages =
@@ -319,6 +334,13 @@ export default async function handler(req: any, res: any) {
 
     if (!messages.length) {
       return res.status(400).json({ error: "Missing chat message" });
+    }
+    const latestUserMessage = [...messages].reverse().find((entry) => entry.role === "user")?.content || "";
+    if (userRole !== "admin" && isAdminIntent(latestUserMessage)) {
+      return res.status(200).json({
+        message:
+          "I can help with rides, booking, fares, status, and support. Admin actions are available only inside the verified Admin panel.",
+      });
     }
 
     const provider = String(config.llmProvider || "gemini").trim().toLowerCase();
@@ -339,7 +361,6 @@ export default async function handler(req: any, res: any) {
       }
     } catch (providerError) {
       console.error("Chat provider failed, using static fallback:", providerError);
-      const latestUserMessage = [...messages].reverse().find((entry) => entry.role === "user")?.content || "";
       reply = buildStaticMaiRideReply(latestUserMessage);
     }
 

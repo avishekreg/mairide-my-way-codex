@@ -9079,7 +9079,7 @@ class ChatbotErrorBoundary extends Component<{ children: React.ReactNode }, { ha
   }
 }
 
-const ChatbotCore = () => {
+const ChatbotCore = ({ userRole }: { userRole?: UserProfile['role'] }) => {
   const appConfigState = useAppConfig();
   const config = (appConfigState?.config || {}) as Partial<AppConfig>;
   const [isOpen, setIsOpen] = useState(false);
@@ -9264,6 +9264,7 @@ const ChatbotCore = () => {
       const response = await axios.post(chatApiPath, {
         messages: transcript,
         language: selectedLanguage,
+        userRole: userRole || 'consumer',
       });
       const text = String(response?.data?.message || '').trim();
       const finalText = text || buildStaticMaiRideReply(currentInput, selectedLanguage);
@@ -9412,9 +9413,9 @@ const ChatbotCore = () => {
   );
 };
 
-const Chatbot = () => (
+const Chatbot = ({ userRole }: { userRole?: UserProfile['role'] }) => (
   <ChatbotErrorBoundary>
-    <ChatbotCore />
+    <ChatbotCore userRole={userRole} />
   </ChatbotErrorBoundary>
 );
 
@@ -10199,7 +10200,7 @@ Answer only about MaiRide topics:
 - support tickets
 - admin actions
 
-Do not answer unrelated general knowledge questions. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.`;
+Do not answer unrelated general knowledge questions. For non-admin users, do not provide admin operational actions or admin panel guidance. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.`;
   const providerModelOptions: Record<NonNullable<AppConfig['llmProvider']>, string[]> = {
     gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
     openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-nano'],
@@ -13982,7 +13983,7 @@ const App = () => {
             </Routes>
           </main>
           <AppFooter />
-          <Chatbot />
+          <Chatbot userRole={profile?.role} />
           <AppDialogHost />
         </div>
       </Router>
