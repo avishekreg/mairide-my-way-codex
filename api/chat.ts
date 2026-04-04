@@ -17,15 +17,7 @@ function getSupabaseAdmin() {
 }
 
 async function getGlobalConfig() {
-  const { data, error } = await getSupabaseAdmin()
-    .from("app_config")
-    .select("*")
-    .eq("id", "global")
-    .maybeSingle();
-
-  if (error) throw error;
-
-  return {
+  const defaults = {
     llmProvider: "gemini",
     llmModel: "gemini-2.5-flash",
     chatbotEnabled: true,
@@ -39,8 +31,26 @@ async function getGlobalConfig() {
     openaiProjectId: process.env.OPENAI_PROJECT_ID || "",
     openaiOrgId: process.env.OPENAI_ORG_ID || "",
     claudeApiKey: process.env.CLAUDE_API_KEY || "",
-    ...(((data?.data as Record<string, any>) || {}) as Record<string, any>),
   } as Record<string, any>;
+
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin
+      .from("app_config")
+      .select("*")
+      .eq("id", "global")
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return {
+      ...defaults,
+      ...(((data?.data as Record<string, any>) || {}) as Record<string, any>),
+    } as Record<string, any>;
+  } catch (error) {
+    console.warn("Chat config fallback engaged:", error);
+    return defaults;
+  }
 }
 
 const DEFAULT_PROMPT =
@@ -50,6 +60,44 @@ function normalizeMessages(messages: any[] = []) {
   return messages
     .filter((m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"))
     .slice(-8);
+}
+
+function buildStaticMaiRideReply(rawMessage: string) {
+  const message = String(rawMessage || "").trim().toLowerCase();
+
+  if (!message) {
+    return "Hello. I can help with MaiRide rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions.";
+  }
+
+  if (/(^|\b)(hi|hello|hey|namaste|hola)(\b|$)/.test(message)) {
+    return "Hello. I’m the MaiRide Assistant. I can help with ride booking, pricing, negotiation flow, payment steps, support, and booking status.";
+  }
+
+  if (message.includes("price") || message.includes("fare") || message.includes("cost")) {
+    return "MaiRide shows the listed ride fare on each offer card. Platform fee and GST are shown separately before confirmation. During negotiation, both parties can counter until one side accepts or rejects.";
+  }
+
+  if (message.includes("book") || message.includes("booking flow") || message.includes("how do i book")) {
+    return "To book a ride, search available rides, open the ride card, review route and departure timing, then send a booking request or counter offer. Once one side accepts, both parties complete platform-fee payment and contact details unlock automatically.";
+  }
+
+  if (message.includes("status") || message.includes("booking status")) {
+    return "You can check booking status from your active booking or ride card. Common states are pending, counter offer, confirmed, paid, started, and completed.";
+  }
+
+  if (message.includes("support") || message.includes("ticket")) {
+    return "For support, please use the Support section in the app so the MaiRide team can track your issue properly. If a ride needs a forced cancellation after confirmation, customer support or admin action is required.";
+  }
+
+  if (message.includes("region") || message.includes("service area") || message.includes("service region")) {
+    return "MaiRide currently supports route-based ride discovery where available offers are shown by search and timing match. If a route is not visible, it usually means there is no active approved driver offer for that route and time window.";
+  }
+
+  if (message.includes("admin")) {
+    return "Admin actions include user review, driver verification, ride oversight, transactions, config management, and support handling, depending on your admin role.";
+  }
+
+  return "I can help with MaiRide rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions. Please ask a MaiRide-specific question and I’ll help.";
 }
 
 async function parseRequestBody(req: any) {
@@ -234,19 +282,24 @@ export default async function handler(req: any, res: any) {
 
     const provider = String(config.llmProvider || "gemini").trim().toLowerCase();
     let reply = "";
-
-    switch (provider) {
-      case "gemini":
-        reply = await callGemini(config, messages);
-        break;
-      case "openai":
-        reply = await callOpenAI(config, messages);
-        break;
-      case "claude":
-        reply = await callClaude(config, messages);
-        break;
-      default:
-        return res.status(400).json({ error: "Unsupported LLM provider" });
+    try {
+      switch (provider) {
+        case "gemini":
+          reply = await callGemini(config, messages);
+          break;
+        case "openai":
+          reply = await callOpenAI(config, messages);
+          break;
+        case "claude":
+          reply = await callClaude(config, messages);
+          break;
+        default:
+          return res.status(400).json({ error: "Unsupported LLM provider" });
+      }
+    } catch (providerError) {
+      console.error("Chat provider failed, using static fallback:", providerError);
+      const latestUserMessage = [...messages].reverse().find((entry) => entry.role === "user")?.content || "";
+      reply = buildStaticMaiRideReply(latestUserMessage);
     }
 
     return res.status(200).json({ message: reply });
