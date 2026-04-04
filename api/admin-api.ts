@@ -157,6 +157,50 @@ async function handleGetTransactions(req: any, res: any) {
   return res.status(200).json({ transactions });
 }
 
+async function handleGetUsers(req: any, res: any) {
+  const auth = await getAuthenticatedAdmin(req, false);
+  if ("error" in auth) {
+    return res.status(auth.error.status).json({ error: auth.error.message });
+  }
+
+  const { data, error } = await auth.supabaseAdmin
+    .from("users")
+    .select("*")
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+
+  const users = (data || []).map((row: any) => {
+    const payload = (row.data as Record<string, any>) || {};
+    return {
+      ...payload,
+      uid: row.id,
+      email: row.email || payload.email || "",
+      displayName: row.display_name || payload.displayName || "",
+      role: row.role || payload.role || "consumer",
+      status: row.status || payload.status || "active",
+      phoneNumber: row.phone_number || payload.phoneNumber || "",
+      onboardingComplete:
+        typeof row.onboarding_complete === "boolean"
+          ? row.onboarding_complete
+          : Boolean(payload.onboardingComplete),
+      adminRole: row.admin_role || payload.adminRole,
+      verificationStatus: row.verification_status || payload.verificationStatus,
+      rejectionReason: row.rejection_reason || payload.rejectionReason,
+      verifiedBy: row.verified_by || payload.verifiedBy,
+      forcePasswordChange:
+        typeof row.force_password_change === "boolean"
+          ? row.force_password_change
+          : Boolean(payload.forcePasswordChange),
+      driverDetails: row.driver_details || payload.driverDetails,
+      createdAt: row.created_at || payload.createdAt,
+      updatedAt: row.updated_at || payload.updatedAt,
+    };
+  });
+
+  return res.status(200).json({ users });
+}
+
 async function handleVerifyDriver(req: any, res: any) {
   const auth = await getAuthenticatedAdmin(req, true);
   if ("error" in auth) {
@@ -439,6 +483,9 @@ export default async function handler(req: any, res: any) {
       case "transactions":
         if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
         return handleGetTransactions(req, res);
+      case "users":
+        if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+        return handleGetUsers(req, res);
       case "verify-driver":
         if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
         return handleVerifyDriver(req, res);

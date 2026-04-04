@@ -840,6 +840,7 @@ const adminApiPath = (action: string) => `/api/admin-api?action=${encodeURICompo
 const adminConfigPath = adminApiPath("config");
 const adminSaveConfigPath = adminApiPath("save-config");
 const adminTransactionsPath = adminApiPath("transactions");
+const adminUsersPath = adminApiPath("users");
 const adminVerifyDriverPath = adminApiPath("verify-driver");
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
@@ -1829,7 +1830,7 @@ const AppDialogHost = () => {
 
     window.addEventListener(APP_DIALOG_EVENT, handleDialog);
     return () => window.removeEventListener(APP_DIALOG_EVENT, handleDialog);
-  }, []);
+  }, [profile.email]);
 
   if (!dialog) return null;
 
@@ -11829,6 +11830,34 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const selectedDriverMarkers = buildVerificationMarkers(selectedDriver?.driverDetails);
 
   useEffect(() => {
+    if (window.location.hostname !== 'localhost') {
+      let active = true;
+      let intervalId: number | null = null;
+
+      const loadAdminUsers = async () => {
+        try {
+          const headers = await getAdminRequestHeaders(profile.email);
+          const response = await axios.get(adminUsersPath, { headers });
+          if (!active) return;
+          setUsers((response.data?.users || []) as UserProfile[]);
+          setIsLoading(false);
+        } catch (error) {
+          if (!active) return;
+          handleFirestoreError(error, OperationType.GET, 'users');
+        }
+      };
+
+      void loadAdminUsers();
+      intervalId = window.setInterval(() => {
+        void loadAdminUsers();
+      }, 8000);
+
+      return () => {
+        active = false;
+        if (intervalId) window.clearInterval(intervalId);
+      };
+    }
+
     const q = query(collection(db, 'users'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const usersData = snapshot.docs.map(doc => doc.data() as UserProfile);
