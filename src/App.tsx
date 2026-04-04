@@ -2139,10 +2139,10 @@ const AuthPage = ({
         } else if (authMode === 'login') {
           let existingProfile: { uid: string; role: string; email: string; phoneNumber: string };
           try {
-            const resolveResponse = await postAuthAction('resolve-phone-login', { phoneNumber: phoneNumber || username }, '/api/auth/resolve-phone-login');
+            const resolveResponse = await postAuthAction('resolve-phone-login', { phoneNumber: phoneNumber || username });
             existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
           } catch (error: any) {
-            if (/HTTP 404/.test(error?.message || '')) {
+            if (/HTTP (404|405)/.test(error?.message || '')) {
               existingProfile = await resolvePhoneLoginClientSide(phoneNumber || username);
             } else {
               throw error;
@@ -6816,7 +6816,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   const handleTravelerNegotiation = async (booking: Booking, action: 'accepted' | 'rejected') => {
     try {
-      await axios.post('/api/user/traveler-respond-booking', {
+      await axios.post('/api/user?action=traveler-respond-booking', {
         bookingId: booking.id,
         consumerId: profile.uid,
         action,
@@ -6852,7 +6852,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
 
     try {
-      await axios.post('/api/user/traveler-counter-booking', {
+      await axios.post('/api/user?action=traveler-counter-booking', {
         bookingId: booking.id,
         consumerId: profile.uid,
         fare,
@@ -7897,7 +7897,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const handleDriverAction = async (request: Booking, status: 'confirmed' | 'rejected') => {
     try {
-      await axios.post('/api/user/respond-booking', {
+      await axios.post('/api/user?action=respond-booking', {
         bookingId: request.id,
         driverId: profile.uid,
         action: status,
@@ -7941,7 +7941,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
 
     try {
-      await axios.post('/api/user/counter-booking', {
+      await axios.post('/api/user?action=counter-booking', {
         bookingId: request.id,
         driverId: profile.uid,
         fare,
