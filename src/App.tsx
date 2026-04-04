@@ -8701,16 +8701,25 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 <p className="text-mairide-secondary italic serif">Manage your empty leg journeys and earnings.</p>
               </div>
             </div>
-            <button 
-              onClick={toggleOnline}
-              className={cn(
-                "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center space-x-3",
-                isOnline ? "bg-green-600 text-white shadow-lg shadow-green-100" : "bg-mairide-secondary text-mairide-primary"
-              )}
-            >
-              <div className={cn("w-3 h-3 rounded-full", isOnline ? "bg-white animate-pulse" : "bg-mairide-primary")} />
-              <span>{isOnline ? 'You are Online' : 'Go Online'}</span>
-            </button>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <button 
+                onClick={() => setShowOfferForm(true)}
+                className="bg-mairide-accent text-white px-6 py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 hover:bg-mairide-primary transition-all"
+              >
+                <Plus className="w-5 h-5" />
+                <span>Offer a Ride</span>
+              </button>
+              <button 
+                onClick={toggleOnline}
+                className={cn(
+                  "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center space-x-3",
+                  isOnline ? "bg-green-600 text-white shadow-lg shadow-green-100" : "bg-mairide-secondary text-mairide-primary"
+                )}
+              >
+                <div className={cn("w-3 h-3 rounded-full", isOnline ? "bg-white animate-pulse" : "bg-mairide-primary")} />
+                <span>{isOnline ? 'You are Online' : 'Go Online'}</span>
+              </button>
+            </div>
           </div>
 
           {activeDashboardRequests.length > 0 && (
@@ -8855,13 +8864,6 @@ const finalizeDriverDashboardRazorpayPayment = async (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-mairide-primary">Your Ride Offers</h2>
-              <button 
-                onClick={() => setShowOfferForm(true)}
-                className="bg-mairide-accent text-white px-6 py-3 rounded-2xl font-bold flex items-center space-x-2 hover:bg-mairide-primary transition-all"
-              >
-                <Plus className="w-5 h-5" />
-                <span>Offer a Ride</span>
-              </button>
             </div>
 
             {showOfferForm && (
