@@ -946,6 +946,54 @@ const hasPendingTravelerCounterOffer = (booking: Booking) => {
   return getPendingNegotiationActor(booking) === 'consumer' && negotiatedFare !== booking.fare;
 };
 
+const loadNegotiationThreadBookings = async (seedBooking: Booking) => {
+  const rideId = seedBooking.rideId;
+  const consumerId = seedBooking.consumerId;
+
+  if (!rideId || !consumerId) {
+    return [seedBooking];
+  }
+
+  const snapshot = await getDocs(
+    query(
+      collection(db, 'bookings'),
+      where('rideId', '==', rideId),
+      where('consumerId', '==', consumerId)
+    )
+  );
+
+  const rows = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
+  const threadKey = getBookingThreadKey(seedBooking);
+  const threadRows = rows.filter((booking) => getBookingThreadKey(booking) === threadKey);
+
+  return threadRows.length ? threadRows : [seedBooking];
+};
+
+const persistCounterOfferThroughCompatStore = async (
+  seedBooking: Booking,
+  actor: 'driver' | 'consumer',
+  fare: number
+) => {
+  const updatedAt = new Date().toISOString();
+  const threadRows = await loadNegotiationThreadBookings(seedBooking);
+
+  await Promise.all(
+    threadRows.map((booking) =>
+      updateDoc(doc(db, 'bookings', booking.id), {
+        negotiatedFare: fare,
+        negotiationStatus: 'pending',
+        negotiationActor: actor,
+        driverCounterPending: actor === 'driver',
+        status: 'negotiating',
+        rideRetired: false,
+        updatedAt,
+      })
+    )
+  );
+
+  return updatedAt;
+};
+
 const getNegotiationDisplayFare = (booking: Booking) => {
   const negotiatedFare =
     typeof booking.negotiatedFare === 'number'
@@ -5962,7 +6010,31 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       );
       showAppDialog("Counter offer sent to traveler!", 'success');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${requestId}`);
+      try {
+        const request = requests.find((booking) => booking.id === requestId);
+        if (!request) {
+          throw error;
+        }
+        const updatedAt = await persistCounterOfferThroughCompatStore(request, 'driver', fare);
+        setRequests((prev) =>
+          prev.map((booking) =>
+            getBookingThreadKey(booking) === getBookingThreadKey(request)
+              ? {
+                  ...booking,
+                  negotiatedFare: fare,
+                  negotiationStatus: 'pending',
+                  negotiationActor: 'driver',
+                  driverCounterPending: true,
+                  status: 'negotiating',
+                  updatedAt,
+                }
+              : booking
+          )
+        );
+        showAppDialog("Counter offer sent to traveler!", 'success');
+      } catch {
+        handleFirestoreError(error, OperationType.UPDATE, `bookings/${requestId}`);
+      }
     }
   };
 
@@ -6932,7 +7004,29 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       );
       showAppDialog('Counter offer sent to the driver.', 'success');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+      try {
+        const updatedAt = await persistCounterOfferThroughCompatStore(booking, 'consumer', fare);
+        setDashboardBookings((prev) =>
+          prev.map((candidate) =>
+            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+              ? {
+                  ...candidate,
+                  negotiatedFare: fare,
+                  negotiationStatus: 'pending',
+                  negotiationActor: 'consumer',
+                  driverCounterPending: false,
+                  status: 'negotiating',
+                  rideRetired: false,
+                  updatedAt,
+                }
+              : candidate
+          )
+        );
+        setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
+        showAppDialog('Counter offer sent to the driver.', 'success');
+      } catch {
+        handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+      }
     }
   };
 
@@ -8032,7 +8126,27 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       );
       showAppDialog('Counter offer sent to traveler.', 'success');
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
+      try {
+        const updatedAt = await persistCounterOfferThroughCompatStore(request, 'driver', fare);
+        setRequests((prev) =>
+          prev.map((booking) =>
+            getBookingThreadKey(booking) === getBookingThreadKey(request)
+              ? {
+                  ...booking,
+                  negotiatedFare: fare,
+                  negotiationStatus: 'pending',
+                  negotiationActor: 'driver',
+                  driverCounterPending: true,
+                  status: 'negotiating',
+                  updatedAt,
+                }
+              : booking
+          )
+        );
+        showAppDialog('Counter offer sent to traveler.', 'success');
+      } catch {
+        handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
+      }
     }
   };
 
