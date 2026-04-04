@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, Component } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Component } from 'react';
 import { 
   BrowserRouter as Router, 
   Routes, 
@@ -4349,11 +4349,15 @@ const DriverDashboardSummary = ({
   onStartRide: (request: Booking, otp: string) => void;
   onEndRide: (request: Booking, otp: string) => void;
 }) => {
-  const liveRequests = requests.filter((request) => {
-    if ((request as any).rideRetired) return false;
-    if (request.negotiationStatus === 'rejected') return false;
-    return ['pending', 'negotiating', 'confirmed'].includes(request.status);
-  });
+  const liveRequests = useMemo(
+    () =>
+      requests.filter((request) => {
+        if ((request as any).rideRetired) return false;
+        if (request.negotiationStatus === 'rejected') return false;
+        return ['pending', 'negotiating', 'confirmed'].includes(request.status);
+      }),
+    [requests]
+  );
   const [startOtpInputs, setStartOtpInputs] = useState<{ [key: string]: string }>({});
   const [endOtpInputs, setEndOtpInputs] = useState<{ [key: string]: string }>({});
   if (!liveRequests.length) return null;
@@ -5334,6 +5338,14 @@ const MyRides = ({
   const [loading, setLoading] = useState(true);
   const [cancellingRideId, setCancellingRideId] = useState<string | null>(null);
   const [pendingCancelRide, setPendingCancelRide] = useState<any | null>(null);
+  const visibleRides = useMemo(
+    () =>
+      rides.filter((ride) => {
+        if (hiddenRideIds.includes(ride.id)) return false;
+        return ['available', 'full'].includes(String(ride.status || ''));
+      }),
+    [rides, hiddenRideIds]
+  );
 
   useEffect(() => {
     const q = query(
@@ -5434,12 +5446,13 @@ const MyRides = ({
 
   if (loading) return <LoadingScreen />;
 
+  if (!visibleRides.length) return null;
+
   return (
     <div className="max-w-4xl mx-auto p-8">
       <h1 className="text-3xl font-bold text-mairide-primary mb-8">My Ride Offers</h1>
       <div className="space-y-6">
-        {rides.length > 0 ? (
-          rides.map((ride) => (
+        {visibleRides.map((ride) => (
             <div key={ride.id} className="bg-white p-6 rounded-3xl border border-mairide-secondary shadow-sm">
               <div className="flex justify-between items-start mb-4">
                 <div>
@@ -5469,13 +5482,7 @@ const MyRides = ({
                 </div>
               </div>
             </div>
-          ))
-        ) : (
-          <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-mairide-secondary">
-            <Navigation className="w-12 h-12 text-mairide-secondary mx-auto mb-4" />
-            <p className="text-mairide-secondary">You haven't posted any rides yet.</p>
-          </div>
-        )}
+          ))}
       </div>
       {pendingCancelRide && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-mairide-primary/30 px-4 backdrop-blur-sm">
@@ -7521,6 +7528,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [retiredRideIds, setRetiredRideIds] = useState<string[]>([]);
   const seenTravelerCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedTravelerCountersRef = useRef(false);
+  const activeDashboardRequests = useMemo(
+    () => requests.filter((request) => !retiredRideIds.includes(request.rideId)),
+    [requests, retiredRideIds]
+  );
 
   useEffect(() => {
     // Listen for online travelers
@@ -8120,6 +8131,24 @@ const finalizeDriverDashboardRazorpayPayment = async (
             </button>
           </div>
 
+          {activeDashboardRequests.length > 0 && (
+            <div className="mb-8">
+              <DriverDashboardSummary
+                requests={activeDashboardRequests}
+                config={config}
+                onAccept={(request) => handleDriverAction(request, 'confirmed')}
+                onReject={(request) => handleDriverAction(request, 'rejected')}
+                counterFares={counterFares}
+                setCounterFares={setCounterFares}
+                onCounter={handleDriverCounterOffer}
+                onPayWithCoins={(request) => handleDriverDashboardPayment(request, true)}
+                onPayOnline={(request) => handleDriverDashboardPayment(request, false)}
+                onStartRide={handleStartRide}
+                onEndRide={handleEndRide}
+              />
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
             <div className="bg-white p-6 rounded-3xl border border-mairide-secondary shadow-sm">
               <p className="text-sm text-mairide-secondary mb-1">Total Earnings</p>
@@ -8176,7 +8205,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 {consumers.filter(c => c.location && typeof c.location.lat === 'number' && typeof c.location.lng === 'number').length} Travelers Visible
               </div>
             </div>
-            <div className="h-[360px] relative">
+            <div className="relative h-[280px] md:h-[360px]" style={{ contentVisibility: 'auto', containIntrinsicSize: '280px 360px' }}>
               {GOOGLE_MAPS_API_KEY && isLoaded && window.google ? (
                 <GoogleMap
                   mapContainerStyle={{ width: '100%', height: '100%' }}
@@ -8252,20 +8281,6 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 <span>Offer a Ride</span>
               </button>
             </div>
-
-            <DriverDashboardSummary
-              requests={requests.filter((request) => !retiredRideIds.includes(request.rideId))}
-              config={config}
-              onAccept={(request) => handleDriverAction(request, 'confirmed')}
-              onReject={(request) => handleDriverAction(request, 'rejected')}
-              counterFares={counterFares}
-              setCounterFares={setCounterFares}
-              onCounter={handleDriverCounterOffer}
-              onPayWithCoins={(request) => handleDriverDashboardPayment(request, true)}
-              onPayOnline={(request) => handleDriverDashboardPayment(request, false)}
-              onStartRide={handleStartRide}
-              onEndRide={handleEndRide}
-            />
 
             {showOfferForm && (
               <motion.div 
