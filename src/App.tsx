@@ -4306,9 +4306,11 @@ const TravelerDashboardSummary = ({
   const activeBookings = bookings.filter((booking) => {
     if ((booking as any).rideRetired) return false;
     if (booking.negotiationStatus === 'rejected') return false;
+    if (booking.rideEndedAt || booking.rideLifecycleStatus === 'completed') return false;
+    if (['completed', 'cancelled', 'rejected'].includes(String(booking.status || ''))) return false;
     if (ridesResolved) {
       const rideStatus = rideStatusById[booking.rideId];
-      if (!rideStatus || rideStatus === 'cancelled') return false;
+      if (!rideStatus || ['cancelled', 'completed'].includes(String(rideStatus))) return false;
     }
     return ['pending', 'confirmed', 'negotiating'].includes(booking.status);
   });
@@ -4516,9 +4518,10 @@ const TravelerCounterOffersSummary = ({
 }) => {
   const counterOffers = bookings.filter((booking) => {
     if ((booking as any).rideRetired) return false;
+    if (booking.rideEndedAt || booking.rideLifecycleStatus === 'completed') return false;
     if (ridesResolved) {
       const rideStatus = rideStatusById[booking.rideId];
-      if (!rideStatus || rideStatus === 'cancelled') return false;
+      if (!rideStatus || ['cancelled', 'completed'].includes(String(rideStatus))) return false;
     }
     if (['completed', 'cancelled', 'rejected'].includes(booking.status)) return false;
     if (booking.negotiationStatus === 'rejected') return false;
@@ -9079,33 +9082,34 @@ class ChatbotErrorBoundary extends Component<{ children: React.ReactNode }, { ha
 }
 
 const ChatbotCore = () => {
-  const { config } = useAppConfig();
+  const appConfigState = useAppConfig();
+  const config = (appConfigState?.config || {}) as Partial<AppConfig>;
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [selectedLanguage, setSelectedLanguage] = useState<string>(String(config.chatbotDefaultLanguage || 'en-IN'));
-  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(config.chatbotVoiceOutputEnabled !== false);
-  const [voiceInputEnabled, setVoiceInputEnabled] = useState(config.chatbotVoiceInputEnabled !== false);
-  const [ttsRate, setTtsRate] = useState(Number(config.chatbotTtsRate ?? 0.95));
-  const [ttsPitch, setTtsPitch] = useState(Number(config.chatbotTtsPitch ?? 1.02));
+  const [selectedLanguage, setSelectedLanguage] = useState<string>(String(config?.chatbotDefaultLanguage || 'en-IN'));
+  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(config?.chatbotVoiceOutputEnabled !== false);
+  const [voiceInputEnabled, setVoiceInputEnabled] = useState(config?.chatbotVoiceInputEnabled !== false);
+  const [ttsRate, setTtsRate] = useState(Number(config?.chatbotTtsRate ?? 0.95));
+  const [ttsPitch, setTtsPitch] = useState(Number(config?.chatbotTtsPitch ?? 1.02));
   const [voiceInputSupported, setVoiceInputSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   const chatApiPath = '/api/chat';
 
   useEffect(() => {
-    setSelectedLanguage(String(config.chatbotDefaultLanguage || 'en-IN'));
-    setVoiceOutputEnabled(config.chatbotVoiceOutputEnabled !== false);
-    setVoiceInputEnabled(config.chatbotVoiceInputEnabled !== false);
-    setTtsRate(Number(config.chatbotTtsRate ?? 0.95));
-    setTtsPitch(Number(config.chatbotTtsPitch ?? 1.02));
+    setSelectedLanguage(String(config?.chatbotDefaultLanguage || 'en-IN'));
+    setVoiceOutputEnabled(config?.chatbotVoiceOutputEnabled !== false);
+    setVoiceInputEnabled(config?.chatbotVoiceInputEnabled !== false);
+    setTtsRate(Number(config?.chatbotTtsRate ?? 0.95));
+    setTtsPitch(Number(config?.chatbotTtsPitch ?? 1.02));
   }, [
-    config.chatbotDefaultLanguage,
-    config.chatbotVoiceOutputEnabled,
-    config.chatbotVoiceInputEnabled,
-    config.chatbotTtsRate,
-    config.chatbotTtsPitch,
+    config?.chatbotDefaultLanguage,
+    config?.chatbotVoiceOutputEnabled,
+    config?.chatbotVoiceInputEnabled,
+    config?.chatbotTtsRate,
+    config?.chatbotTtsPitch,
   ]);
 
   const languageOptions = useMemo(
