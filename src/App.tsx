@@ -6490,7 +6490,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         availableRides = querySnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
         allBookings = bookingsSnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
       } else {
-        const { data } = await axios.get('/api/user?action=search-rides');
+        const { data } = await axios.get('/api/health?action=search-rides');
         availableRides = Array.isArray(data?.rides) ? data.rides : [];
         allBookings = Array.isArray(data?.bookings) ? data.bookings : [];
       }
