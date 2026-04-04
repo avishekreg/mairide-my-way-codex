@@ -5057,7 +5057,7 @@ const finalizeTravelerRazorpayPayment = async (
         throw new Error('Booking not found.');
       }
 
-      await axios.post('/api/user/traveler-respond-booking', {
+      await axios.post('/api/user?action=traveler-respond-booking', {
         bookingId,
         consumerId: profile.uid,
         action,
@@ -5921,7 +5921,7 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       if (!request) {
         throw new Error('Booking request not found.');
       }
-      await axios.post('/api/user/counter-booking', {
+      await axios.post('/api/user?action=counter-booking', {
         bookingId: request.id,
         driverId: profile.uid,
         fare,
@@ -5993,7 +5993,7 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       if (!bookingData) {
         throw new Error('Booking request not found.');
       }
-      await axios.post('/api/user/respond-booking', {
+      await axios.post('/api/user?action=respond-booking', {
         bookingId: bookingData.id,
         driverId: profile.uid,
         action: status,
