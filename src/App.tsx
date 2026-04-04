@@ -9137,37 +9137,44 @@ const Chatbot = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognitionCtor) {
+
+    try {
+      const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognitionCtor) {
+        setVoiceInputSupported(false);
+        return;
+      }
+
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = selectedLanguage;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+      recognition.onstart = () => setIsListening(true);
+      recognition.onend = () => setIsListening(false);
+      recognition.onerror = () => setIsListening(false);
+      recognition.onresult = (event: any) => {
+        const transcript = event?.results?.[0]?.[0]?.transcript;
+        if (typeof transcript === 'string' && transcript.trim()) {
+          setInput((prev) => (prev ? `${prev} ${transcript.trim()}` : transcript.trim()));
+        }
+      };
+
+      recognitionRef.current = recognition;
+      setVoiceInputSupported(true);
+
+      return () => {
+        try {
+          recognition.stop();
+        } catch {
+          // no-op
+        }
+        recognitionRef.current = null;
+      };
+    } catch (error) {
+      console.warn('Speech recognition initialization failed; continuing without voice input.', error);
       setVoiceInputSupported(false);
-      return;
-    }
-
-    const recognition = new SpeechRecognitionCtor();
-    recognition.lang = selectedLanguage;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
-    recognition.onresult = (event: any) => {
-      const transcript = event?.results?.[0]?.[0]?.transcript;
-      if (typeof transcript === 'string' && transcript.trim()) {
-        setInput((prev) => (prev ? `${prev} ${transcript.trim()}` : transcript.trim()));
-      }
-    };
-
-    recognitionRef.current = recognition;
-    setVoiceInputSupported(true);
-
-    return () => {
-      try {
-        recognition.stop();
-      } catch {
-        // no-op
-      }
       recognitionRef.current = null;
-    };
+    }
   }, []);
 
   useEffect(() => {
@@ -9353,7 +9360,7 @@ const Chatbot = () => {
               {messages.length === 0 && (
                 <div className="text-center py-8">
                   <p className="text-mairide-secondary text-sm italic serif">
-                    {selectedLanguage.startsWith('hi')
+                    {String(selectedLanguage || '').toLowerCase().startsWith('hi')
                       ? 'आज मैं आपकी कैसे मदद कर सकती हूँ?'
                       : `How can I help you today? (${getLanguageLabel(selectedLanguage)})`}
                   </p>
