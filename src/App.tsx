@@ -9060,6 +9060,44 @@ const Chatbot = () => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
 
+  const buildStaticMaiRideReply = (rawMessage: string) => {
+    const message = String(rawMessage || '').trim().toLowerCase();
+
+    if (!message) {
+      return "Hello. I can help with MaiRide rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions.";
+    }
+
+    if (/(^|\\b)(hi|hello|hey|namaste)(\\b|$)/.test(message)) {
+      return "Hello. I’m the MaiRide Assistant. I can help with ride booking, pricing, booking status, payment steps, support, and service regions.";
+    }
+
+    if (message.includes('book') || message.includes('booking flow')) {
+      return "To book a ride, search available rides, open the ride card, review route and departure timing, then send a booking request or counter offer. Once one side accepts, both parties complete the platform-fee payment and contact details unlock automatically.";
+    }
+
+    if (message.includes('price') || message.includes('fare') || message.includes('cost')) {
+      return "MaiRide shows the listed ride fare on each offer card. Platform fee and GST are shown separately before confirmation. During negotiation, both parties can counter until one side accepts or rejects.";
+    }
+
+    if (message.includes('status')) {
+      return "You can check booking status from your active booking or ride card. Common states are pending, counter offer, confirmed, paid, started, and completed.";
+    }
+
+    if (message.includes('support') || message.includes('ticket')) {
+      return "For help, please use the Support section in the app so the MaiRide team can track your issue properly. If a ride needs cancellation after confirmation, customer support or admin action is required.";
+    }
+
+    if (message.includes('region') || message.includes('service area')) {
+      return "MaiRide currently shows route-based ride offers when there is an active approved driver offer matching your search and timing window.";
+    }
+
+    if (message.includes('admin')) {
+      return "Admin actions include driver verification, user management, ride oversight, transactions, config management, and support handling, depending on role access.";
+    }
+
+    return "I can help with MaiRide rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions. Please ask a MaiRide-specific question.";
+  };
+
   const handleSend = async () => {
     if (!input.trim()) return;
 
@@ -9083,10 +9121,14 @@ const Chatbot = () => {
         })),
       });
 
-      const text =
+      const rawText =
         response.data?.message ||
         config?.chatbotFallbackMessage ||
         "I'm sorry, I couldn't generate a response.";
+      const text =
+        rawText.toLowerCase().includes("i'm sorry") || rawText.toLowerCase().includes("trouble connecting")
+          ? buildStaticMaiRideReply(input)
+          : rawText;
 
       const botMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -9105,7 +9147,9 @@ const Chatbot = () => {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: errorMessage || config?.chatbotFallbackMessage || "I'm sorry, I'm having trouble connecting right now. Please try again later.",
+        content: errorMessage
+          ? errorMessage
+          : buildStaticMaiRideReply(input),
         createdAt: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMsg]);
