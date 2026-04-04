@@ -99,8 +99,6 @@ import {
   Send,
   Mic,
   MicOff,
-  Volume2,
-  VolumeX,
   PlusCircle,
   TrendingUp,
   LineChart as LineChartIcon,
@@ -9089,10 +9087,7 @@ const ChatbotCore = () => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<string>(String(config?.chatbotDefaultLanguage || 'en-IN'));
-  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(config?.chatbotVoiceOutputEnabled !== false);
   const [voiceInputEnabled, setVoiceInputEnabled] = useState(config?.chatbotVoiceInputEnabled !== false);
-  const [ttsRate, setTtsRate] = useState(Number(config?.chatbotTtsRate ?? 0.95));
-  const [ttsPitch, setTtsPitch] = useState(Number(config?.chatbotTtsPitch ?? 1.02));
   const [voiceInputSupported, setVoiceInputSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -9100,16 +9095,10 @@ const ChatbotCore = () => {
 
   useEffect(() => {
     setSelectedLanguage(String(config?.chatbotDefaultLanguage || 'en-IN'));
-    setVoiceOutputEnabled(config?.chatbotVoiceOutputEnabled !== false);
     setVoiceInputEnabled(config?.chatbotVoiceInputEnabled !== false);
-    setTtsRate(Number(config?.chatbotTtsRate ?? 0.95));
-    setTtsPitch(Number(config?.chatbotTtsPitch ?? 1.02));
   }, [
     config?.chatbotDefaultLanguage,
-    config?.chatbotVoiceOutputEnabled,
     config?.chatbotVoiceInputEnabled,
-    config?.chatbotTtsRate,
-    config?.chatbotTtsPitch,
   ]);
 
   const languageOptions = useMemo(
@@ -9130,34 +9119,6 @@ const ChatbotCore = () => {
 
   const getLanguageLabel = (language: string) =>
     languageOptions.find((item) => item.value === language)?.label || 'English';
-
-  const pickPreferredVoice = (voices: SpeechSynthesisVoice[]) => {
-    const femaleHint = /(female|woman|aditi|priya|samantha|veena|karen|zira)/i;
-    const languagePrefix = selectedLanguage.split('-')[0]?.toLowerCase();
-    const exact = voices.filter((voice) => voice.lang?.toLowerCase() === selectedLanguage.toLowerCase());
-    const byPrefix = voices.filter((voice) => voice.lang?.toLowerCase().startsWith(languagePrefix));
-    const pool = exact.length ? exact : byPrefix.length ? byPrefix : voices;
-    const female = pool.find((voice) => femaleHint.test(voice.name));
-    return female || pool[0] || null;
-  };
-
-  const speakReply = (text: string) => {
-    if (!voiceOutputEnabled || typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      return;
-    }
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = selectedLanguage;
-      utterance.rate = Number.isFinite(ttsRate) ? Math.max(0.75, Math.min(1.15, ttsRate)) : 0.95;
-      utterance.pitch = Number.isFinite(ttsPitch) ? Math.max(0.8, Math.min(1.2, ttsPitch)) : 1.0;
-      const preferredVoice = pickPreferredVoice(window.speechSynthesis.getVoices() || []);
-      if (preferredVoice) utterance.voice = preferredVoice;
-      window.speechSynthesis.speak(utterance);
-    } catch (error) {
-      console.error('Voice output failed:', error);
-    }
-  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -9315,7 +9276,6 @@ const ChatbotCore = () => {
       };
 
       setMessages(prev => [...prev, botMsg]);
-      speakReply(finalText);
     } catch (error) {
       console.error("Chatbot Error:", error);
       const errorMsg: ChatMessage = {
@@ -9328,7 +9288,6 @@ const ChatbotCore = () => {
         createdAt: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMsg]);
-      speakReply(errorMsg.content);
     } finally {
       setIsTyping(false);
     }
@@ -9367,13 +9326,6 @@ const ChatbotCore = () => {
                     </option>
                   ))}
                 </select>
-                <button
-                  onClick={() => setVoiceOutputEnabled(prev => !prev)}
-                  className="text-white/70 hover:text-white transition-colors"
-                  title={voiceOutputEnabled ? 'Disable voice replies' : 'Enable voice replies'}
-                >
-                  {voiceOutputEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-                </button>
                 <button onClick={() => setIsOpen(false)} className="text-white/60 hover:text-white">
                   <X className="w-6 h-6" />
                 </button>
@@ -10235,7 +10187,19 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
 };
 
 const AdminConfigView = () => {
-  const defaultChatbotPrompt = `You are MaiRide's official in-app assistant. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing. Keep responses concise, helpful, and action-oriented.`;
+  const defaultChatbotPrompt = `You are MaiRide's official in-app assistant, Mai Ira. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Use friendly wording, acknowledge user concerns briefly, and give practical next steps. Keep replies short, clear, and supportive.
+
+Answer only about MaiRide topics:
+- rides
+- pricing
+- booking flow
+- support
+- service regions
+- booking status
+- support tickets
+- admin actions
+
+Do not answer unrelated general knowledge questions. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.`;
   const providerModelOptions: Record<NonNullable<AppConfig['llmProvider']>, string[]> = {
     gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
     openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-nano'],
@@ -10265,7 +10229,7 @@ const AdminConfigView = () => {
     chatbotMaxTokens: 400,
     chatbotFallbackMessage: "MaiRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
     chatbotDefaultLanguage: 'en-IN',
-    chatbotVoiceOutputEnabled: true,
+    chatbotVoiceOutputEnabled: false,
     chatbotVoiceInputEnabled: true,
     chatbotTtsRate: 0.95,
     chatbotTtsPitch: 1.02,
@@ -10815,14 +10779,12 @@ const AdminConfigView = () => {
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Voice Output</label>
-                <select
-                  value={formData.chatbotVoiceOutputEnabled === false ? 'disabled' : 'enabled'}
-                  onChange={e => setFormData({ ...formData, chatbotVoiceOutputEnabled: e.target.value === 'enabled' })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
-                >
-                  <option value="enabled">Enabled</option>
-                  <option value="disabled">Disabled</option>
-                </select>
+                <input
+                  type="text"
+                  value="Temporarily disabled in this release"
+                  disabled
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-secondary"
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Voice Input (STT)</label>
