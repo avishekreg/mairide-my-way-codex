@@ -2137,17 +2137,7 @@ const AuthPage = ({
         if (!user && authMode === 'signup' && email && password && displayName) {
           await completeEmailPasswordSignUp();
         } else if (authMode === 'login') {
-          let existingProfile: { uid: string; role: string; email: string; phoneNumber: string };
-          try {
-            const resolveResponse = await postAuthAction('resolve-phone-login', { phoneNumber: phoneNumber || username });
-            existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
-          } catch (error: any) {
-            if (/HTTP (404|405)/.test(error?.message || '')) {
-              existingProfile = await resolvePhoneLoginClientSide(phoneNumber || username);
-            } else {
-              throw error;
-            }
-          }
+          const existingProfile = await resolvePhoneLoginClientSide(phoneNumber || username);
 
           sessionStorage.setItem(PHONE_LOGIN_PROFILE_KEY, existingProfile.uid);
           sessionStorage.setItem(PHONE_LOGIN_NUMBER_KEY, normalizePhoneForAuth(phoneNumber || username));
