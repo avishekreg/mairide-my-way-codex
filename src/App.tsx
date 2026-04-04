@@ -8722,6 +8722,163 @@ const finalizeDriverDashboardRazorpayPayment = async (
             </div>
           </div>
 
+          {showOfferForm && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white p-8 rounded-[32px] border border-mairide-accent shadow-xl relative overflow-hidden mb-10"
+            >
+              <div className="absolute top-0 right-0 p-4">
+                <button onClick={() => setShowOfferForm(false)} className="text-mairide-secondary hover:text-mairide-primary">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <h3 className="text-2xl font-bold text-mairide-primary mb-6">Create New Offer</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div>
+                  <label className="block text-sm font-semibold text-mairide-primary mb-2">Origin</label>
+                  {isLoaded ? (
+                    <Autocomplete
+                      onLoad={autocomplete => setAutocompleteFrom(autocomplete)}
+                      onPlaceChanged={() => {
+                        if (autocompleteFrom) {
+                          const place = autocompleteFrom.getPlace();
+                          if (place.formatted_address) {
+                            setNewRide(prev => ({ ...prev, origin: place.formatted_address! }));
+                          }
+                          if (place.geometry?.location) {
+                            setOriginLocation({
+                              lat: place.geometry.location.lat(),
+                              lng: place.geometry.location.lng()
+                            });
+                          }
+                        }
+                      }}
+                    >
+                      <input 
+                        type="text" 
+                        placeholder="Where are you now?"
+                        className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                        value={newRide.origin}
+                        onChange={e => setNewRide({ ...newRide, origin: e.target.value })}
+                      />
+                    </Autocomplete>
+                  ) : (
+                    <input 
+                      type="text" 
+                      placeholder="Where are you now?"
+                      className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                      value={newRide.origin}
+                      onChange={e => setNewRide({ ...newRide, origin: e.target.value })}
+                    />
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-mairide-primary mb-2">Destination</label>
+                  {isLoaded ? (
+                    <Autocomplete
+                      onLoad={autocomplete => setAutocompleteTo(autocomplete)}
+                      onPlaceChanged={() => {
+                        if (autocompleteTo) {
+                          const place = autocompleteTo.getPlace();
+                          if (place.formatted_address) {
+                            setNewRide(prev => ({ ...prev, destination: place.formatted_address! }));
+                          }
+                          if (place.geometry?.location) {
+                            setDestinationLocation({
+                              lat: place.geometry.location.lat(),
+                              lng: place.geometry.location.lng()
+                            });
+                          }
+                        }
+                      }}
+                    >
+                      <input 
+                        type="text" 
+                        placeholder="Where are you going?"
+                        className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                        value={newRide.destination}
+                        onChange={e => setNewRide({ ...newRide, destination: e.target.value })}
+                      />
+                    </Autocomplete>
+                  ) : (
+                    <input 
+                      type="text" 
+                      placeholder="Where are you going?"
+                      className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                      value={newRide.destination}
+                      onChange={e => setNewRide({ ...newRide, destination: e.target.value })}
+                    />
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-mairide-primary mb-2">Your Price (INR)</label>
+                  <div className="relative">
+                    <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 text-mairide-secondary w-5 h-5" />
+                    <input 
+                      type="number" 
+                      placeholder="e.g. 500"
+                      className="w-full pl-12 pr-4 py-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                      value={newRide.price}
+                      onChange={e => setNewRide({ ...newRide, price: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-mairide-primary mb-2">Seats Available</label>
+                  <div className="relative">
+                    <select 
+                      className="w-full appearance-none py-4 pl-4 pr-12 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                      value={newRide.seats}
+                      onChange={e => setNewRide({ ...newRide, seats: e.target.value })}
+                    >
+                      {[1, 2, 3, 4, 5, 6].map(n => (
+                        <option key={n} value={n}>
+                          {n} {n === 1 ? 'Seat' : 'Seats'}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronRight className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 rotate-90 text-mairide-secondary" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-mairide-primary mb-2">Journey Day</label>
+                  <div className="relative">
+                    <select
+                      className="w-full appearance-none py-4 pl-4 pr-12 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                      value={newRide.departureDay}
+                      onChange={e => setNewRide({ ...newRide, departureDay: e.target.value })}
+                    >
+                      <option value="today">Today</option>
+                      <option value="tomorrow">Tomorrow</option>
+                      <option value="dayAfter">Day After</option>
+                    </select>
+                    <ChevronRight className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 rotate-90 text-mairide-secondary" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-mairide-primary mb-2">Likely Start Time</label>
+                  <input
+                    type="time"
+                    className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
+                    value={newRide.departureClock}
+                    onChange={e => setNewRide({ ...newRide, departureClock: e.target.value })}
+                  />
+                  <p className="mt-2 text-xs text-mairide-secondary">
+                    This is the likely start time only and may vary due to traffic, road conditions, weather, and operational delays.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={handlePostRide}
+                disabled={isPostingRide}
+                className="w-full bg-mairide-accent text-white py-4 rounded-2xl font-bold hover:bg-mairide-primary transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isPostingRide ? 'Posting Offer...' : 'Post Ride Offer'}
+              </button>
+            </motion.div>
+          )}
+
           {activeDashboardRequests.length > 0 && (
             <div className="mb-8">
               <DriverDashboardSummary
@@ -8865,163 +9022,6 @@ const finalizeDriverDashboardRazorpayPayment = async (
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-mairide-primary">Your Ride Offers</h2>
             </div>
-
-            {showOfferForm && (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white p-8 rounded-[32px] border border-mairide-accent shadow-xl relative overflow-hidden"
-              >
-                <div className="absolute top-0 right-0 p-4">
-                  <button onClick={() => setShowOfferForm(false)} className="text-mairide-secondary hover:text-mairide-primary">
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-                <h3 className="text-2xl font-bold text-mairide-primary mb-6">Create New Offer</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-mairide-primary mb-2">Origin</label>
-                    {isLoaded ? (
-                      <Autocomplete
-                        onLoad={autocomplete => setAutocompleteFrom(autocomplete)}
-                        onPlaceChanged={() => {
-                          if (autocompleteFrom) {
-                            const place = autocompleteFrom.getPlace();
-                            if (place.formatted_address) {
-                              setNewRide(prev => ({ ...prev, origin: place.formatted_address! }));
-                            }
-                            if (place.geometry?.location) {
-                              setOriginLocation({
-                                lat: place.geometry.location.lat(),
-                                lng: place.geometry.location.lng()
-                              });
-                            }
-                          }
-                        }}
-                      >
-                        <input 
-                          type="text" 
-                          placeholder="Where are you now?"
-                          className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                          value={newRide.origin}
-                          onChange={e => setNewRide({ ...newRide, origin: e.target.value })}
-                        />
-                      </Autocomplete>
-                    ) : (
-                      <input 
-                        type="text" 
-                        placeholder="Where are you now?"
-                        className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                        value={newRide.origin}
-                        onChange={e => setNewRide({ ...newRide, origin: e.target.value })}
-                      />
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-mairide-primary mb-2">Destination</label>
-                    {isLoaded ? (
-                      <Autocomplete
-                        onLoad={autocomplete => setAutocompleteTo(autocomplete)}
-                        onPlaceChanged={() => {
-                          if (autocompleteTo) {
-                            const place = autocompleteTo.getPlace();
-                            if (place.formatted_address) {
-                              setNewRide(prev => ({ ...prev, destination: place.formatted_address! }));
-                            }
-                            if (place.geometry?.location) {
-                              setDestinationLocation({
-                                lat: place.geometry.location.lat(),
-                                lng: place.geometry.location.lng()
-                              });
-                            }
-                          }
-                        }}
-                      >
-                        <input 
-                          type="text" 
-                          placeholder="Where are you going?"
-                          className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                          value={newRide.destination}
-                          onChange={e => setNewRide({ ...newRide, destination: e.target.value })}
-                        />
-                      </Autocomplete>
-                    ) : (
-                      <input 
-                        type="text" 
-                        placeholder="Where are you going?"
-                        className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                        value={newRide.destination}
-                        onChange={e => setNewRide({ ...newRide, destination: e.target.value })}
-                      />
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-mairide-primary mb-2">Your Price (INR)</label>
-                    <div className="relative">
-                      <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 text-mairide-secondary w-5 h-5" />
-                      <input 
-                        type="number" 
-                        placeholder="e.g. 500"
-                        className="w-full pl-12 pr-4 py-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                        value={newRide.price}
-                        onChange={e => setNewRide({ ...newRide, price: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-mairide-primary mb-2">Seats Available</label>
-                    <div className="relative">
-                      <select 
-                        className="w-full appearance-none py-4 pl-4 pr-12 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                        value={newRide.seats}
-                        onChange={e => setNewRide({ ...newRide, seats: e.target.value })}
-                      >
-                        {[1, 2, 3, 4, 5, 6].map(n => (
-                          <option key={n} value={n}>
-                            {n} {n === 1 ? 'Seat' : 'Seats'}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronRight className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 rotate-90 text-mairide-secondary" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-mairide-primary mb-2">Journey Day</label>
-                    <div className="relative">
-                      <select
-                        className="w-full appearance-none py-4 pl-4 pr-12 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                        value={newRide.departureDay}
-                        onChange={e => setNewRide({ ...newRide, departureDay: e.target.value })}
-                      >
-                        <option value="today">Today</option>
-                        <option value="tomorrow">Tomorrow</option>
-                        <option value="dayAfter">Day After</option>
-                      </select>
-                      <ChevronRight className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 rotate-90 text-mairide-secondary" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-mairide-primary mb-2">Likely Start Time</label>
-                    <input
-                      type="time"
-                      className="w-full p-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
-                      value={newRide.departureClock}
-                      onChange={e => setNewRide({ ...newRide, departureClock: e.target.value })}
-                    />
-                    <p className="mt-2 text-xs text-mairide-secondary">
-                      This is the likely start time only and may vary due to traffic, road conditions, weather, and operational delays.
-                    </p>
-                  </div>
-                </div>
-                <button 
-                  onClick={handlePostRide}
-                  disabled={isPostingRide}
-                  className="w-full bg-mairide-accent text-white py-4 rounded-2xl font-bold hover:bg-mairide-primary transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {isPostingRide ? 'Posting Offer...' : 'Post Ride Offer'}
-                </button>
-              </motion.div>
-            )}
 
             <MyRides
               profile={profile}
