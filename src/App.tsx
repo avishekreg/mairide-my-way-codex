@@ -9058,7 +9058,27 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
 // --- Chatbot Component ---
 
-const Chatbot = () => {
+class ChatbotErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('Chatbot render failed:', error);
+  }
+
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
+
+const ChatbotCore = () => {
   const { config } = useAppConfig();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -9435,6 +9455,12 @@ const Chatbot = () => {
     </div>
   );
 };
+
+const Chatbot = () => (
+  <ChatbotErrorBoundary>
+    <ChatbotCore />
+  </ChatbotErrorBoundary>
+);
 
 // --- Support System Components ---
 
