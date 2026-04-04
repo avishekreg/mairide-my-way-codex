@@ -9100,11 +9100,12 @@ const Chatbot = () => {
 
   const handleSend = async () => {
     if (!input.trim()) return;
+    const currentInput = input;
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: currentInput,
       createdAt: new Date().toISOString()
     };
 
@@ -9113,22 +9114,8 @@ const Chatbot = () => {
     setIsTyping(true);
 
     try {
-      const response = await axios.post("/api/chat", {
-        message: input,
-        messages: [...messages, userMsg].slice(-8).map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
-      });
-
-      const rawText =
-        response.data?.message ||
-        config?.chatbotFallbackMessage ||
-        "I'm sorry, I couldn't generate a response.";
-      const text =
-        rawText.toLowerCase().includes("i'm sorry") || rawText.toLowerCase().includes("trouble connecting")
-          ? buildStaticMaiRideReply(input)
-          : rawText;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const text = buildStaticMaiRideReply(currentInput);
 
       const botMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -9140,17 +9127,10 @@ const Chatbot = () => {
       setMessages(prev => [...prev, botMsg]);
     } catch (error) {
       console.error("Chatbot Error:", error);
-      const errorMessage =
-        axios.isAxiosError(error)
-          ? String(error.response?.data?.message || error.response?.data?.error || "")
-          : "";
-      const normalizedErrorMessage = errorMessage.toLowerCase();
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: errorMessage && !normalizedErrorMessage.includes("trouble connecting") && !normalizedErrorMessage.includes("server error")
-          ? errorMessage
-          : buildStaticMaiRideReply(input),
+        content: buildStaticMaiRideReply(currentInput),
         createdAt: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMsg]);
