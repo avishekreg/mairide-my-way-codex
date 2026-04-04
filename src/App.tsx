@@ -6479,17 +6479,26 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const handleSearch = async () => {
     setIsLoading(true);
     try {
-      const [querySnapshot, bookingsSnapshot] = await Promise.all([
-        getDocs(query(collection(db, 'rides'), where('status', '==', 'available'))),
-        getDocs(collection(db, 'bookings')),
-      ]);
-      const lockedRideIds = getLockedRideIds(
-        bookingsSnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-      );
+      let availableRides: Ride[] = [];
+      let allBookings: Booking[] = [];
+
+      if (window.location.hostname === 'localhost') {
+        const [querySnapshot, bookingsSnapshot] = await Promise.all([
+          getDocs(query(collection(db, 'rides'), where('status', '==', 'available'))),
+          getDocs(collection(db, 'bookings')),
+        ]);
+        availableRides = querySnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
+        allBookings = bookingsSnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
+      } else {
+        const { data } = await axios.get('/api/user?action=search-rides');
+        availableRides = Array.isArray(data?.rides) ? data.rides : [];
+        allBookings = Array.isArray(data?.bookings) ? data.bookings : [];
+      }
+
+      const lockedRideIds = getLockedRideIds(allBookings);
       const rideMap = new Map<string, any>();
-      querySnapshot.forEach((doc) => {
-        const data = doc.data() as Ride;
-        if (lockedRideIds.has(doc.id)) {
+      availableRides.forEach((data) => {
+        if (!data?.id || lockedRideIds.has(data.id)) {
           return;
         }
 
@@ -6571,7 +6580,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           withinPlanningWindow &&
           (isAdvancePlanningSearch ? true : nearbyToTraveler)
         ) {
-          const nextRide = { id: doc.id, ...data };
+          const nextRide = { ...data };
           const dedupeKey = getRideDuplicateKey(nextRide);
           const existingRide = rideMap.get(dedupeKey);
           if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {

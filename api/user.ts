@@ -4,6 +4,7 @@ import {
   handleUserCounterBooking,
   handleUserCreateRide,
   handleUserRejectBooking,
+  handleUserSearchRides,
   handleUserTravelerCounterBooking,
   handleUserTravelerRespondBooking,
   handleUserUploadDriverDoc,
@@ -25,6 +26,10 @@ export default async function handler(req: any, res: any) {
 
   if (action === "create-ride") {
     return handleUserCreateRide(req, res);
+  }
+
+  if (action === "search-rides") {
+    return handleUserSearchRides(req, res);
   }
 
   if (action === "reject-booking") {
@@ -53,6 +58,10 @@ export default async function handler(req: any, res: any) {
 
   if (req.url?.endsWith("/create-ride")) {
     return handleUserCreateRide(req, res);
+  }
+
+  if (req.url?.endsWith("/search-rides")) {
+    return handleUserSearchRides(req, res);
   }
 
   if (req.url?.endsWith("/reject-booking")) {
