@@ -115,13 +115,15 @@ import {
   Receipt,
   ArrowUpRight,
   ArrowDownLeft,
-  Wallet
+  Wallet,
+  Globe2
 } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
 
 declare global {
   interface Window {
     Razorpay?: new (options: Record<string, any>) => { open: () => void };
+    googleTranslateElementInit?: () => void;
   }
 }
 
@@ -932,6 +934,142 @@ const GOOGLE_MAPS_API_KEY =
   import.meta.env.VITE_GOOGLE_MAPS_API_KEY.length > 10
     ? import.meta.env.VITE_GOOGLE_MAPS_API_KEY
     : "";
+const UI_LANGUAGE_STORAGE_KEY = 'mairide_ui_language';
+const UI_LANGUAGE_PROMPT_SEEN_KEY = 'mairide_ui_language_prompt_seen';
+type SupportedUiLanguage = {
+  value: string;
+  label: string;
+  nativeLabel: string;
+  googleCode: string;
+};
+const SUPPORTED_UI_LANGUAGES: SupportedUiLanguage[] = [
+  { value: 'en', label: 'English', nativeLabel: 'English', googleCode: 'en' },
+  { value: 'hi', label: 'Hindi', nativeLabel: 'हिंदी', googleCode: 'hi' },
+  { value: 'bn', label: 'Bengali', nativeLabel: 'বাংলা', googleCode: 'bn' },
+  { value: 'gu', label: 'Gujarati', nativeLabel: 'ગુજરાતી', googleCode: 'gu' },
+  { value: 'mr', label: 'Marathi', nativeLabel: 'मराठी', googleCode: 'mr' },
+  { value: 'ta', label: 'Tamil', nativeLabel: 'தமிழ்', googleCode: 'ta' },
+  { value: 'te', label: 'Telugu', nativeLabel: 'తెలుగు', googleCode: 'te' },
+  { value: 'kn', label: 'Kannada', nativeLabel: 'ಕನ್ನಡ', googleCode: 'kn' },
+  { value: 'ml', label: 'Malayalam', nativeLabel: 'മലയാളം', googleCode: 'ml' },
+  { value: 'pa', label: 'Punjabi', nativeLabel: 'ਪੰਜਾਬੀ', googleCode: 'pa' },
+  { value: 'or', label: 'Odia', nativeLabel: 'ଓଡ଼ିଆ', googleCode: 'or' },
+  { value: 'as', label: 'Assamese', nativeLabel: 'অসমীয়া', googleCode: 'as' },
+];
+const IN_STATE_LANGUAGE_MAP: Record<string, string> = {
+  assam: 'as',
+  bihar: 'hi',
+  chandigarh: 'hi',
+  chhattisgarh: 'hi',
+  delhi: 'hi',
+  'goa': 'hi',
+  gujarat: 'gu',
+  haryana: 'hi',
+  'himachal pradesh': 'hi',
+  'jammu and kashmir': 'hi',
+  jharkhand: 'hi',
+  karnataka: 'kn',
+  kerala: 'ml',
+  ladakh: 'hi',
+  'madhya pradesh': 'hi',
+  maharashtra: 'mr',
+  odisha: 'or',
+  orissa: 'or',
+  punjab: 'pa',
+  rajasthan: 'hi',
+  sikkim: 'hi',
+  'tamil nadu': 'ta',
+  telangana: 'te',
+  tripura: 'bn',
+  'uttar pradesh': 'hi',
+  uttarakhand: 'hi',
+  'west bengal': 'bn',
+};
+
+const getSupportedUiLanguage = (value: string) =>
+  SUPPORTED_UI_LANGUAGES.find((item) => item.value === value) || SUPPORTED_UI_LANGUAGES[0];
+
+const getGoogleTranslateCode = (value: string) => getSupportedUiLanguage(value).googleCode;
+
+const setGoogleTranslateCookie = (language: string) => {
+  if (typeof document === 'undefined') return;
+  const target = `/en/${getGoogleTranslateCode(language)}`;
+  const maxAge = 60 * 60 * 24 * 365;
+  document.cookie = `googtrans=${target}; path=/; max-age=${maxAge}`;
+  if (window.location.hostname.endsWith('mairide.in')) {
+    document.cookie = `googtrans=${target}; path=/; domain=.mairide.in; max-age=${maxAge}`;
+  }
+};
+
+const applyGoogleTranslateLanguage = (language: string) => {
+  if (typeof document === 'undefined') return;
+  const combo = document.querySelector('.goog-te-combo') as HTMLSelectElement | null;
+  if (!combo) return;
+  const target = getGoogleTranslateCode(language);
+  if (combo.value !== target) {
+    combo.value = target;
+    combo.dispatchEvent(new Event('change'));
+  }
+};
+
+const detectBrowserPreferredLanguage = () => {
+  const locale = (typeof navigator !== 'undefined' ? navigator.language : 'en').toLowerCase();
+  const matched = SUPPORTED_UI_LANGUAGES.find((item) => locale.startsWith(item.value));
+  return matched?.value || 'en';
+};
+
+const detectLanguageFromGeolocation = async (): Promise<string | null> => {
+  if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return null;
+  const position = await new Promise<GeolocationPosition>((resolve, reject) =>
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: false,
+      timeout: 6000,
+      maximumAge: 600000,
+    })
+  ).catch(() => null);
+
+  if (!position) return null;
+
+  const lat = position.coords.latitude;
+  const lon = position.coords.longitude;
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
+  ).catch(() => null);
+  if (!response || !response.ok) return null;
+  const payload = await response.json().catch(() => null);
+  const address = payload?.address || {};
+  const state = String(address.state || address.state_district || '').trim().toLowerCase();
+  if (!state) return null;
+  return IN_STATE_LANGUAGE_MAP[state] || null;
+};
+
+const LanguageSwitcher = ({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  compact?: boolean;
+}) => (
+  <div className={cn('flex items-center gap-2 rounded-xl border border-mairide-secondary bg-white', compact ? 'px-2 py-1' : 'px-3 py-2')}>
+    <Globe2 className={cn('text-mairide-secondary', compact ? 'w-4 h-4' : 'w-5 h-5')} />
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className={cn(
+        'bg-transparent text-mairide-primary outline-none',
+        compact ? 'text-xs font-semibold' : 'text-sm font-semibold'
+      )}
+    >
+      {SUPPORTED_UI_LANGUAGES.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.nativeLabel}
+        </option>
+      ))}
+    </select>
+  </div>
+);
 
 const formatGeoTimestamp = (timestamp?: number) => {
   if (!timestamp) return null;
@@ -1750,7 +1888,19 @@ const AppDialogHost = () => {
   );
 };
 
-const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile | null, onLogout: () => void }) => {
+const Navbar = ({
+  user,
+  profile,
+  onLogout,
+  uiLanguage,
+  onChangeLanguage,
+}: {
+  user: User,
+  profile: UserProfile | null,
+  onLogout: () => void,
+  uiLanguage: string,
+  onChangeLanguage: (next: string) => void,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   const handleHomeNavigation = () => {
@@ -1781,6 +1931,7 @@ const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile 
             ) : (
               <button onClick={() => navigate('/consumer/bookings')} className="text-mairide-primary hover:text-mairide-accent font-medium">My Bookings</button>
             )}
+            <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact />
             <div className="flex items-center space-x-3 pl-4 border-l border-mairide-secondary">
               <div className="text-right">
                 <p className="text-sm font-semibold text-mairide-primary">{profile?.displayName}</p>
@@ -1845,6 +1996,16 @@ const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile 
                 >
                   {profile?.role === 'driver' ? 'My Rides' : 'My Bookings'}
                 </button>
+                <div className="px-4 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary mb-2">Language</p>
+                  <LanguageSwitcher
+                    value={uiLanguage}
+                    onChange={(next) => {
+                      onChangeLanguage(next);
+                      setIsOpen(false);
+                    }}
+                  />
+                </div>
               </div>
               <div className="mt-auto px-4 pb-6">
                 <button onClick={onLogout} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-mairide-primary px-4 py-3 font-semibold text-white shadow-lg shadow-mairide-primary/20 transition-transform hover:scale-[1.01] active:scale-[0.99]">
@@ -13920,6 +14081,13 @@ const App = () => {
   const [notRegisteredError, setNotRegisteredError] = useState(false);
   const [referralCodeInput, setReferralCodeInput] = useState('');
   const [role, setRole] = useState<'consumer' | 'driver'>('consumer');
+  const [uiLanguage, setUiLanguage] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'en';
+    return localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || 'en';
+  });
+  const [translatorReady, setTranslatorReady] = useState(false);
+  const [showLanguagePrompt, setShowLanguagePrompt] = useState(false);
+  const [suggestedLanguage, setSuggestedLanguage] = useState<string>('en');
 
   useEffect(() => {
     if (!isLocalRazorpayEnabled()) return;
@@ -14123,6 +14291,105 @@ const App = () => {
     if (loadError) setDebugInfo(prev => [...prev, `Maps Load Error: ${loadError.message}`]);
   }, [isLoaded, loadError]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    const initTranslateWidget = () => {
+      const googleAny = (window as any).google;
+      if (!googleAny?.translate?.TranslateElement) return;
+      if (!document.getElementById('google_translate_element')) return;
+      try {
+        new googleAny.translate.TranslateElement(
+          {
+            pageLanguage: 'en',
+            autoDisplay: false,
+            includedLanguages: SUPPORTED_UI_LANGUAGES.map((option) => option.googleCode).join(','),
+          },
+          'google_translate_element'
+        );
+        setTranslatorReady(true);
+      } catch (error) {
+        console.warn('Google Translate widget init failed:', error);
+      }
+    };
+
+    if ((window as any).google?.translate?.TranslateElement) {
+      initTranslateWidget();
+      return;
+    }
+
+    window.googleTranslateElementInit = initTranslateWidget;
+    const existingScript = document.getElementById('google-translate-script') as HTMLScriptElement | null;
+    if (existingScript) return;
+
+    const script = document.createElement('script');
+    script.id = 'google-translate-script';
+    script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+    script.async = true;
+    document.body.appendChild(script);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const styleId = 'mairide-google-translate-style';
+    if (document.getElementById(styleId)) return;
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      .goog-te-banner-frame.skiptranslate { display: none !important; }
+      body { top: 0 !important; }
+      #goog-gt-tt, .goog-te-balloon-frame { display: none !important; }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const lang = getSupportedUiLanguage(uiLanguage).value;
+    localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, lang);
+    document.documentElement.lang = lang;
+    setGoogleTranslateCookie(lang);
+    if (translatorReady) {
+      window.setTimeout(() => applyGoogleTranslateLanguage(lang), 80);
+    }
+  }, [translatorReady, uiLanguage]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hasSeenPrompt = localStorage.getItem(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
+    const existing = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
+    if (hasSeenPrompt || existing) return;
+
+    let cancelled = false;
+
+    const runDetection = async () => {
+      let detected = detectBrowserPreferredLanguage();
+      try {
+        const geoDetected = await detectLanguageFromGeolocation();
+        if (geoDetected) detected = geoDetected;
+      } catch {
+        // keep browser fallback
+      }
+      if (!cancelled) {
+        setSuggestedLanguage(getSupportedUiLanguage(detected).value);
+        setShowLanguagePrompt(true);
+      }
+    };
+
+    void runDetection();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const commitUiLanguage = (nextLanguage: string) => {
+    const normalized = getSupportedUiLanguage(nextLanguage).value;
+    setUiLanguage(normalized);
+    localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, normalized);
+    localStorage.setItem(UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
+    setShowLanguagePrompt(false);
+  };
+
   if (loading) return <ErrorBoundary><LoadingScreen /></ErrorBoundary>;
 
   if (user && !profile) return <ErrorBoundary><LoadingScreen /></ErrorBoundary>;
@@ -14141,7 +14408,54 @@ const App = () => {
           referralCodeInput={referralCodeInput}
           setReferralCodeInput={setReferralCodeInput}
         />
+        <div className="fixed right-4 top-4 z-[70]">
+          <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact />
+        </div>
+        <div id="google_translate_element" className="hidden" />
         <AppDialogHost />
+        <AnimatePresence>
+          {showLanguagePrompt && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[95] flex items-center justify-center bg-mairide-primary/40 px-4 backdrop-blur-sm"
+            >
+              <motion.div
+                initial={{ y: 12, opacity: 0, scale: 0.98 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: 12, opacity: 0, scale: 0.98 }}
+                className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+              >
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Language preference</p>
+                <h3 className="mt-2 text-2xl font-black text-mairide-primary">Choose your app language</h3>
+                <p className="mt-2 text-sm text-mairide-secondary">
+                  We detected a suggested local language for your region. You can change this anytime from the menu.
+                </p>
+                <div className="mt-5 grid grid-cols-1 gap-3">
+                  <button
+                    onClick={() => commitUiLanguage(suggestedLanguage)}
+                    className="rounded-2xl bg-mairide-accent px-4 py-3 text-left text-sm font-bold text-white"
+                  >
+                    Continue in {getSupportedUiLanguage(suggestedLanguage).nativeLabel}
+                  </button>
+                  <button
+                    onClick={() => commitUiLanguage('hi')}
+                    className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
+                  >
+                    हिंदी में जारी रखें
+                  </button>
+                  <button
+                    onClick={() => commitUiLanguage('en')}
+                    className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
+                  >
+                    Continue in English
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </>
     </ErrorBoundary>
   );
@@ -14177,7 +14491,14 @@ const App = () => {
     <ErrorBoundary>
       <Router>
         <div className="min-h-screen bg-mairide-bg">
-          <Navbar user={user} profile={profile} onLogout={handleLogout} />
+          <Navbar
+            user={user}
+            profile={profile}
+            onLogout={handleLogout}
+            uiLanguage={uiLanguage}
+            onChangeLanguage={commitUiLanguage}
+          />
+          <div id="google_translate_element" className="hidden" />
           <main className="pb-20">
             <Routes>
               <Route path="/" element={
@@ -14195,6 +14516,49 @@ const App = () => {
           <AppFooter />
           <Chatbot userRole={profile?.role} userId={profile?.uid} />
           <AppDialogHost />
+          <AnimatePresence>
+            {showLanguagePrompt && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[95] flex items-center justify-center bg-mairide-primary/40 px-4 backdrop-blur-sm"
+              >
+                <motion.div
+                  initial={{ y: 12, opacity: 0, scale: 0.98 }}
+                  animate={{ y: 0, opacity: 1, scale: 1 }}
+                  exit={{ y: 12, opacity: 0, scale: 0.98 }}
+                  className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Language preference</p>
+                  <h3 className="mt-2 text-2xl font-black text-mairide-primary">Choose your app language</h3>
+                  <p className="mt-2 text-sm text-mairide-secondary">
+                    We detected a suggested local language for your region. You can change this anytime from the top menu.
+                  </p>
+                  <div className="mt-5 grid grid-cols-1 gap-3">
+                    <button
+                      onClick={() => commitUiLanguage(suggestedLanguage)}
+                      className="rounded-2xl bg-mairide-accent px-4 py-3 text-left text-sm font-bold text-white"
+                    >
+                      Continue in {getSupportedUiLanguage(suggestedLanguage).nativeLabel}
+                    </button>
+                    <button
+                      onClick={() => commitUiLanguage('hi')}
+                      className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
+                    >
+                      हिंदी में जारी रखें
+                    </button>
+                    <button
+                      onClick={() => commitUiLanguage('en')}
+                      className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
+                    >
+                      Continue in English
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </Router>
     </ErrorBoundary>
