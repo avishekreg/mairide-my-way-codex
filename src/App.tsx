@@ -325,7 +325,9 @@ const getPlatformFeePaymentEvents = (bookings: Booking[]): PlatformFeePaymentEve
 
   bookings.forEach((booking) => {
     if (booking.feePaid) {
-      const paymentMode = booking.consumerPaymentMode === 'maicoins'
+      const paymentMode = booking.consumerPaymentMode === 'hybrid'
+        ? 'hybrid'
+        : booking.consumerPaymentMode === 'maicoins'
         ? 'maicoins'
         : booking.consumerPaymentGateway === 'razorpay'
           ? 'online'
@@ -343,7 +345,9 @@ const getPlatformFeePaymentEvents = (bookings: Booking[]): PlatformFeePaymentEve
     }
 
     if (booking.driverFeePaid) {
-      const paymentMode = booking.driverPaymentMode === 'maicoins'
+      const paymentMode = booking.driverPaymentMode === 'hybrid'
+        ? 'hybrid'
+        : booking.driverPaymentMode === 'maicoins'
         ? 'maicoins'
         : booking.driverPaymentGateway === 'razorpay'
           ? 'online'
@@ -378,7 +382,7 @@ const recordPlatformFeeTransaction = async ({
 }: {
   booking: Booking;
   payer: 'consumer' | 'driver';
-  paymentMode: 'maicoins' | 'online';
+  paymentMode: 'maicoins' | 'online' | 'hybrid';
   paymentStatus: 'pending' | 'completed' | 'failed';
   transactionId?: string;
   orderId?: string;
@@ -835,6 +839,21 @@ const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
 const isLocalRazorpayEnabled = (config?: Partial<AppConfig> | null) => isRazorpayEnabled(config);
+const getMaxHybridCoinOffset = (booking: Booking, balance: number, config?: Partial<AppConfig> | null) => {
+  const { baseFee } = calculateServiceFee(booking.fare, config || undefined);
+  return Math.min(balance, baseFee, MAX_MAICOINS_PER_RIDE);
+};
+const getHybridPaymentBreakdown = (booking: Booking, balance: number, useCoins: boolean, config?: Partial<AppConfig> | null) => {
+  const { totalFee } = calculateServiceFee(booking.fare, config || undefined);
+  const coinsToUse = useCoins ? getMaxHybridCoinOffset(booking, balance, config) : 0;
+  const paymentMode: 'hybrid' | 'online' = coinsToUse > 0 ? 'hybrid' : 'online';
+  return {
+    totalFee,
+    coinsToUse,
+    amountPaid: Math.max(totalFee - coinsToUse, 0),
+    paymentMode,
+  };
+};
 let razorpayScriptPromise: Promise<boolean> | null = null;
 const GOOGLE_MAPS_API_KEY =
   import.meta.env.VITE_GOOGLE_MAPS_API_KEY &&
@@ -1052,12 +1071,16 @@ const startRazorpayPlatformFeeCheckout = async ({
   payer,
   profile,
   config,
+  amount,
+  coinsUsed = 0,
   onVerified,
 }: {
   booking: Booking;
   payer: 'consumer' | 'driver';
   profile: UserProfile;
   config?: AppConfig | null;
+  amount?: number;
+  coinsUsed?: number;
   onVerified: (payment: { paymentId: string; orderId: string; signature: string }) => Promise<void>;
 }) => {
   const razorpayKeyId = getConfiguredRazorpayKeyId(config);
@@ -1075,16 +1098,18 @@ const startRazorpayPlatformFeeCheckout = async ({
 
   const token = await getAccessToken();
   const { totalFee } = calculateServiceFee(booking.fare, config || undefined);
+  const payableAmount = typeof amount === 'number' && Number.isFinite(amount) ? amount : totalFee;
   let order;
   try {
     const orderResponse = await axios.post(
       '/api/payments?action=create-razorpay-order',
       {
-        amount: totalFee,
+        amount: payableAmount,
         bookingId: booking.id,
         payer,
         notes: {
           route: `${booking.origin} -> ${booking.destination}`,
+          coinsUsed,
         },
       },
       {
@@ -4145,12 +4170,12 @@ const TravelerDashboardSummary = ({
                   <span className="font-bold text-mairide-primary">{formatCurrency(booking.serviceFee + booking.gstAmount)}</span>
                 </div>
                 <p className="text-xs text-mairide-secondary">
-                  MaiCoins can only offset the platform fee. They cannot be used to pay the driver&apos;s ride fare.
+                  You can apply up to 25 MaiCoins against the platform fee portion only. GST and the remaining balance are paid online. MaiCoins cannot be used to pay the driver&apos;s ride fare.
                 </p>
                 {!booking.feePaid ? (
                   <div className="flex gap-3 mt-4">
                     <button onClick={() => onPayWithCoins(booking)} className={cn("flex-1 bg-mairide-primary text-white py-3", primaryActionButtonClass)}>
-                      Pay with Maicoins
+                      {isLocalRazorpayEnabled(config) ? 'Use MaiCoins + Pay Balance' : 'Pay with Maicoins'}
                     </button>
                     <button onClick={() => onPayOnline(booking)} className={cn("flex-1 bg-white border border-mairide-primary text-mairide-primary py-3", secondaryActionButtonClass)}>
                       {isLocalRazorpayEnabled(config) ? 'Pay with Razorpay' : 'Pay Online'}
@@ -4439,12 +4464,12 @@ const DriverDashboardSummary = ({
                   <span className="font-bold text-mairide-primary">{formatCurrency(request.serviceFee + request.gstAmount)}</span>
                 </div>
                 <p className="text-xs text-mairide-secondary">
-                  MaiCoins can only offset the platform fee. They cannot be used to pay the driver&apos;s ride fare.
+                  You can apply up to 25 MaiCoins against the platform fee portion only. GST and the remaining balance are paid online. MaiCoins cannot be used to pay the traveler&apos;s ride fare.
                 </p>
                 {!request.driverFeePaid ? (
                   <div className="flex gap-3 mt-4">
                     <button onClick={() => onPayWithCoins(request)} className={cn("flex-1 bg-mairide-primary text-white py-3", primaryActionButtonClass)}>
-                      Pay with Maicoins
+                      {isLocalRazorpayEnabled(config) ? 'Use MaiCoins + Pay Balance' : 'Pay with Maicoins'}
                     </button>
                     <button onClick={() => onPayOnline(request)} className={cn("flex-1 bg-white border border-mairide-primary text-mairide-primary py-3", secondaryActionButtonClass)}>
                       {isLocalRazorpayEnabled(config) ? 'Pay with Razorpay' : 'Pay Online'}
@@ -4814,14 +4839,24 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     alert('Traveler payment proof submitted successfully.');
   };
 
-  const finalizeTravelerRazorpayPayment = async (
-    booking: Booking,
-    payment: { paymentId: string; orderId: string; signature: string }
-  ) => {
+const finalizeTravelerRazorpayPayment = async (
+  booking: Booking,
+  payment: { paymentId: string; orderId: string; signature: string },
+  coinsUsed = 0
+) => {
+    if (coinsUsed > 0) {
+      await walletService.processTransaction(profile.uid, {
+        amount: coinsUsed,
+        type: 'debit',
+        description: `Platform fee for ride to ${booking.destination}`,
+        bookingId: booking.id
+      });
+    }
     await updateDoc(doc(db, 'bookings', booking.id), {
       feePaid: true,
       paymentStatus: 'paid',
-      consumerPaymentMode: 'online',
+      consumerPaymentMode: coinsUsed > 0 ? 'hybrid' : 'online',
+      maiCoinsUsed: coinsUsed,
       consumerPaymentTransactionId: payment.paymentId,
       consumerPaymentOrderId: payment.orderId,
       consumerPaymentGateway: 'razorpay',
@@ -4834,11 +4869,12 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     await recordPlatformFeeTransaction({
       booking,
       payer: 'consumer',
-      paymentMode: 'online',
+      paymentMode: coinsUsed > 0 ? 'hybrid' : 'online',
       paymentStatus: 'completed',
       transactionId: payment.paymentId,
       orderId: payment.orderId,
       gateway: 'razorpay',
+      coinsUsed,
       metadata: {
         signature: payment.signature,
       },
@@ -4850,15 +4886,8 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
 
   const handlePayFee = async (booking: Booking, useCoins: boolean) => {
     try {
-      const { totalFee } = calculateServiceFee(booking.fare, config || undefined);
-      let coinsToUse = 0;
-      
-      if (useCoins) {
-        const balance = profile.wallet?.balance || 0;
-        coinsToUse = Math.min(balance, totalFee, MAX_MAICOINS_PER_RIDE);
-      }
-
-      const amountPaid = totalFee - coinsToUse;
+      const balance = profile.wallet?.balance || 0;
+      const { totalFee, coinsToUse, amountPaid } = getHybridPaymentBreakdown(booking, balance, useCoins, config || undefined);
 
       if (amountPaid > 0) {
         if (isLocalRazorpayEnabled(config)) {
@@ -4867,7 +4896,9 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
             payer: 'consumer',
             profile,
             config,
-            onVerified: (payment) => finalizeTravelerRazorpayPayment(booking, payment),
+            amount: amountPaid,
+            coinsUsed: coinsToUse,
+            onVerified: (payment) => finalizeTravelerRazorpayPayment(booking, payment, coinsToUse),
           });
           return;
         }
@@ -5161,7 +5192,7 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                   <span className="text-2xl font-black text-mairide-accent">{formatCurrency(booking.serviceFee + booking.gstAmount)}</span>
                 </div>
                 <p className="mt-3 text-xs text-mairide-secondary">
-                  Ride fare is settled between traveler and driver separately. MaiRide collects only the maintenance fee + GST to confirm and protect the booking flow.
+                  Ride fare is settled between traveler and driver separately. You can apply up to 25 MaiCoins against the ₹100 platform fee, and any remaining fee plus GST is paid online.
                 </p>
               </div>
 
@@ -5172,7 +5203,7 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
                     className="flex-1 bg-mairide-primary text-white py-4 rounded-2xl font-bold hover:bg-mairide-accent transition-colors flex items-center justify-center space-x-2"
                   >
                     <Bot className="w-5 h-5" />
-                    <span>Pay with Maicoins</span>
+                    <span>{isLocalRazorpayEnabled(config) ? 'Use MaiCoins + Pay Balance' : 'Pay with Maicoins'}</span>
                   </button>
                   <button 
                     onClick={() => handlePayFee(booking, false)}
@@ -5915,14 +5946,24 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
     alert('Driver payment proof submitted successfully.');
   };
 
-  const finalizeDriverRazorpayPayment = async (
-    booking: Booking,
-    payment: { paymentId: string; orderId: string; signature: string }
-  ) => {
+const finalizeDriverRazorpayPayment = async (
+  booking: Booking,
+  payment: { paymentId: string; orderId: string; signature: string },
+  coinsUsed = 0
+) => {
+    if (coinsUsed > 0) {
+      await walletService.processTransaction(profile.uid, {
+        amount: coinsUsed,
+        type: 'debit',
+        description: `Platform fee for ride from ${booking.origin}`,
+        bookingId: booking.id
+      });
+    }
     await updateDoc(doc(db, 'bookings', booking.id), {
       driverFeePaid: true,
       paymentStatus: 'paid',
-      driverPaymentMode: 'online',
+      driverPaymentMode: coinsUsed > 0 ? 'hybrid' : 'online',
+      driverMaiCoinsUsed: coinsUsed,
       driverPaymentTransactionId: payment.paymentId,
       driverPaymentOrderId: payment.orderId,
       driverPaymentGateway: 'razorpay',
@@ -5936,11 +5977,12 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
     await recordPlatformFeeTransaction({
       booking,
       payer: 'driver',
-      paymentMode: 'online',
+      paymentMode: coinsUsed > 0 ? 'hybrid' : 'online',
       paymentStatus: 'completed',
       transactionId: payment.paymentId,
       orderId: payment.orderId,
       gateway: 'razorpay',
+      coinsUsed,
       metadata: {
         signature: payment.signature,
       },
@@ -5952,15 +5994,8 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
 
   const handlePayFee = async (booking: Booking, useCoins: boolean) => {
     try {
-      const { totalFee } = calculateServiceFee(booking.fare, config || undefined);
-      let coinsToUse = 0;
-      
-      if (useCoins) {
-        const balance = profile.wallet?.balance || 0;
-        coinsToUse = Math.min(balance, totalFee, MAX_MAICOINS_PER_RIDE);
-      }
-
-      const amountPaid = totalFee - coinsToUse;
+      const balance = profile.wallet?.balance || 0;
+      const { totalFee, coinsToUse, amountPaid } = getHybridPaymentBreakdown(booking, balance, useCoins, config || undefined);
 
       if (amountPaid > 0) {
         if (isLocalRazorpayEnabled(config)) {
@@ -5969,7 +6004,9 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
             payer: 'driver',
             profile,
             config,
-            onVerified: (payment) => finalizeDriverRazorpayPayment(booking, payment),
+            amount: amountPaid,
+            coinsUsed: coinsToUse,
+            onVerified: (payment) => finalizeDriverRazorpayPayment(booking, payment, coinsToUse),
           });
           return;
         }
@@ -6167,7 +6204,7 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
                     className="flex-1 bg-mairide-primary text-white py-4 rounded-2xl font-bold hover:bg-mairide-accent transition-colors flex items-center justify-center space-x-2 shadow-lg shadow-mairide-primary/20"
                   >
                     <Bot className="w-5 h-5" />
-                    <span>Pay with Maicoins</span>
+                    <span>{isLocalRazorpayEnabled(config) ? 'Use MaiCoins + Pay Balance' : 'Pay with Maicoins'}</span>
                   </button>
                   <button 
                     onClick={() => handlePayFee(request, false)}
@@ -6774,14 +6811,24 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
   };
 
-  const finalizeTravelerDashboardRazorpayPayment = async (
-    booking: Booking,
-    payment: { paymentId: string; orderId: string; signature: string }
-  ) => {
+const finalizeTravelerDashboardRazorpayPayment = async (
+  booking: Booking,
+  payment: { paymentId: string; orderId: string; signature: string },
+  coinsUsed = 0
+) => {
+    if (coinsUsed > 0) {
+      await walletService.processTransaction(profile.uid, {
+        amount: coinsUsed,
+        type: 'debit',
+        description: `Platform fee for ride to ${booking.destination}`,
+        bookingId: booking.id,
+      });
+    }
     await updateDoc(doc(db, 'bookings', booking.id), {
       feePaid: true,
       paymentStatus: 'paid',
-      consumerPaymentMode: 'online',
+      consumerPaymentMode: coinsUsed > 0 ? 'hybrid' : 'online',
+      maiCoinsUsed: coinsUsed,
       consumerPaymentTransactionId: payment.paymentId,
       consumerPaymentOrderId: payment.orderId,
       consumerPaymentGateway: 'razorpay',
@@ -6794,11 +6841,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     await recordPlatformFeeTransaction({
       booking,
       payer: 'consumer',
-      paymentMode: 'online',
+      paymentMode: coinsUsed > 0 ? 'hybrid' : 'online',
       paymentStatus: 'completed',
       transactionId: payment.paymentId,
       orderId: payment.orderId,
       gateway: 'razorpay',
+      coinsUsed,
       metadata: {
         signature: payment.signature,
       },
@@ -6810,15 +6858,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   const handleTravelerDashboardPayment = async (booking: Booking, useCoins: boolean) => {
     try {
-      const { totalFee } = calculateServiceFee(booking.fare, config || undefined);
-      let coinsToUse = 0;
-
-      if (useCoins) {
-        const balance = profile.wallet?.balance || 0;
-        coinsToUse = Math.min(balance, totalFee, MAX_MAICOINS_PER_RIDE);
-      }
-
-      const amountPaid = totalFee - coinsToUse;
+      const balance = profile.wallet?.balance || 0;
+      const { totalFee, coinsToUse, amountPaid } = getHybridPaymentBreakdown(booking, balance, useCoins, config || undefined);
       if (amountPaid > 0) {
         if (isLocalRazorpayEnabled(config)) {
           await startRazorpayPlatformFeeCheckout({
@@ -6826,7 +6867,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
             payer: 'consumer',
             profile,
             config,
-            onVerified: (payment) => finalizeTravelerDashboardRazorpayPayment(booking, payment),
+            amount: amountPaid,
+            coinsUsed: coinsToUse,
+            onVerified: (payment) => finalizeTravelerDashboardRazorpayPayment(booking, payment, coinsToUse),
           });
           return;
         }
@@ -7824,14 +7867,24 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
   };
 
-  const finalizeDriverDashboardRazorpayPayment = async (
-    booking: Booking,
-    payment: { paymentId: string; orderId: string; signature: string }
-  ) => {
+const finalizeDriverDashboardRazorpayPayment = async (
+  booking: Booking,
+  payment: { paymentId: string; orderId: string; signature: string },
+  coinsUsed = 0
+) => {
+    if (coinsUsed > 0) {
+      await walletService.processTransaction(profile.uid, {
+        amount: coinsUsed,
+        type: 'debit',
+        description: `Platform fee for ride from ${booking.origin}`,
+        bookingId: booking.id,
+      });
+    }
     await updateDoc(doc(db, 'bookings', booking.id), {
       driverFeePaid: true,
       paymentStatus: 'paid',
-      driverPaymentMode: 'online',
+      driverPaymentMode: coinsUsed > 0 ? 'hybrid' : 'online',
+      driverMaiCoinsUsed: coinsUsed,
       driverPaymentTransactionId: payment.paymentId,
       driverPaymentOrderId: payment.orderId,
       driverPaymentGateway: 'razorpay',
@@ -7845,11 +7898,12 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     await recordPlatformFeeTransaction({
       booking,
       payer: 'driver',
-      paymentMode: 'online',
+      paymentMode: coinsUsed > 0 ? 'hybrid' : 'online',
       paymentStatus: 'completed',
       transactionId: payment.paymentId,
       orderId: payment.orderId,
       gateway: 'razorpay',
+      coinsUsed,
       metadata: {
         signature: payment.signature,
       },
@@ -7861,15 +7915,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const handleDriverDashboardPayment = async (booking: Booking, useCoins: boolean) => {
     try {
-      const { totalFee } = calculateServiceFee(booking.fare, config || undefined);
-      let coinsToUse = 0;
-
-      if (useCoins) {
-        const balance = profile.wallet?.balance || 0;
-        coinsToUse = Math.min(balance, totalFee, MAX_MAICOINS_PER_RIDE);
-      }
-
-      const amountPaid = totalFee - coinsToUse;
+      const balance = profile.wallet?.balance || 0;
+      const { totalFee, coinsToUse, amountPaid } = getHybridPaymentBreakdown(booking, balance, useCoins, config || undefined);
       if (amountPaid > 0) {
         if (isLocalRazorpayEnabled(config)) {
           await startRazorpayPlatformFeeCheckout({
@@ -7877,7 +7924,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             payer: 'driver',
             profile,
             config,
-            onVerified: (payment) => finalizeDriverDashboardRazorpayPayment(booking, payment),
+            amount: amountPaid,
+            coinsUsed: coinsToUse,
+            onVerified: (payment) => finalizeDriverDashboardRazorpayPayment(booking, payment, coinsToUse),
           });
           return;
         }

@@ -138,7 +138,7 @@ function buildPlatformFeeTransactionRow({
 }: {
   booking: Record<string, any>;
   payer: "consumer" | "driver";
-  paymentMode: "maicoins" | "online";
+  paymentMode: "maicoins" | "online" | "hybrid";
   paymentStatus: "pending" | "completed" | "failed";
   transactionId?: string;
   orderId?: string;
@@ -165,7 +165,7 @@ function buildPlatformFeeTransactionRow({
       id: txId,
       userId: payerUserId || null,
       type: "maintenance_fee_payment",
-      amount: paymentMode === "maicoins" ? coinsUsed : totalFee,
+      amount: paymentMode === "maicoins" ? coinsUsed : Math.max(totalFee - coinsUsed, 0),
       currency: paymentMode === "maicoins" ? "MAICOIN" : "INR",
       status: paymentStatus,
       description: `Platform fee payment for ${bookingData.origin || "ride"} to ${bookingData.destination || "destination"}`,

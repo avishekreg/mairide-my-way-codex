@@ -231,8 +231,8 @@ export interface Booking {
   driverMaiCoinsUsed?: number;
   feePaid?: boolean;
   paymentStatus?: 'pending' | 'proof_submitted' | 'paid' | 'failed';
-  consumerPaymentMode?: 'maicoins' | 'online';
-  driverPaymentMode?: 'maicoins' | 'online';
+  consumerPaymentMode?: 'maicoins' | 'online' | 'hybrid';
+  driverPaymentMode?: 'maicoins' | 'online' | 'hybrid';
   consumerPaymentTransactionId?: string;
   driverPaymentTransactionId?: string;
   consumerPaymentOrderId?: string;
