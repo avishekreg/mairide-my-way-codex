@@ -333,14 +333,15 @@ const getPlatformFeePaymentEvents = (bookings: Booking[]): PlatformFeePaymentEve
         : booking.consumerPaymentGateway === 'razorpay'
           ? 'online'
           : 'manual';
+      const feeBreakdown = getBookingPaymentBreakdown(booking as Booking, 'consumer');
       events.push({
         id: `${booking.id}-consumer`,
         bookingId: booking.id,
         payer: 'consumer',
         createdAt: booking.consumerPaymentSubmittedAt || booking.createdAt,
-        revenue: paymentMode === 'maicoins' ? 0 : booking.serviceFee || 0,
-        gst: paymentMode === 'maicoins' ? 0 : booking.gstAmount || 0,
-        total: paymentMode === 'maicoins' ? 0 : (booking.serviceFee || 0) + (booking.gstAmount || 0),
+        revenue: feeBreakdown.serviceFee,
+        gst: feeBreakdown.gstAmount,
+        total: feeBreakdown.totalFee,
         paymentMode,
       });
     }
@@ -353,14 +354,15 @@ const getPlatformFeePaymentEvents = (bookings: Booking[]): PlatformFeePaymentEve
         : booking.driverPaymentGateway === 'razorpay'
           ? 'online'
           : 'manual';
+      const feeBreakdown = getBookingPaymentBreakdown(booking as Booking, 'driver');
       events.push({
         id: `${booking.id}-driver`,
         bookingId: booking.id,
         payer: 'driver',
         createdAt: booking.driverPaymentSubmittedAt || booking.createdAt,
-        revenue: paymentMode === 'maicoins' ? 0 : booking.serviceFee || 0,
-        gst: paymentMode === 'maicoins' ? 0 : booking.gstAmount || 0,
-        total: paymentMode === 'maicoins' ? 0 : (booking.serviceFee || 0) + (booking.gstAmount || 0),
+        revenue: feeBreakdown.serviceFee,
+        gst: feeBreakdown.gstAmount,
+        total: feeBreakdown.totalFee,
         paymentMode,
       });
     }
@@ -841,19 +843,87 @@ const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
 const isLocalRazorpayEnabled = (config?: Partial<AppConfig> | null) => isRazorpayEnabled(config);
+const getNormalizedGstRate = (config?: Partial<AppConfig> | null) => {
+  const raw = config?.gstRate ?? 0.18;
+  return raw > 1 ? raw / 100 : raw;
+};
 const getMaxHybridCoinOffset = (booking: Booking, balance: number, config?: Partial<AppConfig> | null) => {
   const { baseFee } = calculateServiceFee(booking.fare, config || undefined);
   return Math.min(balance, baseFee, MAX_MAICOINS_PER_RIDE);
 };
+const getBookingPaymentBreakdown = (
+  booking: Booking,
+  payer: 'consumer' | 'driver',
+  config?: Partial<AppConfig> | null
+) => {
+  const { baseFee } = calculateServiceFee(booking.fare, config || undefined);
+  const gstRate = getNormalizedGstRate(config);
+  const paymentMode = payer === 'consumer' ? booking.consumerPaymentMode : booking.driverPaymentMode;
+  const coinsUsed = payer === 'consumer' ? Number(booking.maiCoinsUsed || 0) : Number(booking.driverMaiCoinsUsed || 0);
+  const storedServiceFee =
+    payer === 'consumer' ? Number(booking.consumerNetServiceFee) : Number(booking.driverNetServiceFee);
+  const storedGst =
+    payer === 'consumer' ? Number(booking.consumerNetGstAmount) : Number(booking.driverNetGstAmount);
+
+  if (Number.isFinite(storedServiceFee) && Number.isFinite(storedGst) && storedServiceFee >= 0 && storedGst >= 0) {
+    return {
+      serviceFee: storedServiceFee,
+      gstAmount: storedGst,
+      totalFee: storedServiceFee + storedGst,
+      coinsUsed,
+      paymentMode,
+    };
+  }
+
+  if (paymentMode === 'maicoins') {
+    return { serviceFee: 0, gstAmount: 0, totalFee: 0, coinsUsed, paymentMode };
+  }
+
+  if (coinsUsed > 0) {
+    const netServiceFee = Math.max(baseFee - coinsUsed, 0);
+    const gstAmount = netServiceFee * gstRate;
+    return {
+      serviceFee: netServiceFee,
+      gstAmount,
+      totalFee: netServiceFee + gstAmount,
+      coinsUsed,
+      paymentMode,
+    };
+  }
+
+  return {
+    serviceFee: Number(booking.serviceFee || baseFee),
+    gstAmount: Number(booking.gstAmount || baseFee * gstRate),
+    totalFee: Number(booking.serviceFee || baseFee) + Number(booking.gstAmount || baseFee * gstRate),
+    coinsUsed,
+    paymentMode,
+  };
+};
 const getHybridPaymentBreakdown = (booking: Booking, balance: number, useCoins: boolean, config?: Partial<AppConfig> | null) => {
-  const { totalFee } = calculateServiceFee(booking.fare, config || undefined);
+  const { baseFee } = calculateServiceFee(booking.fare, config || undefined);
+  const gstRate = getNormalizedGstRate(config);
   const coinsToUse = useCoins ? getMaxHybridCoinOffset(booking, balance, config) : 0;
+  if (coinsToUse >= baseFee) {
+    return {
+      totalFee: 0,
+      coinsToUse,
+      amountPaid: 0,
+      paymentMode: 'maicoins' as const,
+      netServiceFee: 0,
+      gstAmount: 0,
+    };
+  }
   const paymentMode: 'hybrid' | 'online' = coinsToUse > 0 ? 'hybrid' : 'online';
+  const netServiceFee = Math.max(baseFee - coinsToUse, 0);
+  const gstAmount = netServiceFee * gstRate;
+  const totalFee = netServiceFee + gstAmount;
   return {
     totalFee,
     coinsToUse,
-    amountPaid: Math.max(totalFee - coinsToUse, 0),
+    amountPaid: Math.max(totalFee, 0),
     paymentMode,
+    netServiceFee,
+    gstAmount,
   };
 };
 let razorpayScriptPromise: Promise<boolean> | null = null;
@@ -4332,6 +4402,7 @@ const TravelerDashboardSummary = ({
           const listedFare = getListedFare(booking);
           const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
           const statusLabel = getBookingStateLabel(booking);
+          const travelerFeeBreakdown = getBookingPaymentBreakdown(booking as Booking, 'consumer', config);
 
           return (
           <div key={booking.id} className="bg-white border border-mairide-secondary rounded-[28px] p-4 md:p-6 shadow-sm min-w-0 overflow-hidden">
@@ -4444,7 +4515,7 @@ const TravelerDashboardSummary = ({
               <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-mairide-secondary">Platform Fee + GST</span>
-                  <span className="font-bold text-mairide-primary">{formatCurrency(booking.serviceFee + booking.gstAmount)}</span>
+                  <span className="font-bold text-mairide-primary">{formatCurrency(travelerFeeBreakdown.totalFee)}</span>
                 </div>
                 <p className="text-xs text-mairide-secondary">
                   You can apply up to 25 MaiCoins against the platform fee portion only. GST and the remaining balance are paid online. MaiCoins cannot be used to pay the driver&apos;s ride fare.
@@ -4655,6 +4726,7 @@ const DriverDashboardSummary = ({
           const driverCounterPending = pendingActor === 'driver';
           const displayFare = getNegotiationDisplayFare(request);
           const listedFare = getListedFare(request);
+          const driverFeeBreakdown = getBookingPaymentBreakdown(request as Booking, 'driver', config);
           const requestedOrigin = request.requestedOrigin || request.origin;
           const requestedDestination = request.requestedDestination || request.destination;
           const showsDetour =
@@ -4744,7 +4816,7 @@ const DriverDashboardSummary = ({
               <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-mairide-secondary">Platform Fee + GST</span>
-                  <span className="font-bold text-mairide-primary">{formatCurrency(request.serviceFee + request.gstAmount)}</span>
+                  <span className="font-bold text-mairide-primary">{formatCurrency(driverFeeBreakdown.totalFee)}</span>
                 </div>
                 <p className="text-xs text-mairide-secondary">
                   You can apply up to 25 MaiCoins against the platform fee portion only. GST and the remaining balance are paid online. MaiCoins cannot be used to pay the traveler&apos;s ride fare.
@@ -5097,6 +5169,7 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     booking: Booking,
     payload: { transactionId: string; receiptDataUrl: string }
   ) => {
+    const { baseFee, gstAmount } = calculateServiceFee(booking.fare, config || undefined);
     const receiptRef = storageRef(storage, `payments/${booking.id}/consumer-${Date.now()}.jpg`);
     await uploadString(receiptRef, payload.receiptDataUrl, 'data_url');
     const receiptUrl = await getDownloadURL(receiptRef);
@@ -5107,6 +5180,8 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
       consumerPaymentTransactionId: payload.transactionId,
       consumerPaymentReceiptUrl: receiptUrl,
       consumerPaymentSubmittedAt: new Date().toISOString(),
+      consumerNetServiceFee: baseFee,
+      consumerNetGstAmount: gstAmount,
     });
     await recordPlatformFeeTransaction({
       booking,
@@ -5127,6 +5202,12 @@ const finalizeTravelerRazorpayPayment = async (
   payment: { paymentId: string; orderId: string; signature: string },
   coinsUsed = 0
 ) => {
+    const { netServiceFee, gstAmount } = getHybridPaymentBreakdown(
+      booking,
+      profile.wallet?.balance || 0,
+      coinsUsed > 0,
+      config || undefined
+    );
     if (coinsUsed > 0) {
       await walletService.processTransaction(profile.uid, {
         amount: coinsUsed,
@@ -5148,6 +5229,8 @@ const finalizeTravelerRazorpayPayment = async (
         verifiedAt: new Date().toISOString(),
       },
       consumerPaymentSubmittedAt: new Date().toISOString(),
+      consumerNetServiceFee: netServiceFee,
+      consumerNetGstAmount: gstAmount,
     });
     await recordPlatformFeeTransaction({
       booking,
@@ -5200,7 +5283,9 @@ const finalizeTravelerRazorpayPayment = async (
         feePaid: true,
         maiCoinsUsed: coinsToUse,
         consumerPaymentMode: 'maicoins',
-        paymentStatus: 'paid'
+        paymentStatus: 'paid',
+        consumerNetServiceFee: 0,
+        consumerNetGstAmount: 0,
       });
       await recordPlatformFeeTransaction({
         booking,
@@ -5407,6 +5492,7 @@ const finalizeTravelerRazorpayPayment = async (
             const listedFare = getListedFare(booking);
             const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
             const statusLabel = getBookingStateLabel(booking);
+            const consumerFeeBreakdown = getBookingPaymentBreakdown(booking as Booking, 'consumer', config);
 
             return (
             <div key={booking.id} className="bg-white p-4 md:p-8 rounded-[32px] border border-mairide-secondary shadow-sm hover:shadow-md transition-all min-w-0">
@@ -5499,16 +5585,16 @@ const finalizeTravelerRazorpayPayment = async (
               <div className="bg-mairide-bg p-6 rounded-2xl mb-6">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-mairide-secondary">Platform Fee</span>
-                  <span className="font-bold text-mairide-primary">{formatCurrency(booking.serviceFee)}</span>
+                  <span className="font-bold text-mairide-primary">{formatCurrency(consumerFeeBreakdown.serviceFee)}</span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-mairide-secondary">GST (18%)</span>
-                  <span className="font-bold text-mairide-primary">{formatCurrency(booking.gstAmount)}</span>
+                  <span className="font-bold text-mairide-primary">{formatCurrency(consumerFeeBreakdown.gstAmount)}</span>
                 </div>
                 <div className="h-px bg-mairide-secondary/20 my-4" />
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-bold text-mairide-primary">Traveler Pays Now</span>
-                  <span className="text-2xl font-black text-mairide-accent">{formatCurrency(booking.serviceFee + booking.gstAmount)}</span>
+                  <span className="text-2xl font-black text-mairide-accent">{formatCurrency(consumerFeeBreakdown.totalFee)}</span>
                 </div>
                 <p className="mt-3 text-xs text-mairide-secondary">
                   Ride fare is settled between traveler and driver separately. You can apply up to 25 MaiCoins against the ₹100 platform fee, and any remaining fee plus GST is paid online.
@@ -6319,6 +6405,7 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
     booking: Booking,
     payload: { transactionId: string; receiptDataUrl: string }
   ) => {
+    const { baseFee, gstAmount } = calculateServiceFee(booking.fare, config || undefined);
     const receiptRef = storageRef(storage, `payments/${booking.id}/driver-${Date.now()}.jpg`);
     await uploadString(receiptRef, payload.receiptDataUrl, 'data_url');
     const receiptUrl = await getDownloadURL(receiptRef);
@@ -6330,6 +6417,8 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       driverPaymentReceiptUrl: receiptUrl,
       driverPaymentSubmittedAt: new Date().toISOString(),
       driverPhone: profile.phoneNumber || '',
+      driverNetServiceFee: baseFee,
+      driverNetGstAmount: gstAmount,
     });
     await recordPlatformFeeTransaction({
       booking,
@@ -6350,6 +6439,12 @@ const finalizeDriverRazorpayPayment = async (
   payment: { paymentId: string; orderId: string; signature: string },
   coinsUsed = 0
 ) => {
+    const { netServiceFee, gstAmount } = getHybridPaymentBreakdown(
+      booking,
+      profile.wallet?.balance || 0,
+      coinsUsed > 0,
+      config || undefined
+    );
     if (coinsUsed > 0) {
       await walletService.processTransaction(profile.uid, {
         amount: coinsUsed,
@@ -6372,6 +6467,8 @@ const finalizeDriverRazorpayPayment = async (
       },
       driverPaymentSubmittedAt: new Date().toISOString(),
       driverPhone: profile.phoneNumber || '',
+      driverNetServiceFee: netServiceFee,
+      driverNetGstAmount: gstAmount,
     });
     await recordPlatformFeeTransaction({
       booking,
@@ -6426,6 +6523,8 @@ const finalizeDriverRazorpayPayment = async (
         driverPaymentMode: 'maicoins',
         paymentStatus: 'paid',
         driverPhone: profile.phoneNumber || '',
+        driverNetServiceFee: 0,
+        driverNetGstAmount: 0,
       });
       await recordPlatformFeeTransaction({
         booking,
@@ -6658,6 +6757,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'search' | 'history' | 'wallet' | 'support' | 'profile'>('search');
   const [paymentBooking, setPaymentBooking] = useState<Booking | null>(null);
+  const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
 
   if (loadError || authFailure) {
     return (
@@ -6753,6 +6855,19 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
     seenDriverCounterNotificationsRef.current = currentKeys;
   }, [dashboardBookings]);
+
+  useEffect(() => {
+    if (reviewBooking) return;
+    const pendingReview = dashboardBookings.find(
+      (booking) =>
+        (booking.status === 'completed' || booking.rideLifecycleStatus === 'completed' || !!booking.rideEndedAt) &&
+        !booking.consumerReview &&
+        !dismissedReviewIds[booking.id]
+    );
+    if (pendingReview) {
+      setReviewBooking(pendingReview);
+    }
+  }, [dashboardBookings, dismissedReviewIds, reviewBooking]);
 
   useEffect(() => {
     const q = query(collection(db, 'rides'));
@@ -7170,6 +7285,30 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
   };
 
+  const handleSubmitReview = async ({
+    rating,
+    comment,
+    traits,
+  }: {
+    rating: number;
+    comment: string;
+    traits: string[];
+  }) => {
+    if (!reviewBooking) return;
+    setIsSubmittingReview(true);
+    try {
+      await submitBookingReview(reviewBooking.id, rating, comment, traits);
+      showAppDialog('Thanks for rating your ride.', 'success');
+      setDismissedReviewIds((prev) => ({ ...prev, [reviewBooking.id]: true }));
+      setReviewBooking(null);
+    } catch (error: any) {
+      const message = error.response?.data?.error || error.message || 'Failed to submit ride review.';
+      showAppDialog(message, 'error', 'Review submit failed');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
   const handleTravelerCounterOffer = async (booking: Booking, fare: number) => {
     if (!fare || fare <= 0) {
       showAppDialog('Please enter a valid counter fare.', 'warning');
@@ -7249,6 +7388,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     payload: { transactionId: string; receiptDataUrl: string }
   ) => {
     try {
+      const { baseFee, gstAmount } = calculateServiceFee(booking.fare, config || undefined);
       const receiptRef = storageRef(storage, `payments/${booking.id}/consumer-${Date.now()}.jpg`);
       await uploadString(receiptRef, payload.receiptDataUrl, 'data_url');
       const receiptUrl = await getDownloadURL(receiptRef);
@@ -7259,6 +7399,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         consumerPaymentTransactionId: payload.transactionId,
         consumerPaymentReceiptUrl: receiptUrl,
         consumerPaymentSubmittedAt: new Date().toISOString(),
+        consumerNetServiceFee: baseFee,
+        consumerNetGstAmount: gstAmount,
       });
       await recordPlatformFeeTransaction({
         booking,
@@ -7283,6 +7425,12 @@ const finalizeTravelerDashboardRazorpayPayment = async (
   payment: { paymentId: string; orderId: string; signature: string },
   coinsUsed = 0
 ) => {
+    const { netServiceFee, gstAmount } = getHybridPaymentBreakdown(
+      booking,
+      profile.wallet?.balance || 0,
+      coinsUsed > 0,
+      config || undefined
+    );
     if (coinsUsed > 0) {
       await walletService.processTransaction(profile.uid, {
         amount: coinsUsed,
@@ -7304,6 +7452,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
         verifiedAt: new Date().toISOString(),
       },
       consumerPaymentSubmittedAt: new Date().toISOString(),
+      consumerNetServiceFee: netServiceFee,
+      consumerNetGstAmount: gstAmount,
     });
     await recordPlatformFeeTransaction({
       booking,
@@ -7356,6 +7506,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
         maiCoinsUsed: coinsToUse,
         consumerPaymentMode: 'maicoins',
         paymentStatus: 'paid',
+        consumerNetServiceFee: 0,
+        consumerNetGstAmount: 0,
       });
       await recordPlatformFeeTransaction({
         booking,
@@ -7942,6 +8094,18 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           onSubmit={(payload) => submitTravelerPaymentProof(paymentBooking, payload)}
         />
       )}
+      {reviewBooking && (
+        <RideReviewModal
+          booking={reviewBooking}
+          reviewerRole="consumer"
+          onClose={() => {
+            setDismissedReviewIds((prev) => ({ ...prev, [reviewBooking.id]: true }));
+            setReviewBooking(null);
+          }}
+          onSubmit={handleSubmitReview}
+          isSubmitting={isSubmittingReview}
+        />
+      )}
     </div>
   );
 };
@@ -7988,6 +8152,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [counterFares, setCounterFares] = useState<{ [key: string]: string }>({});
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
   const [retiredRideIds, setRetiredRideIds] = useState<string[]>([]);
+  const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
+  const [driverBookings, setDriverBookings] = useState<Booking[]>([]);
   const seenTravelerCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedTravelerCountersRef = useRef(false);
   const activeDashboardRequests = useMemo(
@@ -8040,6 +8208,41 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     });
     return () => unsubscribe();
   }, [profile.uid, retiredRideIds]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'bookings'), where('driverId', '==', profile.uid));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Booking[] = [];
+        snapshot.forEach((snapshotDoc) =>
+          list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        );
+        setDriverBookings(
+          dedupeBookingsByThread(list).sort(
+            (a, b) => new Date((b as any).updatedAt || b.createdAt).getTime() - new Date((a as any).updatedAt || a.createdAt).getTime()
+          )
+        );
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'bookings');
+      }
+    );
+    return () => unsubscribe();
+  }, [profile.uid]);
+
+  useEffect(() => {
+    if (reviewBooking) return;
+    const pendingReview = driverBookings.find(
+      (booking) =>
+        (booking.status === 'completed' || booking.rideLifecycleStatus === 'completed' || !!booking.rideEndedAt) &&
+        !booking.driverReview &&
+        !dismissedReviewIds[booking.id]
+    );
+    if (pendingReview) {
+      setReviewBooking(pendingReview);
+    }
+  }, [dismissedReviewIds, driverBookings, reviewBooking]);
 
   useEffect(() => {
     const currentKeys = requests.reduce((acc: Record<string, string>, booking) => {
@@ -8386,6 +8589,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     payload: { transactionId: string; receiptDataUrl: string }
   ) => {
     try {
+      const { baseFee, gstAmount } = calculateServiceFee(booking.fare, config || undefined);
       const receiptRef = storageRef(storage, `payments/${booking.id}/driver-${Date.now()}.jpg`);
       await uploadString(receiptRef, payload.receiptDataUrl, 'data_url');
       const receiptUrl = await getDownloadURL(receiptRef);
@@ -8397,6 +8601,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         driverPaymentReceiptUrl: receiptUrl,
         driverPaymentSubmittedAt: new Date().toISOString(),
         driverPhone: profile.phoneNumber || '',
+        driverNetServiceFee: baseFee,
+        driverNetGstAmount: gstAmount,
       });
       await recordPlatformFeeTransaction({
         booking,
@@ -8421,6 +8627,12 @@ const finalizeDriverDashboardRazorpayPayment = async (
   payment: { paymentId: string; orderId: string; signature: string },
   coinsUsed = 0
 ) => {
+    const { netServiceFee, gstAmount } = getHybridPaymentBreakdown(
+      booking,
+      profile.wallet?.balance || 0,
+      coinsUsed > 0,
+      config || undefined
+    );
     if (coinsUsed > 0) {
       await walletService.processTransaction(profile.uid, {
         amount: coinsUsed,
@@ -8443,6 +8655,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
       },
       driverPaymentSubmittedAt: new Date().toISOString(),
       driverPhone: profile.phoneNumber || '',
+      driverNetServiceFee: netServiceFee,
+      driverNetGstAmount: gstAmount,
     });
     await recordPlatformFeeTransaction({
       booking,
@@ -8496,6 +8710,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
         driverPaymentMode: 'maicoins',
         paymentStatus: 'paid',
         driverPhone: profile.phoneNumber || '',
+        driverNetServiceFee: 0,
+        driverNetGstAmount: 0,
       });
       await recordPlatformFeeTransaction({
         booking,
@@ -8579,6 +8795,30 @@ const finalizeDriverDashboardRazorpayPayment = async (
       alert('Ride completed successfully. Go online again whenever you are ready for the next trip.');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+    }
+  };
+
+  const handleSubmitReview = async ({
+    rating,
+    comment,
+    traits,
+  }: {
+    rating: number;
+    comment: string;
+    traits: string[];
+  }) => {
+    if (!reviewBooking) return;
+    setIsSubmittingReview(true);
+    try {
+      await submitBookingReview(reviewBooking.id, rating, comment, traits);
+      showAppDialog('Thanks for rating your traveler.', 'success');
+      setDismissedReviewIds((prev) => ({ ...prev, [reviewBooking.id]: true }));
+      setReviewBooking(null);
+    } catch (error: any) {
+      const message = error.response?.data?.error || error.message || 'Failed to submit traveler review.';
+      showAppDialog(message, 'error', 'Review submit failed');
+    } finally {
+      setIsSubmittingReview(false);
     }
   };
 
@@ -9002,6 +9242,18 @@ const finalizeDriverDashboardRazorpayPayment = async (
           config={config}
           onClose={() => setPaymentRequest(null)}
           onSubmit={(payload) => submitDriverPaymentProof(paymentRequest, payload)}
+        />
+      )}
+      {reviewBooking && (
+        <RideReviewModal
+          booking={reviewBooking}
+          reviewerRole="driver"
+          onClose={() => {
+            setDismissedReviewIds((prev) => ({ ...prev, [reviewBooking.id]: true }));
+            setReviewBooking(null);
+          }}
+          onSubmit={handleSubmitReview}
+          isSubmitting={isSubmittingReview}
         />
       )}
     </div>

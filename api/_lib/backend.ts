@@ -354,18 +354,61 @@ export async function handleAdminGetTransactions(_req: ReqLike, res: ResLike) {
 
     if (bookingError) throw bookingError;
 
+    const normalizeGstRate = (rawRate: number) => {
+      if (!Number.isFinite(rawRate)) return 0.18;
+      return rawRate > 1 ? rawRate / 100 : rawRate;
+    };
+
+    const resolvePayerFeeBreakdown = (bookingData: Record<string, any>, payer: "consumer" | "driver", coinsUsed: number) => {
+      const configuredServiceFee = Number(bookingData.serviceFee || 0);
+      const configuredGstAmount = Number(bookingData.gstAmount || 0);
+      const inferredGstRate =
+        configuredServiceFee > 0
+          ? configuredGstAmount / configuredServiceFee
+          : normalizeGstRate(Number(bookingData.gstRate ?? 0.18));
+      const baseFee = configuredServiceFee > 0 ? configuredServiceFee : 100;
+      const normalizedCoinsUsed = Math.max(Number(coinsUsed || 0), 0);
+
+      const storedServiceFee = Number(
+        payer === "consumer" ? bookingData.consumerNetServiceFee : bookingData.driverNetServiceFee
+      );
+      const storedGstAmount = Number(
+        payer === "consumer" ? bookingData.consumerNetGstAmount : bookingData.driverNetGstAmount
+      );
+
+      if (
+        Number.isFinite(storedServiceFee) &&
+        Number.isFinite(storedGstAmount) &&
+        storedServiceFee >= 0 &&
+        storedGstAmount >= 0
+      ) {
+        return {
+          serviceFee: storedServiceFee,
+          gstAmount: storedGstAmount,
+          totalFee: storedServiceFee + storedGstAmount,
+        };
+      }
+
+      const netServiceFee = Math.max(baseFee - normalizedCoinsUsed, 0);
+      const gstAmount = netServiceFee * normalizeGstRate(inferredGstRate);
+      return {
+        serviceFee: netServiceFee,
+        gstAmount,
+        totalFee: netServiceFee + gstAmount,
+      };
+    };
+
     const synthesizedRows: any[] = [];
     for (const booking of bookingRows || []) {
       const bookingData = (booking.data as Record<string, any>) || {};
-      const serviceFee = Number(bookingData.serviceFee || 0);
-      const gstAmount = Number(bookingData.gstAmount || 0);
-      const totalFee = serviceFee + gstAmount;
 
       const maybeBuildRow = (payer: "consumer" | "driver") => {
         const isConsumer = payer === "consumer";
         const paid = isConsumer ? bookingData.feePaid : bookingData.driverFeePaid;
         const paymentMode = isConsumer ? bookingData.consumerPaymentMode : bookingData.driverPaymentMode;
         if (!paid || !paymentMode) return null;
+        const coinsUsed = Number(isConsumer ? bookingData.maiCoinsUsed || 0 : bookingData.driverMaiCoinsUsed || 0);
+        const { serviceFee, gstAmount, totalFee } = resolvePayerFeeBreakdown(bookingData, payer, coinsUsed);
 
         const txId = `platform_fee_${booking.id}_${payer}`;
         if (existingIds.has(txId)) return null;
@@ -379,9 +422,7 @@ export async function handleAdminGetTransactions(_req: ReqLike, res: ResLike) {
             id: txId,
             userId: isConsumer ? booking.consumer_id || bookingData.consumerId : booking.driver_id || bookingData.driverId,
             type: "maintenance_fee_payment",
-            amount: paymentMode === "maicoins"
-              ? Number(isConsumer ? bookingData.maiCoinsUsed || 0 : bookingData.driverMaiCoinsUsed || 0)
-              : totalFee,
+            amount: paymentMode === "maicoins" ? coinsUsed : totalFee,
             currency: paymentMode === "maicoins" ? "MAICOIN" : "INR",
             status: bookingData.paymentStatus === "proof_submitted" ? "pending" : "completed",
             description: `Platform fee payment for ${bookingData.origin || "ride"} to ${bookingData.destination || "destination"}`,
@@ -404,9 +445,7 @@ export async function handleAdminGetTransactions(_req: ReqLike, res: ResLike) {
               serviceFee,
               gstAmount,
               totalFee,
-              coinsUsed: paymentMode === "maicoins"
-                ? Number(isConsumer ? bookingData.maiCoinsUsed || 0 : bookingData.driverMaiCoinsUsed || 0)
-                : 0,
+              coinsUsed,
               route: `${bookingData.origin || "Unknown"} -> ${bookingData.destination || "Unknown"}`,
             },
           },

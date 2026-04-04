@@ -244,6 +244,10 @@ export interface Booking {
   totalPrice: number;
   serviceFee: number;
   gstAmount: number; // GST on fee
+  consumerNetServiceFee?: number;
+  consumerNetGstAmount?: number;
+  driverNetServiceFee?: number;
+  driverNetGstAmount?: number;
   maiCoinsUsed: number;
   driverFeePaid?: boolean;
   driverMaiCoinsUsed?: number;

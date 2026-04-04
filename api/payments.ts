@@ -145,6 +145,48 @@ async function verifyRazorpayPayment(req: any, res: any) {
   }
 }
 
+function normalizeGstRate(rawRate: number) {
+  if (!Number.isFinite(rawRate)) return 0.18;
+  return rawRate > 1 ? rawRate / 100 : rawRate;
+}
+
+function resolvePayerFeeBreakdown(bookingData: Record<string, any>, payer: "consumer" | "driver", coinsUsed: number) {
+  const configuredServiceFee = Number(bookingData.serviceFee || 0);
+  const configuredGstAmount = Number(bookingData.gstAmount || 0);
+  const inferredGstRate =
+    configuredServiceFee > 0 ? configuredGstAmount / configuredServiceFee : normalizeGstRate(Number(bookingData.gstRate ?? 0.18));
+  const baseFee = configuredServiceFee > 0 ? configuredServiceFee : 100;
+  const normalizedCoinsUsed = Math.max(Number(coinsUsed || 0), 0);
+
+  const storedServiceFee = Number(
+    payer === "consumer" ? bookingData.consumerNetServiceFee : bookingData.driverNetServiceFee
+  );
+  const storedGstAmount = Number(
+    payer === "consumer" ? bookingData.consumerNetGstAmount : bookingData.driverNetGstAmount
+  );
+
+  if (
+    Number.isFinite(storedServiceFee) &&
+    Number.isFinite(storedGstAmount) &&
+    storedServiceFee >= 0 &&
+    storedGstAmount >= 0
+  ) {
+    return {
+      serviceFee: storedServiceFee,
+      gstAmount: storedGstAmount,
+      totalFee: storedServiceFee + storedGstAmount,
+    };
+  }
+
+  const netServiceFee = Math.max(baseFee - normalizedCoinsUsed, 0);
+  const gstAmount = netServiceFee * normalizeGstRate(inferredGstRate);
+  return {
+    serviceFee: netServiceFee,
+    gstAmount,
+    totalFee: netServiceFee + gstAmount,
+  };
+}
+
 function buildPlatformFeeTransactionRow({
   booking,
   payer,
@@ -172,9 +214,7 @@ function buildPlatformFeeTransactionRow({
   const bookingId = booking.id;
   const payerUserId = payer === "consumer" ? booking.consumer_id || bookingData.consumerId : booking.driver_id || bookingData.driverId;
   const payerName = payer === "consumer" ? bookingData.consumerName : bookingData.driverName;
-  const serviceFee = Number(bookingData.serviceFee || 0);
-  const gstAmount = Number(bookingData.gstAmount || 0);
-  const totalFee = serviceFee + gstAmount;
+  const { serviceFee, gstAmount, totalFee } = resolvePayerFeeBreakdown(bookingData, payer, Number(coinsUsed || 0));
   const txId = `platform_fee_${bookingId}_${payer}`;
 
   return {
