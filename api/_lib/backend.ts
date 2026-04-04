@@ -1373,15 +1373,15 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
     const seedData = bookingRow.data || {};
     const updatedAt = new Date().toISOString();
     const rideId = bookingRow.ride_id || seedData.rideId;
-    const driverId = bookingRow.driver_id || seedData.driverId;
+    const threadConsumerId = bookingRow.consumer_id || seedData.consumerId;
     let targetRows = [bookingRow];
 
-    if (rideId && driverId) {
+    if (rideId && threadConsumerId) {
       const { data: candidateRows, error: candidateError } = await supabaseAdmin
         .from("bookings")
         .select("*")
         .eq("ride_id", rideId)
-        .eq("driver_id", driverId);
+        .eq("consumer_id", threadConsumerId);
 
       if (candidateError) throw candidateError;
 
@@ -1459,15 +1459,15 @@ export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLik
     const seedData = bookingRow.data || {};
     const updatedAt = new Date().toISOString();
     const rideId = bookingRow.ride_id || seedData.rideId;
-    const driverId = bookingRow.driver_id || seedData.driverId;
+    const threadConsumerId = bookingRow.consumer_id || seedData.consumerId;
     let targetRows = [bookingRow];
 
-    if (rideId && driverId) {
+    if (rideId && threadConsumerId) {
       const { data: candidateRows, error: candidateError } = await supabaseAdmin
         .from("bookings")
         .select("*")
         .eq("ride_id", rideId)
-        .eq("driver_id", driverId);
+        .eq("consumer_id", threadConsumerId);
 
       if (candidateError) throw candidateError;
 
