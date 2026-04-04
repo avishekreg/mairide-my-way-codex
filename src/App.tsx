@@ -5056,12 +5056,21 @@ const finalizeTravelerRazorpayPayment = async (
       if (!booking) {
         throw new Error('Booking not found.');
       }
+      const token = await getAccessToken();
 
-      await axios.post('/api/user?action=traveler-respond-booking', {
-        bookingId,
-        consumerId: profile.uid,
-        action,
-      });
+      await axios.post(
+        '/api/user?action=traveler-respond-booking',
+        {
+          bookingId,
+          consumerId: profile.uid,
+          action,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       const updatedAt = new Date().toISOString();
       setBookings((prev) =>
@@ -5921,11 +5930,20 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       if (!request) {
         throw new Error('Booking request not found.');
       }
-      await axios.post('/api/user?action=counter-booking', {
-        bookingId: request.id,
-        driverId: profile.uid,
-        fare,
-      });
+      const token = await getAccessToken();
+      await axios.post(
+        '/api/user?action=counter-booking',
+        {
+          bookingId: request.id,
+          driverId: profile.uid,
+          fare,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
       const updatedAt = new Date().toISOString();
       setRequests((prev) =>
         prev.map((booking) =>
@@ -5993,12 +6011,21 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
       if (!bookingData) {
         throw new Error('Booking request not found.');
       }
-      await axios.post('/api/user?action=respond-booking', {
-        bookingId: bookingData.id,
-        driverId: profile.uid,
-        action: status,
-        driverPhone: profile.phoneNumber || '',
-      });
+      const token = await getAccessToken();
+      await axios.post(
+        '/api/user?action=respond-booking',
+        {
+          bookingId: bookingData.id,
+          driverId: profile.uid,
+          action: status,
+          driverPhone: profile.phoneNumber || '',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       const updatedAt = new Date().toISOString();
       const acceptedFare =
@@ -6820,11 +6847,20 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   const handleTravelerNegotiation = async (booking: Booking, action: 'accepted' | 'rejected') => {
     try {
-      await axios.post('/api/user?action=traveler-respond-booking', {
-        bookingId: booking.id,
-        consumerId: profile.uid,
-        action,
-      });
+      const token = await getAccessToken();
+      await axios.post(
+        '/api/user?action=traveler-respond-booking',
+        {
+          bookingId: booking.id,
+          consumerId: profile.uid,
+          action,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       const updatedAt = new Date().toISOString();
       setDashboardBookings((prev) =>
@@ -6856,11 +6892,20 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
 
     try {
-      await axios.post('/api/user?action=traveler-counter-booking', {
-        bookingId: booking.id,
-        consumerId: profile.uid,
-        fare,
-      });
+      const token = await getAccessToken();
+      await axios.post(
+        '/api/user?action=traveler-counter-booking',
+        {
+          bookingId: booking.id,
+          consumerId: profile.uid,
+          fare,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       const updatedAt = new Date().toISOString();
       setDashboardBookings((prev) =>
@@ -7901,12 +7946,21 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const handleDriverAction = async (request: Booking, status: 'confirmed' | 'rejected') => {
     try {
-      await axios.post('/api/user?action=respond-booking', {
-        bookingId: request.id,
-        driverId: profile.uid,
-        action: status,
-        driverPhone: profile.phoneNumber || '',
-      });
+      const token = await getAccessToken();
+      await axios.post(
+        '/api/user?action=respond-booking',
+        {
+          bookingId: request.id,
+          driverId: profile.uid,
+          action: status,
+          driverPhone: profile.phoneNumber || '',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       const acceptedFare =
         hasPendingTravelerCounterOffer(request) && request.negotiatedFare
@@ -7945,11 +7999,20 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
 
     try {
-      await axios.post('/api/user?action=counter-booking', {
-        bookingId: request.id,
-        driverId: profile.uid,
-        fare,
-      });
+      const token = await getAccessToken();
+      await axios.post(
+        '/api/user?action=counter-booking',
+        {
+          bookingId: request.id,
+          driverId: profile.uid,
+          fare,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       const updatedAt = new Date().toISOString();
       setRequests((prev) =>
