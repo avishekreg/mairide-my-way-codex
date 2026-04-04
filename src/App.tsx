@@ -936,6 +936,7 @@ const GOOGLE_MAPS_API_KEY =
     : "";
 const UI_LANGUAGE_STORAGE_KEY = 'mairide_ui_language';
 const UI_LANGUAGE_PROMPT_SEEN_KEY = 'mairide_ui_language_prompt_seen';
+const UI_LANGUAGE_PROMPT_SESSION_KEY = 'mairide_ui_language_prompt_session';
 type SupportedUiLanguage = {
   value: string;
   label: string;
@@ -955,6 +956,7 @@ const SUPPORTED_UI_LANGUAGES: SupportedUiLanguage[] = [
   { value: 'pa', label: 'Punjabi', nativeLabel: 'ਪੰਜਾਬੀ', googleCode: 'pa' },
   { value: 'or', label: 'Odia', nativeLabel: 'ଓଡ଼ିଆ', googleCode: 'or' },
   { value: 'as', label: 'Assamese', nativeLabel: 'অসমীয়া', googleCode: 'as' },
+  { value: 'ne', label: 'Nepali', nativeLabel: 'नेपाली', googleCode: 'ne' },
 ];
 const IN_STATE_LANGUAGE_MAP: Record<string, string> = {
   assam: 'as',
@@ -9475,6 +9477,7 @@ const ChatbotCore = ({
     () => [
       { value: 'en-IN', label: 'English' },
       { value: 'hi-IN', label: 'Hindi' },
+      { value: 'ne-IN', label: 'Nepali' },
       { value: 'bn-IN', label: 'Bengali' },
       { value: 'ta-IN', label: 'Tamil' },
       { value: 'te-IN', label: 'Telugu' },
@@ -11139,6 +11142,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
                 >
                   <option value="en-IN">English (India)</option>
                   <option value="hi-IN">Hindi</option>
+                  <option value="ne-IN">Nepali</option>
                   <option value="bn-IN">Bengali</option>
                   <option value="ta-IN">Tamil</option>
                   <option value="te-IN">Telugu</option>
@@ -14355,20 +14359,20 @@ const App = () => {
   }, [translatorReady, uiLanguage]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const hasSeenPrompt = localStorage.getItem(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
-    const existing = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
-    if (hasSeenPrompt || existing) return;
+    if (typeof window === 'undefined' || user) return;
+    const sessionPrompted = sessionStorage.getItem(UI_LANGUAGE_PROMPT_SESSION_KEY) === '1';
+    if (sessionPrompted) return;
 
     let cancelled = false;
+    sessionStorage.setItem(UI_LANGUAGE_PROMPT_SESSION_KEY, '1');
 
     const runDetection = async () => {
-      let detected = detectBrowserPreferredLanguage();
+      let detected = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || detectBrowserPreferredLanguage();
       try {
         const geoDetected = await detectLanguageFromGeolocation();
         if (geoDetected) detected = geoDetected;
       } catch {
-        // keep browser fallback
+        // fallback remains detected
       }
       if (!cancelled) {
         setSuggestedLanguage(getSupportedUiLanguage(detected).value);
@@ -14380,7 +14384,7 @@ const App = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user]);
 
   const commitUiLanguage = (nextLanguage: string) => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
@@ -14477,6 +14481,10 @@ const App = () => {
       <ErrorBoundary>
         {profile.forcePasswordChange && <ForcePasswordChangeModal profile={profile} />}
         <div className="min-h-screen bg-mairide-bg flex flex-col">
+          <div className="fixed right-4 top-4 z-[70]">
+            <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact />
+          </div>
+          <div id="google_translate_element" className="hidden" />
           <div className="flex-1">
             <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} />
           </div>
