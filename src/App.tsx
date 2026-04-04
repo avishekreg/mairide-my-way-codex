@@ -4702,17 +4702,17 @@ const DriverDashboardSummary = ({
                 </div>
               </div>
             )}
-            {driverCounterPending && (
-              <div className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
-                <p className="font-bold text-mairide-primary">Your latest counter offer is active.</p>
-                <p className="mt-2 text-sm text-mairide-secondary">
-                  You can still accept, reject, or revise the live negotiation while the traveler is reviewing{' '}
-                  <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>.
-                </p>
-              </div>
-            )}
             {(request.status === 'pending' || request.status === 'negotiating' || travelerCounterPending || driverCounterPending) && (
               <div className="mt-4 space-y-4">
+                {driverCounterPending && (
+                  <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                    <p className="font-bold text-mairide-primary">Your latest counter offer is active.</p>
+                    <p className="mt-2 text-sm text-mairide-secondary">
+                      The negotiation is still live. You can accept, reject, or revise{' '}
+                      <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span> at any time until the traveler makes a final decision.
+                    </p>
+                  </div>
+                )}
                 <div className="flex gap-3">
                   <button onClick={() => onAccept(request)} className={cn("flex-1 bg-green-600 text-white py-3", primaryActionButtonClass)}>
                     {travelerCounterPending || driverCounterPending ? 'Accept Offer' : 'Accept Request'}
