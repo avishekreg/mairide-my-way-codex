@@ -832,6 +832,7 @@ const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const adminApiPath = (action: string) => `/api/admin-api?action=${encodeURIComponent(action)}`;
 const adminConfigPath = adminApiPath("config");
+const adminSaveConfigPath = adminApiPath("save-config");
 const adminTransactionsPath = adminApiPath("transactions");
 const adminVerifyDriverPath = adminApiPath("verify-driver");
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
@@ -10052,7 +10053,7 @@ const AdminConfigView = () => {
 
   const saveConfig = async (payload: Partial<AppConfig>) => {
     const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
-    const response = await axios.post(adminConfigPath, payload, {
+    const response = await axios.post(adminSaveConfigPath, payload, {
       headers
     });
     if (response.data?.config) {
