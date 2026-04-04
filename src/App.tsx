@@ -905,11 +905,33 @@ type AppDialogDetail = {
 };
 
 const getBookingNegotiationField = <T,>(booking: Booking, key: string): T | undefined => {
+  const topLevel = (booking as any)?.[key];
+  if (topLevel !== undefined && topLevel !== null && topLevel !== '') {
+    return topLevel as T;
+  }
   const nested = (booking as any)?.data?.[key];
   if (nested !== undefined && nested !== null && nested !== '') {
     return nested as T;
   }
-  return (booking as any)?.[key] as T | undefined;
+  return undefined;
+};
+
+const normalizeNegotiationBooking = <T extends Booking>(booking: T): T => {
+  const data = (booking as any)?.data || {};
+  return {
+    ...booking,
+    ...(data.negotiatedFare !== undefined ? { negotiatedFare: data.negotiatedFare } : {}),
+    ...(data.negotiationStatus ? { negotiationStatus: data.negotiationStatus } : {}),
+    ...(data.negotiationActor ? { negotiationActor: data.negotiationActor } : {}),
+    ...(data.driverCounterPending !== undefined ? { driverCounterPending: data.driverCounterPending } : {}),
+    ...(data.status ? { status: data.status } : {}),
+    ...(data.fare !== undefined ? { fare: data.fare } : {}),
+    ...(data.listedFare !== undefined ? { listedFare: data.listedFare } : {}),
+    ...(data.updatedAt ? { updatedAt: data.updatedAt } : {}),
+    ...(data.rideRetired !== undefined ? { rideRetired: data.rideRetired } : {}),
+    ...(data.driverPhone ? { driverPhone: data.driverPhone } : {}),
+    ...(data.consumerPhone ? { consumerPhone: data.consumerPhone } : {}),
+  };
 };
 
 const getPendingNegotiationActor = (booking: Booking): 'driver' | 'consumer' | null => {
@@ -993,7 +1015,14 @@ const persistCounterOfferThroughCompatStore = async (
         driverCounterPending: actor === 'driver',
         status: 'negotiating',
         rideRetired: false,
+        'data.negotiatedFare': fare,
+        'data.negotiationStatus': 'pending',
+        'data.negotiationActor': actor,
+        'data.driverCounterPending': actor === 'driver',
+        'data.status': 'negotiating',
+        'data.rideRetired': false,
         updatedAt,
+        'data.updatedAt': updatedAt,
       })
     )
   );
@@ -1029,8 +1058,16 @@ const persistNegotiationResolutionThroughCompatStore = async (
         negotiationActor: actor,
         driverCounterPending: false,
         rideRetired: normalizedAction === 'rejected',
+        ...(normalizedAction === 'accepted' && Number.isFinite(nextFare) ? { 'data.fare': nextFare } : {}),
+        'data.status': nextStatus,
+        'data.negotiationStatus': nextNegotiationStatus,
+        'data.negotiationActor': actor,
+        'data.driverCounterPending': false,
+        'data.rideRetired': normalizedAction === 'rejected',
         ...(options?.driverPhone ? { driverPhone: options.driverPhone } : {}),
+        ...(options?.driverPhone ? { 'data.driverPhone': options.driverPhone } : {}),
         updatedAt,
+        'data.updatedAt': updatedAt,
       })
     )
   );
@@ -1043,6 +1080,37 @@ const persistNegotiationResolutionThroughCompatStore = async (
   }
 
   return updatedAt;
+};
+
+const applyThreadNegotiationState = (
+  seedBooking: Booking,
+  actor: 'driver' | 'consumer',
+  status: 'pending' | 'negotiating' | 'confirmed' | 'rejected',
+  options?: {
+    fare?: number;
+    driverPhone?: string;
+    negotiationStatus?: 'pending' | 'accepted' | 'rejected';
+    driverCounterPending?: boolean;
+    rideRetired?: boolean;
+  }
+) => {
+  const updatedAt = new Date().toISOString();
+  return (candidate: Booking) =>
+    getBookingThreadKey(candidate) === getBookingThreadKey(seedBooking)
+      ? {
+          ...candidate,
+          ...(options?.fare !== undefined ? { fare: options.fare } : {}),
+          ...(options?.fare !== undefined ? { negotiatedFare: options.fare } : {}),
+          status,
+          negotiationStatus:
+            options?.negotiationStatus ?? (status === 'confirmed' ? 'accepted' : status === 'rejected' ? 'rejected' : 'pending'),
+          negotiationActor: actor,
+          driverCounterPending: options?.driverCounterPending ?? (actor === 'driver' && status !== 'confirmed' && status !== 'rejected'),
+          ...(options?.driverPhone ? { driverPhone: options.driverPhone } : {}),
+          ...(options?.rideRetired !== undefined ? { rideRetired: options.rideRetired } : {}),
+          updatedAt,
+        }
+      : candidate;
 };
 
 const getNegotiationDisplayFare = (booking: Booking) => {
@@ -6156,7 +6224,9 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: any[] = [];
-      snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+      snapshot.forEach((doc) =>
+        list.push(normalizeNegotiationBooking({ id: doc.id, ...(doc.data() as Booking) }))
+      );
       setRequests(
         dedupeBookingsByThread(list)
           .filter(
@@ -6634,7 +6704,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     const q = query(collection(db, 'bookings'), where('consumerId', '==', profile.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: Booking[] = [];
-      snapshot.forEach((snapshotDoc) => list.push({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
+      snapshot.forEach((snapshotDoc) =>
+        list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+      );
       setDashboardBookings(
         dedupeBookingsByThread(
           list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -7376,14 +7448,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
       {activeTab === 'search' && (
         <>
-          <div className="flex flex-col md:flex-row md:items-center gap-6 mb-12">
-            <img src={LOGO_URL} className="w-24 h-24 object-contain" alt="MaiRide Logo" />
-            <div>
-              <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Where to?</h1>
-              <p className="text-mairide-secondary italic serif">Find discounted intercity rides on empty leg journeys.</p>
-            </div>
-          </div>
-
           <TravelerDashboardSummary
             bookings={dashboardBookings}
             rideStatusById={rideStatusById}
@@ -7398,6 +7462,14 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
             onOpenBooking={() => setActiveTab('history')}
           />
+
+          <div className="flex flex-col md:flex-row md:items-center gap-6 mb-12">
+            <img src={LOGO_URL} className="w-24 h-24 object-contain" alt="MaiRide Logo" />
+            <div>
+              <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Where to?</h1>
+              <p className="text-mairide-secondary italic serif">Find discounted intercity rides on empty leg journeys.</p>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
             <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
@@ -7964,7 +8036,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: Booking[] = [];
-      snapshot.forEach((snapshotDoc) => list.push({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
+      snapshot.forEach((snapshotDoc) =>
+        list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+      );
       setRequests(
         dedupeBookingsByThread(list)
           .filter(
