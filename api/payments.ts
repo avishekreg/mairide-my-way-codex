@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
-import { verifyTokenFromHeader } from "./_lib/backend.ts";
 
 function getAction(req: any) {
   const fromQuery = req.query?.action;
@@ -23,6 +22,28 @@ function getSupabaseAdmin() {
       persistSession: false,
     },
   });
+}
+
+function getAuthHeader(req: any) {
+  return Array.isArray(req.headers?.authorization)
+    ? req.headers.authorization[0]
+    : req.headers?.authorization;
+}
+
+async function verifyTokenFromHeader(req: any) {
+  const authHeader = getAuthHeader(req);
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw Object.assign(new Error("Unauthorized"), { status: 401 });
+  }
+
+  const accessToken = authHeader.slice("Bearer ".length);
+  const { data, error } = await getSupabaseAdmin().auth.getUser(accessToken);
+
+  if (error || !data.user) {
+    throw Object.assign(new Error("Unauthorized"), { status: 401 });
+  }
+
+  return data.user;
 }
 
 async function getRazorpayConfig() {
@@ -52,7 +73,7 @@ async function getRazorpayConfig() {
 
 async function createRazorpayOrder(req: any, res: any) {
   try {
-    await verifyTokenFromHeader(req.headers.authorization);
+    await verifyTokenFromHeader(req);
     const { amount, bookingId, payer, notes } = req.body || {};
     const numericAmount = Number(amount);
 
@@ -97,7 +118,7 @@ async function createRazorpayOrder(req: any, res: any) {
 
 async function verifyRazorpayPayment(req: any, res: any) {
   try {
-    await verifyTokenFromHeader(req.headers.authorization);
+    await verifyTokenFromHeader(req);
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
@@ -194,7 +215,7 @@ function buildPlatformFeeTransactionRow({
 
 async function recordPlatformFee(req: any, res: any) {
   try {
-    await verifyTokenFromHeader(req.headers.authorization);
+    await verifyTokenFromHeader(req);
     const {
       bookingId,
       payer,
