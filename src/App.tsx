@@ -9079,7 +9079,13 @@ class ChatbotErrorBoundary extends Component<{ children: React.ReactNode }, { ha
   }
 }
 
-const ChatbotCore = ({ userRole }: { userRole?: UserProfile['role'] }) => {
+const ChatbotCore = ({
+  userRole,
+  userId,
+}: {
+  userRole?: UserProfile['role'];
+  userId?: string;
+}) => {
   const appConfigState = useAppConfig();
   const config = (appConfigState?.config || {}) as Partial<AppConfig>;
   const [isOpen, setIsOpen] = useState(false);
@@ -9265,6 +9271,7 @@ const ChatbotCore = ({ userRole }: { userRole?: UserProfile['role'] }) => {
         messages: transcript,
         language: selectedLanguage,
         userRole: userRole || 'consumer',
+        userId: userId || '',
       });
       const text = String(response?.data?.message || '').trim();
       const finalText = text || buildStaticMaiRideReply(currentInput, selectedLanguage);
@@ -9413,9 +9420,9 @@ const ChatbotCore = ({ userRole }: { userRole?: UserProfile['role'] }) => {
   );
 };
 
-const Chatbot = ({ userRole }: { userRole?: UserProfile['role'] }) => (
+const Chatbot = ({ userRole, userId }: { userRole?: UserProfile['role']; userId?: string }) => (
   <ChatbotErrorBoundary>
-    <ChatbotCore userRole={userRole} />
+    <ChatbotCore userRole={userRole} userId={userId} />
   </ChatbotErrorBoundary>
 );
 
@@ -10202,7 +10209,7 @@ Answer only about MaiRide topics:
 
 Do not answer unrelated general knowledge questions. For non-admin users, do not provide admin operational actions or admin panel guidance. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.`;
   const providerModelOptions: Record<NonNullable<AppConfig['llmProvider']>, string[]> = {
-    gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+    gemini: ['gemini-1.5-pro', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
     openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-nano'],
     claude: ['claude-3-5-haiku-latest', 'claude-3-5-sonnet-latest'],
     disabled: [],
@@ -10224,7 +10231,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     emailOtpSubject: 'Your MaiRide verification code',
     chatbotEnabled: true,
     llmProvider: 'gemini',
-    llmModel: 'gemini-2.5-flash',
+    llmModel: 'gemini-1.5-pro',
     chatbotSystemPrompt: defaultChatbotPrompt,
     chatbotTemperature: 0.3,
     chatbotMaxTokens: 400,
@@ -13983,7 +13990,7 @@ const App = () => {
             </Routes>
           </main>
           <AppFooter />
-          <Chatbot userRole={profile?.role} />
+          <Chatbot userRole={profile?.role} userId={profile?.uid} />
           <AppDialogHost />
         </div>
       </Router>

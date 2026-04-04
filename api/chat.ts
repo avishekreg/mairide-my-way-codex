@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { GoogleGenAI } from "@google/genai";
 
 const FALLBACK_GEMINI_PROJECT_ID = "";
 const FALLBACK_GEMINI_API_KEY = "";
@@ -19,7 +20,7 @@ function getSupabaseAdmin() {
 async function getGlobalConfig() {
   const defaults = {
     llmProvider: "gemini",
-    llmModel: "gemini-2.5-flash",
+    llmModel: "gemini-1.5-pro",
     chatbotEnabled: true,
     chatbotTemperature: 0.3,
     chatbotMaxTokens: 400,
@@ -61,6 +62,28 @@ async function getGlobalConfig() {
 const DEFAULT_PROMPT =
   "You are MaiRide's official in-app assistant, Mai Ira. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Acknowledge user concerns briefly and then give practical next steps. Keep replies concise, clear, and supportive. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. For non-admin users, do not provide admin actions or admin operational guidance. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.";
 
+const IRA_PERSONALITY_JSON = {
+  assistant_config: {
+    identity: "Ira",
+    brand: "MaiRide",
+    persona: "Professional, Warm, Soft-spoken (Makhmali), and Highly Intelligent.",
+    language_style: "Hinglish (Natural mix of Hindi and English).",
+    core_expertise: "Logistics, Empty-Leg trip optimization, and customer relationship management.",
+  },
+  behavioral_rules: [
+    "Never start responses with 'As an AI language model' or 'I am an AI'.",
+    "Address the user by name if available in the database/context.",
+    "Use empathetic phrases like 'Main samajh sakti hoon' or 'Zaroor Abhishek ji'.",
+    "Focus on solving the user's specific travel query: Finding empty-leg rides, pricing, or booking status.",
+    "Keep replies concise yet deeply helpful and human-like.",
+  ],
+  example_interaction: {
+    user: "Is there a car from Siliguri to Kolkata tomorrow?",
+    ira_response:
+      "Bilkul! Kal subah ek premium sedan Siliguri se Kolkata ke liye empty-leg par hai. Ye aapko normal fare se kaafi kam mein mil jayegi. Kya main aapke liye booking process start karun?",
+  },
+} as const;
+
 function isAdminIntent(rawMessage: string) {
   const message = String(rawMessage || "").toLowerCase();
   return /(admin|super admin|verify driver|approve driver|reject driver|delete user|config|platform settings|force cancel|override|admin panel|transactions dashboard|revenue panel)/i.test(
@@ -70,6 +93,48 @@ function isAdminIntent(rawMessage: string) {
 
 function getHumanStyleInstruction() {
   return "Write in a natural, human, supportive way. Keep it conversational and warm, not robotic. Use short sentences and practical steps. Avoid sounding like a policy bot.";
+}
+
+async function getUserContext(userId?: string) {
+  if (!userId) return { displayName: "", role: "consumer" };
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .select("display_name, role, data")
+      .eq("id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    return {
+      displayName: String(data?.display_name || data?.data?.displayName || "").trim(),
+      role: String(data?.role || data?.data?.role || "consumer").toLowerCase(),
+    };
+  } catch {
+    return { displayName: "", role: "consumer" };
+  }
+}
+
+function buildGeminiSystemInstruction(config: Record<string, any>, language: string, userContext: { displayName: string; role: string }) {
+  const customPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
+  const languageInstruction = getLanguageInstruction(language);
+  const humanStyleInstruction = getHumanStyleInstruction();
+  const adminGuardInstruction =
+    userContext.role === "admin"
+      ? "User is an authenticated admin. Admin actions can be discussed."
+      : "User is not an admin. Do not provide admin actions or admin panel guidance.";
+  const personalizationInstruction = userContext.displayName
+    ? `User name available: ${userContext.displayName}. Address respectfully when helpful.`
+    : "User name is not available. Use respectful but neutral address.";
+
+  return [
+    customPrompt,
+    languageInstruction,
+    humanStyleInstruction,
+    adminGuardInstruction,
+    personalizationInstruction,
+    "Inject and follow this persona JSON strictly:",
+    JSON.stringify(IRA_PERSONALITY_JSON),
+  ].join("\n\n");
 }
 
 function getLanguageInstruction(language?: string) {
@@ -171,45 +236,35 @@ async function parseRequestBody(req: any) {
   }
 }
 
-async function callGemini(config: Record<string, any>, messages: any[], language?: string) {
+async function callGemini(
+  config: Record<string, any>,
+  messages: any[],
+  language?: string,
+  userContext: { displayName: string; role: string } = { displayName: "", role: "consumer" }
+) {
   const apiKey = String(config.geminiApiKey || FALLBACK_GEMINI_API_KEY || "").trim();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
-  const model = String(config.llmModel || "gemini-2.5-flash").trim();
-  const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
-  const languageInstruction = getLanguageInstruction(language);
-  const humanStyleInstruction = getHumanStyleInstruction();
+  const model = "gemini-1.5-pro";
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || apiKey });
+  const systemInstruction = buildGeminiSystemInstruction(config, String(language || "en-IN"), userContext);
+  const contents = messages.slice(-10).map((message) => ({
+    role: message.role === "assistant" ? "model" : "user",
+    parts: [{ text: String(message.content || "") }],
+  }));
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: `${systemPrompt}\n\n${languageInstruction}\n\n${humanStyleInstruction}` }],
-        },
-        contents: messages.map((message) => ({
-          role: message.role === "assistant" ? "model" : "user",
-          parts: [{ text: message.content }],
-        })),
-        generationConfig: {
-          temperature,
-          maxOutputTokens: maxTokens,
-        },
-      }),
-    }
-  );
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error?.message || "Gemini request failed");
-  }
-
-  const text =
-    data?.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("").trim() || "";
+  const response = await ai.models.generateContent({
+    model,
+    contents,
+    config: {
+      systemInstruction,
+      temperature,
+      maxOutputTokens: maxTokens,
+    },
+  });
+  const text = String(response?.text || "").trim();
 
   if (!text) {
     throw new Error("Gemini returned an empty response.");
@@ -306,6 +361,39 @@ async function callClaude(config: Record<string, any>, messages: any[], language
   return text;
 }
 
+async function handleUserMessage(
+  userId: string,
+  message: string,
+  options: {
+    config: Record<string, any>;
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+    language: string;
+    userRole: string;
+  }
+) {
+  const { config, history, language, userRole } = options;
+  const userContext = await getUserContext(userId);
+  const effectiveRole = userContext.role || userRole;
+
+  if (effectiveRole !== "admin" && isAdminIntent(message)) {
+    return "I can help with rides, booking, fares, status, and support. Admin actions are available only inside the verified Admin panel.";
+  }
+
+  const messages = normalizeMessages([...(history || []), { role: "user", content: message }]).slice(-10);
+  const provider = String(config.llmProvider || "gemini").trim().toLowerCase();
+
+  switch (provider) {
+    case "gemini":
+      return callGemini(config, messages, language, userContext);
+    case "openai":
+      return callOpenAI(config, messages, language);
+    case "claude":
+      return callClaude(config, messages, language);
+    default:
+      throw new Error("Unsupported LLM provider");
+  }
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -323,42 +411,23 @@ export default async function handler(req: any, res: any) {
     const body = await parseRequestBody(req);
     const language = String(body?.language || config.chatbotDefaultLanguage || "en-IN");
     const userRole = String(body?.userRole || "consumer").toLowerCase();
+    const userId = String(body?.userId || "").trim();
     const incomingMessages = normalizeMessages(body?.messages || []);
     const message = String(body?.message || "").trim();
-    const messages =
-      incomingMessages.length > 0
-        ? incomingMessages
-        : message
-          ? [{ role: "user", content: message }]
-          : [];
-
-    if (!messages.length) {
+    const latestUserMessage =
+      message || [...incomingMessages].reverse().find((entry) => entry.role === "user")?.content || "";
+    if (!latestUserMessage) {
       return res.status(400).json({ error: "Missing chat message" });
     }
-    const latestUserMessage = [...messages].reverse().find((entry) => entry.role === "user")?.content || "";
-    if (userRole !== "admin" && isAdminIntent(latestUserMessage)) {
-      return res.status(200).json({
-        message:
-          "I can help with rides, booking, fares, status, and support. Admin actions are available only inside the verified Admin panel.",
-      });
-    }
 
-    const provider = String(config.llmProvider || "gemini").trim().toLowerCase();
     let reply = "";
     try {
-      switch (provider) {
-        case "gemini":
-          reply = await callGemini(config, messages, language);
-          break;
-        case "openai":
-          reply = await callOpenAI(config, messages, language);
-          break;
-        case "claude":
-          reply = await callClaude(config, messages, language);
-          break;
-        default:
-          return res.status(400).json({ error: "Unsupported LLM provider" });
-      }
+      reply = await handleUserMessage(userId, latestUserMessage, {
+        config,
+        history: incomingMessages,
+        language,
+        userRole,
+      });
     } catch (providerError) {
       console.error("Chat provider failed, using static fallback:", providerError);
       reply = buildStaticMaiRideReply(latestUserMessage);
