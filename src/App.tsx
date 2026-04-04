@@ -4704,9 +4704,10 @@ const DriverDashboardSummary = ({
             )}
             {driverCounterPending && (
               <div className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
-                <p className="font-bold text-mairide-primary">Your counter offer has been sent.</p>
+                <p className="font-bold text-mairide-primary">Your latest counter offer is active.</p>
                 <p className="mt-2 text-sm text-mairide-secondary">
-                  Waiting for the traveler to accept or reject <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>.
+                  You can still accept, reject, or revise the live negotiation while the traveler is reviewing{' '}
+                  <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>.
                 </p>
               </div>
             )}
@@ -7370,6 +7371,23 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
+      {activeTab === 'search' && (
+        <TravelerDashboardSummary
+          bookings={dashboardBookings}
+          rideStatusById={rideStatusById}
+          ridesResolved={ridesResolved}
+          config={config}
+          onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
+          onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
+          counterFares={dashboardCounterFares}
+          setCounterFares={setDashboardCounterFares}
+          onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
+          onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
+          onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
+          onOpenBooking={() => setActiveTab('history')}
+        />
+      )}
+
       <MobileSectionDrawer
         title="Consumer Menu"
         activeLabel={
@@ -7448,21 +7466,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
       {activeTab === 'search' && (
         <>
-          <TravelerDashboardSummary
-            bookings={dashboardBookings}
-            rideStatusById={rideStatusById}
-            ridesResolved={ridesResolved}
-            config={config}
-            onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
-            onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
-            counterFares={dashboardCounterFares}
-            setCounterFares={setDashboardCounterFares}
-            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
-            onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
-            onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
-            onOpenBooking={() => setActiveTab('history')}
-          />
-
           <div className="flex flex-col md:flex-row md:items-center gap-6 mb-12">
             <img src={LOGO_URL} className="w-24 h-24 object-contain" alt="MaiRide Logo" />
             <div>
