@@ -53,6 +53,22 @@ function getBookingThreadKey(data: any) {
   ].join("__");
 }
 
+function getBookingThreadSource(row: any) {
+  const data = row?.data || {};
+  return {
+    ...data,
+    rideId: row?.ride_id ?? data.rideId,
+    ride_id: row?.ride_id ?? data.ride_id,
+    consumerId: row?.consumer_id ?? data.consumerId,
+    consumer_id: row?.consumer_id ?? data.consumer_id,
+    driverId: row?.driver_id ?? data.driverId,
+    driver_id: row?.driver_id ?? data.driver_id,
+    origin: row?.origin ?? data.origin,
+    destination: row?.destination ?? data.destination,
+    departureTime: row?.departure_time ?? data.departureTime,
+  };
+}
+
 function isActiveBookingStatus(status: string | null | undefined) {
   return ["pending", "confirmed", "negotiating"].includes(String(status || ""));
 }
@@ -1131,24 +1147,25 @@ export async function handleUserRespondBooking(req: ReqLike, res: ResLike) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const seedData = bookingRow.data || {};
+    const seedData = getBookingThreadSource(bookingRow);
     const updatedAt = new Date().toISOString();
-    const rideId = bookingRow.ride_id || seedData.rideId;
     const consumerId = bookingRow.consumer_id || seedData.consumerId;
     let targetRows = [bookingRow];
 
-    if (rideId && consumerId) {
+    if (consumerId) {
       const { data: candidateRows, error: candidateError } = await supabaseAdmin
         .from("bookings")
         .select("*")
-        .eq("ride_id", rideId)
         .eq("consumer_id", consumerId);
 
       if (candidateError) throw candidateError;
 
       const activeRows = (candidateRows || []).filter((row: any) => {
-        const rowData = row.data || {};
-        return isActiveBookingStatus(row.status || rowData.status);
+        const rowData = getBookingThreadSource(row);
+        return (
+          isActiveBookingStatus(row.status || rowData.status) &&
+          getBookingThreadKey(rowData) === getBookingThreadKey(seedData)
+        );
       });
 
       if (activeRows.length) {
@@ -1285,24 +1302,25 @@ export async function handleUserCounterBooking(req: ReqLike, res: ResLike) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const seedData = bookingRow.data || {};
+    const seedData = getBookingThreadSource(bookingRow);
     const updatedAt = new Date().toISOString();
-    const rideId = bookingRow.ride_id || seedData.rideId;
     const consumerId = bookingRow.consumer_id || seedData.consumerId;
     let targetRows = [bookingRow];
 
-    if (rideId && consumerId) {
+    if (consumerId) {
       const { data: candidateRows, error: candidateError } = await supabaseAdmin
         .from("bookings")
         .select("*")
-        .eq("ride_id", rideId)
         .eq("consumer_id", consumerId);
 
       if (candidateError) throw candidateError;
 
       const activeRows = (candidateRows || []).filter((row: any) => {
-        const rowData = row.data || {};
-        return isActiveBookingStatus(row.status || rowData.status);
+        const rowData = getBookingThreadSource(row);
+        return (
+          isActiveBookingStatus(row.status || rowData.status) &&
+          getBookingThreadKey(rowData) === getBookingThreadKey(seedData)
+        );
       });
 
       if (activeRows.length) {
@@ -1370,24 +1388,25 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const seedData = bookingRow.data || {};
+    const seedData = getBookingThreadSource(bookingRow);
     const updatedAt = new Date().toISOString();
-    const rideId = bookingRow.ride_id || seedData.rideId;
     const threadConsumerId = bookingRow.consumer_id || seedData.consumerId;
     let targetRows = [bookingRow];
 
-    if (rideId && threadConsumerId) {
+    if (threadConsumerId) {
       const { data: candidateRows, error: candidateError } = await supabaseAdmin
         .from("bookings")
         .select("*")
-        .eq("ride_id", rideId)
         .eq("consumer_id", threadConsumerId);
 
       if (candidateError) throw candidateError;
 
       const activeRows = (candidateRows || []).filter((row: any) => {
-        const rowData = row.data || {};
-        return isActiveBookingStatus(row.status || rowData.status);
+        const rowData = getBookingThreadSource(row);
+        return (
+          isActiveBookingStatus(row.status || rowData.status) &&
+          getBookingThreadKey(rowData) === getBookingThreadKey(seedData)
+        );
       });
 
       if (activeRows.length) {
@@ -1456,24 +1475,25 @@ export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLik
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const seedData = bookingRow.data || {};
+    const seedData = getBookingThreadSource(bookingRow);
     const updatedAt = new Date().toISOString();
-    const rideId = bookingRow.ride_id || seedData.rideId;
     const threadConsumerId = bookingRow.consumer_id || seedData.consumerId;
     let targetRows = [bookingRow];
 
-    if (rideId && threadConsumerId) {
+    if (threadConsumerId) {
       const { data: candidateRows, error: candidateError } = await supabaseAdmin
         .from("bookings")
         .select("*")
-        .eq("ride_id", rideId)
         .eq("consumer_id", threadConsumerId);
 
       if (candidateError) throw candidateError;
 
       const activeRows = (candidateRows || []).filter((row: any) => {
-        const rowData = row.data || {};
-        return isActiveBookingStatus(row.status || rowData.status);
+        const rowData = getBookingThreadSource(row);
+        return (
+          isActiveBookingStatus(row.status || rowData.status) &&
+          getBookingThreadKey(rowData) === getBookingThreadKey(seedData)
+        );
       });
 
       if (activeRows.length) {
