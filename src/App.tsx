@@ -1565,37 +1565,140 @@ const Navbar = ({ user, profile, onLogout }: { user: User, profile: UserProfile 
 
       <AnimatePresence>
         {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="md:hidden bg-white border-t border-gray-100 overflow-hidden"
-          >
-            <div className="px-4 pt-2 pb-6 space-y-1">
-              <button onClick={handleHomeNavigation} className="block w-full text-left px-3 py-2 text-gray-600 font-medium">Home</button>
-              <button onClick={() => { navigate('/support'); setIsOpen(false); }} className="block w-full text-left px-3 py-2 text-gray-600 font-medium">Support</button>
-              {profile?.role === 'admin' && (
-                <button onClick={() => { navigate('/admin'); setIsOpen(false); }} className="block w-full text-left px-3 py-2 text-gray-600 font-medium">Admin Panel</button>
-              )}
-              <button onClick={() => { navigate(profile?.role === 'driver' ? '/driver/rides' : '/consumer/bookings'); setIsOpen(false); }} className="block w-full text-left px-3 py-2 text-gray-600 font-medium">
-                {profile?.role === 'driver' ? 'My Rides' : 'My Bookings'}
-              </button>
-              <div className="pt-4 border-t border-gray-100 mt-4 flex items-center space-x-3">
-                <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="w-10 h-10 rounded-full" />
-                <div>
-                  <p className="font-semibold text-gray-900">{profile?.displayName}</p>
-                  <p className="text-xs text-gray-500 capitalize">{profile?.role}</p>
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40 bg-mairide-primary/40 backdrop-blur-sm md:hidden"
+              onClick={() => setIsOpen(false)}
+            />
+            <motion.div
+              initial={{ x: -320 }}
+              animate={{ x: 0 }}
+              exit={{ x: -320 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-y-0 left-0 z-50 w-72 bg-white shadow-2xl border-r border-mairide-secondary md:hidden"
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-mairide-secondary">
+                <div className="flex items-center gap-3">
+                  <img src={getResolvedUserPhoto(profile) || LOGO_URL} alt="Profile" className="w-11 h-11 rounded-full object-cover border border-mairide-secondary" />
+                  <div>
+                    <p className="font-semibold text-mairide-primary leading-tight">{profile?.displayName}</p>
+                    <p className="text-xs text-mairide-secondary capitalize">{profile?.role}</p>
+                  </div>
                 </div>
+                <button onClick={() => setIsOpen(false)} className="p-2 text-mairide-secondary hover:text-mairide-primary transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button onClick={onLogout} className="mt-4 flex items-center space-x-2 text-red-600 font-medium px-3 py-2">
-                <LogOut className="w-5 h-5" />
-                <span>Logout</span>
-              </button>
-            </div>
-          </motion.div>
+              <div className="px-4 py-4 space-y-2">
+                <button onClick={handleHomeNavigation} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Home</button>
+                <button onClick={() => { navigate('/support'); setIsOpen(false); }} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Support</button>
+                {profile?.role === 'admin' && (
+                  <button onClick={() => { navigate('/admin'); setIsOpen(false); }} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Admin Panel</button>
+                )}
+                <button
+                  onClick={() => {
+                    navigate(profile?.role === 'driver' ? '/driver/rides' : '/consumer/bookings');
+                    setIsOpen(false);
+                  }}
+                  className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors"
+                >
+                  {profile?.role === 'driver' ? 'My Rides' : 'My Bookings'}
+                </button>
+              </div>
+              <div className="mt-auto px-4 pb-6">
+                <button onClick={onLogout} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-mairide-primary px-4 py-3 font-semibold text-white shadow-lg shadow-mairide-primary/20 transition-transform hover:scale-[1.01] active:scale-[0.99]">
+                  <LogOut className="w-5 h-5" />
+                  <span>Logout</span>
+                </button>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </nav>
+  );
+};
+
+const MobileSectionDrawer = ({
+  title,
+  activeLabel,
+  items,
+  onSelect,
+}: {
+  title: string;
+  activeLabel: string;
+  items: { id: string; label: string; icon: LucideIcon }[];
+  onSelect: (id: string) => void;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="md:hidden mb-6">
+      <button
+        onClick={() => setIsOpen(true)}
+        className="flex w-full items-center justify-between rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-left shadow-sm"
+      >
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">{title}</p>
+          <p className="mt-1 text-base font-semibold text-mairide-primary">{activeLabel}</p>
+        </div>
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-mairide-bg text-mairide-primary">
+          <Menu className="w-5 h-5" />
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40 bg-mairide-primary/40 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <motion.div
+              initial={{ x: -320 }}
+              animate={{ x: 0 }}
+              exit={{ x: -320 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-y-0 left-0 z-50 w-72 bg-white shadow-2xl border-r border-mairide-secondary"
+            >
+              <div className="flex items-center justify-between border-b border-mairide-secondary px-5 py-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">{title}</p>
+                  <p className="mt-1 text-lg font-semibold text-mairide-primary">{activeLabel}</p>
+                </div>
+                <button onClick={() => setIsOpen(false)} className="p-2 text-mairide-secondary hover:text-mairide-primary transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="px-4 py-4 space-y-2">
+                {items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        onSelect(item.id);
+                        setIsOpen(false);
+                      }}
+                      className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary transition-colors hover:bg-mairide-bg"
+                    >
+                      <Icon className="w-5 h-5 text-mairide-accent" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
   );
 };
 
@@ -6916,7 +7019,30 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <div className="flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
+      <MobileSectionDrawer
+        title="Consumer Menu"
+        activeLabel={
+          activeTab === 'search'
+            ? 'Search'
+            : activeTab === 'history'
+              ? 'History'
+              : activeTab === 'wallet'
+                ? 'Wallet'
+                : activeTab === 'support'
+                  ? 'Support'
+                  : 'Profile'
+        }
+        items={[
+          { id: 'search', label: 'Search', icon: Search },
+          { id: 'history', label: 'History', icon: History },
+          { id: 'wallet', label: 'Wallet', icon: Wallet },
+          { id: 'support', label: 'Support', icon: LifeBuoy },
+          { id: 'profile', label: 'Profile', icon: UserIcon },
+        ]}
+        onSelect={(id) => setActiveTab(id as typeof activeTab)}
+      />
+
+      <div className="hidden md:flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
         <button
           onClick={() => setActiveTab('search')}
           className={cn(
@@ -8046,7 +8172,33 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <div className="flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
+      <MobileSectionDrawer
+        title="Driver Menu"
+        activeLabel={
+          activeTab === 'dashboard'
+            ? 'Dashboard'
+            : activeTab === 'requests'
+              ? 'Requests'
+              : activeTab === 'history'
+                ? 'History'
+                : activeTab === 'wallet'
+                  ? 'Wallet'
+                  : activeTab === 'support'
+                    ? 'Support'
+                    : 'Profile'
+        }
+        items={[
+          { id: 'dashboard', label: 'Dashboard', icon: Settings },
+          { id: 'requests', label: 'Requests', icon: Clock },
+          { id: 'history', label: 'History', icon: History },
+          { id: 'wallet', label: 'Wallet', icon: Wallet },
+          { id: 'support', label: 'Support', icon: LifeBuoy },
+          { id: 'profile', label: 'Profile', icon: UserIcon },
+        ]}
+        onSelect={(id) => setActiveTab(id as typeof activeTab)}
+      />
+
+      <div className="hidden md:flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
         <button
           onClick={() => setActiveTab('dashboard')}
           className={cn(
