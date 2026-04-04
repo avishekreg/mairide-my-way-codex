@@ -831,9 +831,9 @@ const CONSENT_VERSION = 'consent-v1';
 const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const adminApiPath = (action: string) => `/api/admin-api?action=${encodeURIComponent(action)}`;
-const adminConfigPath = "/api/admin-config";
-const adminTransactionsPath = "/api/admin-transactions";
-const adminVerifyDriverPath = "/api/verify-driver";
+const adminConfigPath = adminApiPath("config");
+const adminTransactionsPath = adminApiPath("transactions");
+const adminVerifyDriverPath = adminApiPath("verify-driver");
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
@@ -3522,7 +3522,7 @@ const DriverOnboarding = ({
     if (!base64) return '';
     const token = await getAccessToken();
     const response = await axios.post(
-      '/api/upload-driver-doc',
+      '/api/user?action=upload-driver-doc',
       {
         driverId: profile.uid,
         path,
@@ -3584,7 +3584,7 @@ const DriverOnboarding = ({
       };
       const token = await getAccessToken();
       await axios.post(
-        '/api/complete-driver-onboarding',
+        '/api/user?action=complete-driver-onboarding',
         {
           driverId: profile.uid,
           driverDetails: updatedProfile.driverDetails,
@@ -11557,7 +11557,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const handleDeleteUser = async (userId: string) => {
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post(`/api/delete-user`, { uid: userId }, { headers });
+      await axios.post(adminApiPath('delete-user'), { uid: userId }, { headers });
       setShowDeleteConfirm(null);
       setAdminNotice({
         title: 'User removed',

@@ -1,6 +1,7 @@
 import {
   handleUserCancelRide,
   handleUserChangePassword,
+  handleUserCompleteDriverOnboarding,
   handleUserCounterBooking,
   handleUserCreateRide,
   handleUserRejectBooking,
@@ -61,6 +62,10 @@ export default async function handler(req: any, res: any) {
     return handleUserUploadDriverDoc(req, res);
   }
 
+  if (action === "complete-driver-onboarding") {
+    return handleUserCompleteDriverOnboarding(req, res);
+  }
+
   if (req.url?.endsWith("/create-ride")) {
     return handleUserCreateRide(req, res);
   }
@@ -95,6 +100,10 @@ export default async function handler(req: any, res: any) {
 
   if (req.url?.endsWith("/upload-driver-doc")) {
     return handleUserUploadDriverDoc(req, res);
+  }
+
+  if (req.url?.endsWith("/complete-driver-onboarding")) {
+    return handleUserCompleteDriverOnboarding(req, res);
   }
 
   if (req.url?.endsWith("/change-password")) {
