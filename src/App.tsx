@@ -4334,8 +4334,8 @@ const TravelerDashboardSummary = ({
           const statusLabel = getBookingStateLabel(booking);
 
           return (
-          <div key={booking.id} className="bg-white border border-mairide-secondary rounded-[28px] p-6 shadow-sm">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div key={booking.id} className="bg-white border border-mairide-secondary rounded-[28px] p-4 md:p-6 shadow-sm min-w-0 overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center shrink-0">
                   {booking.driverPhotoUrl ? (
@@ -4344,12 +4344,12 @@ const TravelerDashboardSummary = ({
                     <Car className="w-6 h-6 text-mairide-accent" />
                   )}
                 </div>
-                <div>
-                <p className="text-lg font-bold text-mairide-primary">{booking.origin} → {booking.destination}</p>
+                <div className="min-w-0">
+                <p className="text-lg font-bold text-mairide-primary break-words">{booking.origin} → {booking.destination}</p>
                 <p className="text-sm text-mairide-secondary">Driver: {booking.driverName}</p>
                 </div>
               </div>
-              <div className="text-right">
+              <div className="text-left md:text-right">
                 <p className="text-xl font-black text-mairide-accent">{formatCurrency(displayFare)}</p>
                 <p className={cn(
                   "text-[10px] font-bold uppercase tracking-widest",
@@ -4450,7 +4450,7 @@ const TravelerDashboardSummary = ({
                   You can apply up to 25 MaiCoins against the platform fee portion only. GST and the remaining balance are paid online. MaiCoins cannot be used to pay the driver&apos;s ride fare.
                 </p>
                 {!booking.feePaid ? (
-                  <div className="flex gap-3 mt-4">
+                  <div className="flex flex-col sm:flex-row gap-3 mt-4">
                     <button onClick={() => onPayWithCoins(booking)} className={cn("flex-1 bg-mairide-primary text-white py-3", primaryActionButtonClass)}>
                       {isLocalRazorpayEnabled(config) ? 'Use MaiCoins + Pay Balance' : 'Pay with Maicoins'}
                     </button>
@@ -4486,10 +4486,10 @@ const TravelerDashboardSummary = ({
                 </p>
               </div>
             )}
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex justify-start md:justify-end">
               <button
                 onClick={() => onOpenBooking(booking)}
-                className="text-sm font-bold text-mairide-accent hover:text-mairide-primary transition-colors"
+                className="w-full md:w-auto text-left md:text-right text-sm font-bold text-mairide-accent hover:text-mairide-primary transition-colors break-words"
               >
                 View Full Booking Details
               </button>
@@ -7393,29 +7393,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
         />
       )}
 
-      <MobileSectionDrawer
-        title="Consumer Menu"
-        activeLabel={
-          activeTab === 'search'
-            ? 'Search'
-            : activeTab === 'history'
-              ? 'History'
-              : activeTab === 'wallet'
-                ? 'Wallet'
-                : activeTab === 'support'
-                  ? 'Support'
-                  : 'Profile'
-        }
-        items={[
-          { id: 'search', label: 'Search', icon: Search },
-          { id: 'history', label: 'History', icon: History },
-          { id: 'wallet', label: 'Wallet', icon: Wallet },
-          { id: 'support', label: 'Support', icon: LifeBuoy },
-          { id: 'profile', label: 'Profile', icon: UserIcon },
-        ]}
-        onSelect={(id) => setActiveTab(id as typeof activeTab)}
-      />
-
       <div className="hidden md:flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
         <button
           onClick={() => setActiveTab('search')}
@@ -8607,32 +8584,6 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <MobileSectionDrawer
-        title="Driver Menu"
-        activeLabel={
-          activeTab === 'dashboard'
-            ? 'Dashboard'
-            : activeTab === 'requests'
-              ? 'Requests'
-              : activeTab === 'history'
-                ? 'History'
-                : activeTab === 'wallet'
-                  ? 'Wallet'
-                  : activeTab === 'support'
-                    ? 'Support'
-                    : 'Profile'
-        }
-        items={[
-          { id: 'dashboard', label: 'Dashboard', icon: Settings },
-          { id: 'requests', label: 'Requests', icon: Clock },
-          { id: 'history', label: 'History', icon: History },
-          { id: 'wallet', label: 'Wallet', icon: Wallet },
-          { id: 'support', label: 'Support', icon: LifeBuoy },
-          { id: 'profile', label: 'Profile', icon: UserIcon },
-        ]}
-        onSelect={(id) => setActiveTab(id as typeof activeTab)}
-      />
-
       <div className="hidden md:flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
         <button
           onClick={() => setActiveTab('dashboard')}
