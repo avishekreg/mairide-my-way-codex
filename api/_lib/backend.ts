@@ -840,21 +840,17 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
 export async function handleUserSearchRides(_req: ReqLike, res: ResLike) {
   try {
     const admin = getSupabaseAdmin();
-    const [{ data: rideRows, error: ridesError }, { data: bookingRows, error: bookingsError }, { data: driverRows, error: driversError }] = await Promise.all([
+    const [{ data: rideRows, error: ridesError }, { data: driverRows, error: driversError }] = await Promise.all([
       admin
         .from("rides")
         .select("id, driver_id, status, data, created_at, updated_at")
         .eq("status", "available"),
-      admin
-        .from("bookings")
-        .select("id, ride_id, consumer_id, driver_id, status, data, created_at, updated_at"),
       admin
         .from("users")
         .select("id, role, status, onboarding_complete, verification_status, data"),
     ]);
 
     if (ridesError) throw ridesError;
-    if (bookingsError) throw bookingsError;
     if (driversError) throw driversError;
 
     const approvedDriverIds = new Set(
@@ -888,18 +884,7 @@ export async function handleUserSearchRides(_req: ReqLike, res: ResLike) {
         updatedAt: row.updated_at || row.data?.updatedAt,
       }));
 
-    const bookings = (bookingRows || []).map((row: any) => ({
-      ...(row.data || {}),
-      id: row.id,
-      rideId: row.ride_id || row.data?.rideId,
-      consumerId: row.consumer_id || row.data?.consumerId,
-      driverId: row.driver_id || row.data?.driverId,
-      status: row.status || row.data?.status,
-      createdAt: row.created_at || row.data?.createdAt,
-      updatedAt: row.updated_at || row.data?.updatedAt,
-    }));
-
-    return res.status(200).json({ rides, bookings });
+    return res.status(200).json({ rides });
   } catch (error: any) {
     console.error("Error searching rides:", error);
     return res.status(error?.status || 500).json({
