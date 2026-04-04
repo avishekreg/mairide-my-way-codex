@@ -904,25 +904,33 @@ type AppDialogDetail = {
   tone?: AppDialogTone;
 };
 
-const getPendingNegotiationActor = (booking: Booking): 'driver' | 'consumer' | null => {
-  const negotiatedFare =
-    typeof booking.negotiatedFare === 'number'
-      ? booking.negotiatedFare
-      : Number(booking.negotiatedFare);
+const getBookingNegotiationField = <T,>(booking: Booking, key: string): T | undefined => {
+  const nested = (booking as any)?.data?.[key];
+  if (nested !== undefined && nested !== null && nested !== '') {
+    return nested as T;
+  }
+  return (booking as any)?.[key] as T | undefined;
+};
 
-  if (!Number.isFinite(negotiatedFare) || booking.negotiationStatus !== 'pending') {
+const getPendingNegotiationActor = (booking: Booking): 'driver' | 'consumer' | null => {
+  const negotiatedFare = Number(getBookingNegotiationField<number | string>(booking, 'negotiatedFare'));
+  const negotiationStatus = String(getBookingNegotiationField<string>(booking, 'negotiationStatus') || '');
+  const negotiationActor = String(getBookingNegotiationField<string>(booking, 'negotiationActor') || '');
+  const driverCounterPending = Boolean(getBookingNegotiationField<boolean>(booking, 'driverCounterPending'));
+
+  if (!Number.isFinite(negotiatedFare) || negotiationStatus !== 'pending') {
     return null;
   }
 
-  if (booking.negotiationActor === 'driver') {
+  if (negotiationActor === 'driver') {
     return 'driver';
   }
 
-  if (booking.negotiationActor === 'consumer') {
+  if (negotiationActor === 'consumer') {
     return 'consumer';
   }
 
-  if (booking.driverCounterPending) {
+  if (driverCounterPending) {
     return 'driver';
   }
 
@@ -934,16 +942,15 @@ const hasPendingDriverCounterOffer = (booking: Booking) => {
 };
 
 const hasPendingTravelerCounterOffer = (booking: Booking) => {
-  const negotiatedFare =
-    typeof booking.negotiatedFare === 'number'
-      ? booking.negotiatedFare
-      : Number(booking.negotiatedFare);
+  const negotiatedFare = Number(getBookingNegotiationField<number | string>(booking, 'negotiatedFare'));
+  const negotiationStatus = String(getBookingNegotiationField<string>(booking, 'negotiationStatus') || '');
+  const fare = Number(getBookingNegotiationField<number | string>(booking, 'fare'));
 
-  if (!Number.isFinite(negotiatedFare) || booking.negotiationStatus !== 'pending') {
+  if (!Number.isFinite(negotiatedFare) || negotiationStatus !== 'pending') {
     return false;
   }
 
-  return getPendingNegotiationActor(booking) === 'consumer' && negotiatedFare !== booking.fare;
+  return getPendingNegotiationActor(booking) === 'consumer' && negotiatedFare !== fare;
 };
 
 const loadNegotiationThreadBookings = async (seedBooking: Booking) => {
@@ -995,16 +1002,15 @@ const persistCounterOfferThroughCompatStore = async (
 };
 
 const getNegotiationDisplayFare = (booking: Booking) => {
-  const negotiatedFare =
-    typeof booking.negotiatedFare === 'number'
-      ? booking.negotiatedFare
-      : Number(booking.negotiatedFare);
+  const negotiatedFare = Number(getBookingNegotiationField<number | string>(booking, 'negotiatedFare'));
+  const negotiationStatus = String(getBookingNegotiationField<string>(booking, 'negotiationStatus') || '');
+  const fare = Number(getBookingNegotiationField<number | string>(booking, 'fare'));
 
-  if (Number.isFinite(negotiatedFare) && booking.negotiationStatus === 'pending') {
+  if (Number.isFinite(negotiatedFare) && negotiationStatus === 'pending') {
     return negotiatedFare;
   }
 
-  return booking.fare;
+  return fare;
 };
 
 const getBookingStateLabel = (booking: Booking) => {
@@ -1014,11 +1020,11 @@ const getBookingStateLabel = (booking: Booking) => {
 };
 
 const getListedFare = (booking: Booking) => {
-  const listedFare = Number((booking as any).listedFare);
+  const listedFare = Number(getBookingNegotiationField<number | string>(booking, 'listedFare'));
   if (Number.isFinite(listedFare) && listedFare > 0) {
     return listedFare;
   }
-  return booking.fare;
+  return Number(getBookingNegotiationField<number | string>(booking, 'fare'));
 };
 
 const shouldShowNegotiatedFareLine = (booking: Booking) => {
@@ -5499,6 +5505,7 @@ const MyRides = ({
   onRideRetired?: (rideId: string) => void;
 }) => {
   const [rides, setRides] = useState<any[]>([]);
+  const [activeNegotiationRideIds, setActiveNegotiationRideIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancellingRideId, setCancellingRideId] = useState<string | null>(null);
   const [pendingCancelRide, setPendingCancelRide] = useState<any | null>(null);
@@ -5529,9 +5536,41 @@ const MyRides = ({
     return () => unsubscribe();
   }, [profile.uid, hiddenRideIds]);
 
+  useEffect(() => {
+    const bookingQuery = query(collection(db, 'bookings'), where('driverId', '==', profile.uid));
+    const unsubscribe = onSnapshot(bookingQuery, (snapshot) => {
+      const rideIds = new Set<string>();
+      snapshot.forEach((bookingDoc) => {
+        const booking = bookingDoc.data() as Booking;
+        const isNegotiationActive =
+          ['pending', 'negotiating'].includes(String(booking.status || '')) &&
+          booking.negotiationStatus !== 'rejected' &&
+          !booking.rideRetired &&
+          !booking.feePaid &&
+          !booking.driverFeePaid &&
+          !booking.rideStartedAt &&
+          !booking.rideEndedAt;
+
+        if (isNegotiationActive && booking.rideId) {
+          rideIds.add(booking.rideId);
+        }
+      });
+      setActiveNegotiationRideIds(Array.from(rideIds));
+    });
+    return () => unsubscribe();
+  }, [profile.uid]);
+
   const confirmCancelRideOffer = async (ride: any) => {
     if (ride.status !== 'available') {
       showAppDialog('Only active unbooked ride offers can be cancelled.', 'warning');
+      return;
+    }
+
+    if (activeNegotiationRideIds.includes(ride.id)) {
+      showAppDialog(
+        'A traveler negotiation is currently active on this ride. Please wait for that offer thread to be accepted or rejected before cancelling the ride offer.',
+        'warning'
+      );
       return;
     }
 
@@ -5634,7 +5673,7 @@ const MyRides = ({
                 <span className="text-sm text-mairide-secondary">{new Date(ride.createdAt).toLocaleDateString()}</span>
                 <div className="flex items-center gap-3">
                   <span className="font-bold text-mairide-primary">{ride.seatsAvailable} seats left</span>
-                  {ride.status === 'available' && (
+                  {ride.status === 'available' && !activeNegotiationRideIds.includes(ride.id) && (
                     <button
                       onClick={() => setPendingCancelRide(ride)}
                       disabled={cancellingRideId === ride.id}
@@ -6980,6 +7019,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       );
 
       const updatedAt = new Date().toISOString();
+      await persistCounterOfferThroughCompatStore(booking, 'consumer', fare);
       setDashboardBookings((prev) =>
         prev.map((candidate) =>
           getBookingThreadKey(candidate) === getBookingThreadKey(booking)
@@ -7271,6 +7311,21 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </div>
           </div>
 
+          <TravelerDashboardSummary
+            bookings={dashboardBookings}
+            rideStatusById={rideStatusById}
+            ridesResolved={ridesResolved}
+            config={config}
+            onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
+            onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
+            counterFares={dashboardCounterFares}
+            setCounterFares={setDashboardCounterFares}
+            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
+            onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
+            onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
+            onOpenBooking={() => setActiveTab('history')}
+          />
+
           <div id="consumer-live-map" className="mb-12 overflow-hidden rounded-[32px] border border-mairide-secondary bg-white shadow-xl">
             <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-mairide-secondary/70">
               <div>
@@ -7359,21 +7414,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               )}
             </div>
           </div>
-
-          <TravelerDashboardSummary
-            bookings={dashboardBookings}
-            rideStatusById={rideStatusById}
-            ridesResolved={ridesResolved}
-            config={config}
-            onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
-            onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
-            counterFares={dashboardCounterFares}
-            setCounterFares={setDashboardCounterFares}
-            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
-            onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
-            onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
-            onOpenBooking={() => setActiveTab('history')}
-          />
 
           <div className="bg-white rounded-3xl shadow-xl p-6 mb-12 border border-mairide-secondary">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -8109,6 +8149,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       );
 
       const updatedAt = new Date().toISOString();
+      await persistCounterOfferThroughCompatStore(request, 'driver', fare);
       setRequests((prev) =>
         prev.map((booking) =>
           getBookingThreadKey(booking) === getBookingThreadKey(request)
