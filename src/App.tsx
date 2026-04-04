@@ -3831,6 +3831,13 @@ const DriverOnboarding = ({
           },
         }
       );
+      await updateDoc(doc(db, 'users', profile.uid), {
+        onboardingComplete: true,
+        verificationStatus: 'pending',
+        rejectionReason: null,
+        verifiedBy: null,
+        driverDetails: updatedProfile.driverDetails,
+      });
       onComplete();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${profile.uid}`);
@@ -11997,9 +12004,12 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
-  const pendingVerificationDrivers = users.filter(
-    (u) => u.role === 'driver' && u.onboardingComplete && u.verificationStatus === 'pending'
-  );
+  const pendingVerificationDrivers = users.filter((u) => {
+    if (u.role !== 'driver') return false;
+    const verificationStatus = (u.verificationStatus || 'pending') as string;
+    const hasDriverDetails = Boolean(u.driverDetails);
+    return verificationStatus === 'pending' && (Boolean(u.onboardingComplete) || hasDriverDetails);
+  });
   const activityWindowMs = 15 * 60 * 1000;
   const isRecentlyActive = (user: UserProfile) => {
     if (!user.location?.lastUpdated) return false;
