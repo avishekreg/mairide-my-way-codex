@@ -4598,11 +4598,11 @@ const DriverDashboardSummary = ({
                 </p>
               </div>
             )}
-            {(request.status === 'pending' || travelerCounterPending) && !driverCounterPending && (
+            {(request.status === 'pending' || request.status === 'negotiating' || travelerCounterPending || driverCounterPending) && (
               <div className="mt-4 space-y-4">
                 <div className="flex gap-3">
                   <button onClick={() => onAccept(request)} className={cn("flex-1 bg-green-600 text-white py-3", primaryActionButtonClass)}>
-                    {travelerCounterPending ? 'Accept Offer' : 'Accept Request'}
+                    {travelerCounterPending || driverCounterPending ? 'Accept Offer' : 'Accept Request'}
                   </button>
                   <button onClick={() => onReject(request)} className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3", secondaryActionButtonClass)}>
                     Reject
@@ -7288,6 +7288,21 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </div>
           </div>
 
+          <TravelerDashboardSummary
+            bookings={dashboardBookings}
+            rideStatusById={rideStatusById}
+            ridesResolved={ridesResolved}
+            config={config}
+            onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
+            onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
+            counterFares={dashboardCounterFares}
+            setCounterFares={setDashboardCounterFares}
+            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
+            onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
+            onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
+            onOpenBooking={() => setActiveTab('history')}
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
             <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
               <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">MaiCoins Wallet</p>
@@ -7310,21 +7325,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               </p>
             </div>
           </div>
-
-          <TravelerDashboardSummary
-            bookings={dashboardBookings}
-            rideStatusById={rideStatusById}
-            ridesResolved={ridesResolved}
-            config={config}
-            onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
-            onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
-            counterFares={dashboardCounterFares}
-            setCounterFares={setDashboardCounterFares}
-            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
-            onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
-            onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
-            onOpenBooking={() => setActiveTab('history')}
-          />
 
           <div id="consumer-live-map" className="mb-12 overflow-hidden rounded-[32px] border border-mairide-secondary bg-white shadow-xl">
             <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-mairide-secondary/70">
