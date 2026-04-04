@@ -14,6 +14,7 @@ import userHandler from "./api/user.ts";
 import completeDriverOnboardingHandler from "./api/complete-driver-onboarding.ts";
 import deleteUserHandler from "./api/delete-user.ts";
 import uploadDriverDocHandler from "./api/upload-driver-doc.ts";
+import chatHandler from "./api/chat.ts";
 import { handleCompleteSignup } from "./api/_lib/signup.ts";
 import { handleSubmitReview } from "./api/_lib/reviews.ts";
 import {
@@ -53,6 +54,7 @@ async function startServer() {
   app.get("/api/admin-transactions", adminTransactionsHandler);
   app.post("/api/verify-driver", verifyDriverHandler);
   app.post("/api/upload-driver-doc", uploadDriverDocHandler);
+  app.post("/api/chat", chatHandler);
   app.all("/api/admin-api", adminHandler);
   app.post("/api/user/change-password", handleUserChangePassword);
   app.post("/api/complete-driver-onboarding", completeDriverOnboardingHandler);

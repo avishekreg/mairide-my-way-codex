@@ -57,7 +57,6 @@ import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConf
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import Webcam from 'react-webcam';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import { 
   LineChart, 
   Line, 
@@ -9055,6 +9054,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
 // --- Chatbot Component ---
 
 const Chatbot = () => {
+  const { config } = useAppConfig();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -9075,20 +9075,18 @@ const Chatbot = () => {
     setIsTyping(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      
-      const prompt = `You are MaiRide's helpful assistant. MaiRide is a long-distance cab aggregator that uses empty leg journeys to provide discounted rides. 
-      We are currently launching in North East India, specifically North Bengal, Sikkim, Assam, and Meghalaya. 
-      In Phase 2, we will expand to North and West India. 
-      Answer the user's query concisely and inform them about our regional focus if relevant. 
-      User query: ${input}`;
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt
+      const response = await axios.post("/api/chat", {
+        message: input,
+        messages: [...messages, userMsg].slice(-8).map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
       });
-      
-      const text = response.text || "I'm sorry, I couldn't generate a response.";
+
+      const text =
+        response.data?.message ||
+        config?.chatbotFallbackMessage ||
+        "I'm sorry, I couldn't generate a response.";
 
       const botMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -9103,7 +9101,7 @@ const Chatbot = () => {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: "I'm sorry, I'm having trouble connecting right now. Please try again later.",
+        content: config?.chatbotFallbackMessage || "I'm sorry, I'm having trouble connecting right now. Please try again later.",
         createdAt: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -9968,6 +9966,13 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
 };
 
 const AdminConfigView = () => {
+  const defaultChatbotPrompt = `You are MaiRide's official in-app assistant. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing. Keep responses concise, helpful, and action-oriented.`;
+  const providerModelOptions: Record<NonNullable<AppConfig['llmProvider']>, string[]> = {
+    gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+    openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-nano'],
+    claude: ['claude-3-5-haiku-latest', 'claude-3-5-sonnet-latest'],
+    disabled: [],
+  };
   const buildDefaultConfig = (): Partial<AppConfig> => ({
     maintenanceFeeBase: 100,
     gstRate: 0.18,
@@ -9983,6 +9988,13 @@ const AdminConfigView = () => {
     resendFromName: 'MaiRide',
     emailOtpExpiryMinutes: 10,
     emailOtpSubject: 'Your MaiRide verification code',
+    chatbotEnabled: true,
+    llmProvider: 'gemini',
+    llmModel: 'gemini-2.5-flash',
+    chatbotSystemPrompt: defaultChatbotPrompt,
+    chatbotTemperature: 0.3,
+    chatbotMaxTokens: 400,
+    chatbotFallbackMessage: "I'm sorry, I'm having trouble connecting right now. Please try again later or contact MaiRide support.",
     appBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
     publicApiBaseUrl: typeof window !== 'undefined' ? `${window.location.origin}/api` : '',
     environmentLabel: typeof window !== 'undefined' ? window.location.hostname : 'localhost',
@@ -9993,10 +10005,14 @@ const AdminConfigView = () => {
     googleMapsApiKey: GOOGLE_MAPS_API_KEY || '',
     supportEmail: '',
     supportPhone: '',
+    geminiProjectId: '',
+    openaiProjectId: '',
+    openaiOrgId: '',
     n8nBaseUrl: '',
     n8nOtpWebhookUrl: '',
     n8nPaymentWebhookUrl: '',
     n8nBookingWebhookUrl: '',
+    n8nChatWebhookUrl: '',
     n8nSupportWebhookUrl: '',
     n8nUserWebhookUrl: '',
   });
@@ -10058,6 +10074,9 @@ const AdminConfigView = () => {
   };
 
   if (loadingConfig) return <div className="p-20 text-center font-bold">Loading configuration...</div>;
+
+  const selectedProvider = (formData.llmProvider || 'gemini') as NonNullable<AppConfig['llmProvider']>;
+  const providerModels = providerModelOptions[selectedProvider] || [];
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -10403,6 +10422,15 @@ const AdminConfigView = () => {
                 />
               </div>
               <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n Chat Webhook URL</label>
+                <input 
+                  type="url"
+                  value={formData.n8nChatWebhookUrl || ''}
+                  onChange={e => setFormData({ ...formData, n8nChatWebhookUrl: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">n8n Support Webhook URL</label>
                 <input 
                   type="url"
@@ -10418,6 +10446,152 @@ const AdminConfigView = () => {
                   value={formData.n8nUserWebhookUrl || ''}
                   onChange={e => setFormData({ ...formData, n8nUserWebhookUrl: e.target.value })}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <h3 className="text-sm font-bold text-mairide-secondary uppercase tracking-widest border-b border-mairide-bg pb-2">Chatbot & LLM Runtime</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Chatbot Enabled</label>
+                <select
+                  value={formData.chatbotEnabled === false ? 'disabled' : 'enabled'}
+                  onChange={e => setFormData({ ...formData, chatbotEnabled: e.target.value === 'enabled' })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">LLM Provider</label>
+                <select
+                  value={selectedProvider}
+                  onChange={e => {
+                    const nextProvider = e.target.value as NonNullable<AppConfig['llmProvider']>;
+                    setFormData({
+                      ...formData,
+                      llmProvider: nextProvider,
+                      llmModel: providerModelOptions[nextProvider]?.[0] || '',
+                    });
+                  }}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="claude">Claude</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Model</label>
+                <select
+                  value={formData.llmModel || ''}
+                  onChange={e => setFormData({ ...formData, llmModel: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  {providerModels.map(model => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Temperature</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="1"
+                  value={formData.chatbotTemperature ?? 0.3}
+                  onChange={e => setFormData({ ...formData, chatbotTemperature: Number(e.target.value) })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Max Output Tokens</label>
+                <input
+                  type="number"
+                  min="100"
+                  max="2000"
+                  value={formData.chatbotMaxTokens ?? 400}
+                  onChange={e => setFormData({ ...formData, chatbotMaxTokens: Number(e.target.value) })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Gemini Project ID</label>
+                <input
+                  type="text"
+                  value={formData.geminiProjectId || ''}
+                  onChange={e => setFormData({ ...formData, geminiProjectId: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Gemini API Key</label>
+                <input 
+                  type="password"
+                  value={formData.geminiApiKey || ''}
+                  onChange={e => setFormData({ ...formData, geminiApiKey: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">OpenAI API Key</label>
+                <input 
+                  type="password"
+                  value={formData.openaiApiKey || ''}
+                  onChange={e => setFormData({ ...formData, openaiApiKey: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">OpenAI Project ID</label>
+                <input 
+                  type="text"
+                  value={formData.openaiProjectId || ''}
+                  onChange={e => setFormData({ ...formData, openaiProjectId: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">OpenAI Org ID</label>
+                <input 
+                  type="text"
+                  value={formData.openaiOrgId || ''}
+                  onChange={e => setFormData({ ...formData, openaiOrgId: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Claude API Key</label>
+                <input 
+                  type="password"
+                  value={formData.claudeApiKey || ''}
+                  onChange={e => setFormData({ ...formData, claudeApiKey: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Strict MaiRide System Prompt</label>
+                <textarea
+                  rows={6}
+                  value={formData.chatbotSystemPrompt || defaultChatbotPrompt}
+                  onChange={e => setFormData({ ...formData, chatbotSystemPrompt: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary resize-y"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Fallback Message</label>
+                <textarea
+                  rows={3}
+                  value={formData.chatbotFallbackMessage || ''}
+                  onChange={e => setFormData({ ...formData, chatbotFallbackMessage: e.target.value })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary resize-y"
                 />
               </div>
             </div>
@@ -10468,15 +10642,6 @@ const AdminConfigView = () => {
                   type="password"
                   value={formData.googleMapsApiKey || ''}
                   onChange={e => setFormData({ ...formData, googleMapsApiKey: e.target.value })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Gemini API Key</label>
-                <input 
-                  type="password"
-                  value={formData.geminiApiKey || ''}
-                  onChange={e => setFormData({ ...formData, geminiApiKey: e.target.value })}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
               </div>
@@ -13214,6 +13379,8 @@ const useAppConfig = () => {
           'n8nApiKey',
           'n8nSharedSecret',
           'geminiApiKey',
+          'openaiApiKey',
+          'claudeApiKey',
         ].forEach((key) => {
           if (key in nextConfig) {
             delete (nextConfig as Record<string, any>)[key];

@@ -181,7 +181,19 @@ export interface AppConfig {
   resendReplyToEmail?: string;
   emailOtpExpiryMinutes?: number;
   emailOtpSubject?: string;
+  chatbotEnabled?: boolean;
+  llmProvider?: 'gemini' | 'openai' | 'claude' | 'disabled';
+  llmModel?: string;
+  chatbotSystemPrompt?: string;
+  chatbotTemperature?: number;
+  chatbotMaxTokens?: number;
+  chatbotFallbackMessage?: string;
   geminiApiKey?: string;
+  geminiProjectId?: string;
+  openaiApiKey?: string;
+  openaiProjectId?: string;
+  openaiOrgId?: string;
+  claudeApiKey?: string;
   appBaseUrl?: string;
   publicApiBaseUrl?: string;
   supportEmail?: string;
@@ -198,6 +210,7 @@ export interface AppConfig {
   n8nOtpWebhookUrl?: string;
   n8nPaymentWebhookUrl?: string;
   n8nBookingWebhookUrl?: string;
+  n8nChatWebhookUrl?: string;
   n8nSupportWebhookUrl?: string;
   n8nUserWebhookUrl?: string;
   updatedAt: string;
