@@ -6706,124 +6706,32 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   const handleTravelerNegotiation = async (booking: Booking, action: 'accepted' | 'rejected') => {
     try {
-      if (window.location.hostname === 'localhost') {
-        await axios.post('/api/user/traveler-respond-booking', {
-          bookingId: booking.id,
-          consumerId: profile.uid,
-          action,
-        });
+      await axios.post('/api/user/traveler-respond-booking', {
+        bookingId: booking.id,
+        consumerId: profile.uid,
+        action,
+      });
 
-        const updatedAt = new Date().toISOString();
-        const threadSnapshot = await getDocs(
-          query(
-            collection(db, 'bookings'),
-            where('rideId', '==', booking.rideId),
-            where('consumerId', '==', booking.consumerId)
-          )
-        );
-        const threadBookings = threadSnapshot.docs
-          .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-          .filter((candidate) => getBookingThreadKey(candidate) === getBookingThreadKey(booking));
-
-        if (action === 'accepted' && booking.negotiatedFare) {
-          const { baseFee, gstAmount, totalFee } = calculateServiceFee(booking.negotiatedFare, config || undefined);
-          await Promise.all(
-            (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
-              updateDoc(doc(db, 'bookings', candidate.id), {
-                fare: booking.negotiatedFare,
-                serviceFee: baseFee,
-                gstAmount,
-                totalPrice: booking.negotiatedFare + totalFee,
-                status: 'confirmed',
-                negotiationStatus: 'accepted',
+      const updatedAt = new Date().toISOString();
+      setDashboardBookings((prev) =>
+        prev.map((candidate) =>
+          getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+            ? {
+                ...candidate,
+                status: action === 'accepted' ? 'confirmed' : 'rejected',
+                fare: action === 'accepted' && booking.negotiatedFare ? booking.negotiatedFare : candidate.fare,
+                negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
                 negotiationActor: 'driver',
                 driverCounterPending: false,
                 updatedAt,
-              })
-            )
-          );
-        } else {
-          await Promise.all(
-            (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
-              updateDoc(doc(db, 'bookings', candidate.id), {
-                status: 'rejected',
-                negotiationStatus: 'rejected',
-                negotiationActor: 'driver',
-                driverCounterPending: false,
-                updatedAt,
-              })
-            )
-          );
-        }
-
-        setDashboardBookings((prev) =>
-          prev.map((candidate) =>
-            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-              ? {
-                  ...candidate,
-                  status: action === 'accepted' ? 'confirmed' : 'rejected',
-                  fare: action === 'accepted' && booking.negotiatedFare ? booking.negotiatedFare : candidate.fare,
-                  negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
-                  negotiationActor: 'driver',
-                  driverCounterPending: false,
-                  updatedAt,
-                }
-              : candidate
-          )
-        );
-        alert(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.');
-        return;
-      }
-
-      const threadSnapshot = await getDocs(
-        query(
-          collection(db, 'bookings'),
-          where('rideId', '==', booking.rideId),
-          where('consumerId', '==', booking.consumerId)
+              }
+            : candidate
         )
       );
-      const threadBookings = threadSnapshot.docs
-        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-        .filter((candidate) => ['pending', 'confirmed', 'negotiating'].includes(candidate.status));
-
-      if (action === 'accepted' && booking.negotiatedFare) {
-        const { baseFee, gstAmount, totalFee } = calculateServiceFee(booking.negotiatedFare, config || undefined);
-        await Promise.all(
-          (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
-            updateDoc(doc(db, 'bookings', candidate.id), {
-              fare: booking.negotiatedFare,
-              serviceFee: baseFee,
-              gstAmount,
-              totalPrice: booking.negotiatedFare + totalFee,
-              status: 'confirmed',
-              negotiationStatus: 'accepted',
-              negotiationActor: 'driver',
-              driverCounterPending: false,
-              updatedAt: new Date().toISOString(),
-            })
-          )
-        );
-        alert('Counter offer accepted.');
-        return;
-      }
-
-      await Promise.all(
-        (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
-          updateDoc(doc(db, 'bookings', candidate.id), {
-            status: 'rejected',
-            negotiationStatus: 'rejected',
-            negotiationActor: 'driver',
-            driverCounterPending: false,
-            rideRetired: true,
-            retiredAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
-        )
-      );
-      alert('Counter offer rejected.');
+      showAppDialog(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.', 'success');
     } catch (error: any) {
-      const message = getApiErrorMessage(error, 'Unable to start Razorpay checkout.');
-      showAppDialog(message, 'error', 'Payment unavailable');
+      const message = getApiErrorMessage(error, 'Failed to update negotiation.');
+      showAppDialog(message, 'error', 'Negotiation update failed');
     }
   };
 
@@ -6834,88 +6742,27 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
 
     try {
-      if (window.location.hostname === 'localhost') {
-        await axios.post('/api/user/traveler-counter-booking', {
-          bookingId: booking.id,
-          consumerId: profile.uid,
-          fare,
-        });
-
-        const updatedAt = new Date().toISOString();
-        const threadSnapshot = await getDocs(
-          query(
-            collection(db, 'bookings'),
-            where('rideId', '==', booking.rideId),
-            where('consumerId', '==', booking.consumerId)
-          )
-        );
-        const threadBookings = threadSnapshot.docs
-          .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-          .filter((candidate) => getBookingThreadKey(candidate) === getBookingThreadKey(booking));
-
-        await Promise.all(
-          (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
-            updateDoc(doc(db, 'bookings', candidate.id), {
-              negotiatedFare: fare,
-              negotiationStatus: 'pending',
-              negotiationActor: 'consumer',
-              driverCounterPending: false,
-              status: 'negotiating',
-              rideRetired: false,
-              updatedAt,
-            })
-          )
-        );
-
-        setDashboardBookings((prev) =>
-          prev.map((candidate) =>
-            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-              ? {
-                  ...candidate,
-                  negotiatedFare: fare,
-                  negotiationStatus: 'pending',
-                  negotiationActor: 'consumer',
-                  driverCounterPending: false,
-                  status: 'negotiating',
-                  rideRetired: false,
-                  updatedAt,
-                }
-              : candidate
-          )
-        );
-        setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
-        void sendBrowserNotification(
-          'MaiRide Counter Offer',
-          `You countered with ${formatCurrency(fare)} for ${booking.origin} to ${booking.destination}.`,
-          { tag: `traveler-dashboard-counter-${booking.id}`, requirePermissionPrompt: true }
-        );
-        showAppDialog('Counter offer sent to the driver.', 'success');
-        return;
-      }
+      await axios.post('/api/user/traveler-counter-booking', {
+        bookingId: booking.id,
+        consumerId: profile.uid,
+        fare,
+      });
 
       const updatedAt = new Date().toISOString();
-      const threadSnapshot = await getDocs(
-        query(
-          collection(db, 'bookings'),
-          where('rideId', '==', booking.rideId),
-          where('consumerId', '==', booking.consumerId)
-        )
-      );
-      const threadBookings = threadSnapshot.docs
-        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-        .filter((candidate) => ['pending', 'confirmed', 'negotiating'].includes(candidate.status));
-
-      await Promise.all(
-        (threadBookings.length ? threadBookings : [booking]).map((candidate) =>
-          updateDoc(doc(db, 'bookings', candidate.id), {
-            negotiatedFare: fare,
-            negotiationStatus: 'pending',
-            negotiationActor: 'consumer',
-            driverCounterPending: false,
-            status: 'negotiating',
-            rideRetired: false,
-            updatedAt,
-          })
+      setDashboardBookings((prev) =>
+        prev.map((candidate) =>
+          getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+            ? {
+                ...candidate,
+                negotiatedFare: fare,
+                negotiationStatus: 'pending',
+                negotiationActor: 'consumer',
+                driverCounterPending: false,
+                status: 'negotiating',
+                rideRetired: false,
+                updatedAt,
+              }
+            : candidate
         )
       );
       setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
@@ -7906,138 +7753,38 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const handleDriverAction = async (request: Booking, status: 'confirmed' | 'rejected') => {
     try {
-      if (status === 'rejected' && window.location.hostname === 'localhost') {
-        await axios.post('/api/user/reject-booking', {
-          bookingId: request.id,
-          driverId: profile.uid,
-          driverPhone: profile.phoneNumber || '',
-        });
-
-        const threadBookings = await loadRelatedBookingThread(request);
-        const updatedAt = new Date().toISOString();
-        await Promise.all(
-          threadBookings.map((booking) =>
-            updateDoc(doc(db, 'bookings', booking.id), {
-              status: 'rejected',
-              negotiationStatus: 'rejected',
-              negotiationActor: booking.negotiationActor || request.negotiationActor || 'driver',
-              driverCounterPending: false,
-              rideRetired: true,
-              retiredAt: updatedAt,
-              driverPhone: profile.phoneNumber || '',
-              updatedAt,
-            })
-          )
-        );
-
-        setRequests((prev) =>
-          prev.filter(
-            (booking) =>
-              getBookingThreadKey(booking) !== getBookingThreadKey(request)
-          )
-        );
-        showAppDialog('Traveler offer rejected.', 'success');
-        return;
-      }
-
-      const threadBookings = await loadRelatedBookingThread(request);
-      if (status === 'rejected') {
-        const updatedAt = new Date().toISOString();
-        await Promise.all(
-          threadBookings.map((booking) =>
-            updateDoc(doc(db, 'bookings', booking.id), {
-              status: 'rejected',
-              negotiationStatus: 'rejected',
-              negotiationActor: booking.negotiationActor || request.negotiationActor || 'driver',
-              driverCounterPending: false,
-              rideRetired: true,
-              retiredAt: updatedAt,
-              driverPhone: profile.phoneNumber || '',
-              updatedAt,
-            })
-          )
-        );
-
-        setRequests((prev) =>
-          prev.filter(
-            (booking) =>
-              !(booking.rideId === request.rideId && booking.consumerId === request.consumerId)
-          )
-        );
-        alert('Traveler offer rejected.');
-        return;
-      }
+      await axios.post('/api/user/respond-booking', {
+        bookingId: request.id,
+        driverId: profile.uid,
+        action: status,
+        driverPhone: profile.phoneNumber || '',
+      });
 
       const acceptedFare =
         hasPendingTravelerCounterOffer(request) && request.negotiatedFare
           ? request.negotiatedFare
           : request.fare;
-      const { baseFee, gstAmount, totalFee } = calculateServiceFee(acceptedFare, config || undefined);
-
-      if (status === 'confirmed' && window.location.hostname === 'localhost') {
-        const updatedAt = new Date().toISOString();
-        const threadBookings = await loadRelatedBookingThread(request);
-        await Promise.all(
-          threadBookings.map((booking) =>
-            updateDoc(doc(db, 'bookings', booking.id), {
-              status,
-              fare: acceptedFare,
-              serviceFee: baseFee,
-              gstAmount,
-              totalPrice: acceptedFare + totalFee,
-              negotiationStatus:
-                booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
-              negotiationActor: booking.negotiationActor,
-              driverCounterPending: false,
-              driverPhone: profile.phoneNumber || '',
-              updatedAt,
-            })
-          )
-        );
-      }
-
-      await Promise.all(
-        threadBookings.map((booking) =>
-          updateDoc(doc(db, 'bookings', booking.id), {
-            status,
-            fare: acceptedFare,
-            serviceFee: baseFee,
-            gstAmount,
-            totalPrice: acceptedFare + totalFee,
-            negotiationStatus:
-              booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
-            negotiationActor: booking.negotiationActor,
-            driverCounterPending: false,
-            driverPhone: profile.phoneNumber || '',
-            updatedAt: new Date().toISOString(),
-          })
-        )
-      );
-
-      if (status === 'confirmed') {
-        await updateDoc(doc(db, 'rides', request.rideId), {
-          status: 'full',
-        });
-        await walletService.onRideStart(profile.uid);
-      }
 
       setRequests((prev) =>
-        prev.map((booking) =>
-          getBookingThreadKey(booking) === getBookingThreadKey(request)
-            ? {
-                ...booking,
-                status,
-                fare: acceptedFare,
-                negotiationStatus:
-                  booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
-                driverCounterPending: false,
-                updatedAt: new Date().toISOString(),
-              }
-            : booking
-        )
+        status === 'rejected'
+          ? prev.filter((booking) => getBookingThreadKey(booking) !== getBookingThreadKey(request))
+          : prev.map((booking) =>
+              getBookingThreadKey(booking) === getBookingThreadKey(request)
+                ? {
+                    ...booking,
+                    status,
+                    fare: acceptedFare,
+                    negotiationStatus:
+                      booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
+                    driverCounterPending: false,
+                    driverPhone: profile.phoneNumber || '',
+                    updatedAt: new Date().toISOString(),
+                  }
+                : booking
+            )
       );
 
-      alert(`Booking ${status}.`);
+      showAppDialog(status === 'confirmed' ? 'Booking confirmed.' : 'Traveler offer rejected.', 'success');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
     }
@@ -8050,62 +7797,29 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
 
     try {
-      if (window.location.hostname === 'localhost') {
-        await axios.post('/api/user/counter-booking', {
-          bookingId: request.id,
-          driverId: profile.uid,
-          fare,
-        });
+      await axios.post('/api/user/counter-booking', {
+        bookingId: request.id,
+        driverId: profile.uid,
+        fare,
+      });
 
-        const updatedAt = new Date().toISOString();
-        const threadBookings = await loadRelatedBookingThread(request);
-        await Promise.all(
-          threadBookings.map((booking) =>
-            updateDoc(doc(db, 'bookings', booking.id), {
-              negotiatedFare: fare,
-              negotiationStatus: 'pending',
-              negotiationActor: 'driver',
-              driverCounterPending: true,
-              status: 'negotiating',
-              updatedAt,
-            })
-          )
-        );
-
-        setRequests((prev) =>
-          prev.map((booking) =>
-            getBookingThreadKey(booking) === getBookingThreadKey(request)
-              ? {
-                  ...booking,
-                  negotiatedFare: fare,
-                  negotiationStatus: 'pending',
-                  negotiationActor: 'driver',
-                  driverCounterPending: true,
-                  status: 'negotiating',
-                  updatedAt,
-                }
-              : booking
-          )
-        );
-        showAppDialog('Counter offer sent to traveler.', 'success');
-        return;
-      }
-
-      const threadBookings = await loadRelatedBookingThread(request);
       const updatedAt = new Date().toISOString();
-      await Promise.all(
-        threadBookings.map((booking) =>
-          updateDoc(doc(db, 'bookings', booking.id), {
-            negotiatedFare: fare,
-            negotiationStatus: 'pending',
-            negotiationActor: 'driver',
-            driverCounterPending: true,
-            status: 'negotiating',
-            updatedAt,
-          })
+      setRequests((prev) =>
+        prev.map((booking) =>
+          getBookingThreadKey(booking) === getBookingThreadKey(request)
+            ? {
+                ...booking,
+                negotiatedFare: fare,
+                negotiationStatus: 'pending',
+                negotiationActor: 'driver',
+                driverCounterPending: true,
+                status: 'negotiating',
+                updatedAt,
+              }
+            : booking
         )
       );
-      alert('Counter offer sent to traveler.');
+      showAppDialog('Counter offer sent to traveler.', 'success');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
     }
