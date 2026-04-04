@@ -22,7 +22,22 @@ async function getGlobalConfig() {
 
   if (error) throw error;
 
-  return ((data?.data as Record<string, any>) || {}) as Record<string, any>;
+  return {
+    llmProvider: "gemini",
+    llmModel: "gemini-2.5-flash",
+    chatbotEnabled: true,
+    chatbotTemperature: 0.3,
+    chatbotMaxTokens: 400,
+    chatbotSystemPrompt: DEFAULT_PROMPT,
+    chatbotFallbackMessage: "I'm sorry, I'm having trouble connecting right now. Please try again later.",
+    geminiApiKey: process.env.GEMINI_API_KEY || "",
+    geminiProjectId: process.env.GEMINI_PROJECT_ID || "",
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    openaiProjectId: process.env.OPENAI_PROJECT_ID || "",
+    openaiOrgId: process.env.OPENAI_ORG_ID || "",
+    claudeApiKey: process.env.CLAUDE_API_KEY || "",
+    ...(((data?.data as Record<string, any>) || {}) as Record<string, any>),
+  } as Record<string, any>;
 }
 
 const DEFAULT_PROMPT =
@@ -32,6 +47,29 @@ function normalizeMessages(messages: any[] = []) {
   return messages
     .filter((m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"))
     .slice(-8);
+}
+
+async function parseRequestBody(req: any) {
+  if (req.body && typeof req.body === "object") return req.body;
+  if (typeof req.body === "string") {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  if (!chunks.length) return {};
+
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return {};
+  }
 }
 
 async function callGemini(config: Record<string, any>, messages: any[]) {
@@ -177,8 +215,9 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const incomingMessages = normalizeMessages(req.body?.messages || []);
-    const message = String(req.body?.message || "").trim();
+    const body = await parseRequestBody(req);
+    const incomingMessages = normalizeMessages(body?.messages || []);
+    const message = String(body?.message || "").trim();
     const messages =
       incomingMessages.length > 0
         ? incomingMessages
@@ -212,7 +251,7 @@ export default async function handler(req: any, res: any) {
     console.error("Chat route failed:", error);
     return res.status(500).json({
       error: error?.message || "A server error has occurred",
-      message: "I'm sorry, I'm having trouble connecting right now. Please try again later.",
+      message: error?.message || "I'm sorry, I'm having trouble connecting right now. Please try again later.",
     });
   }
 }

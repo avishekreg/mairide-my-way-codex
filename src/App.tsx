@@ -9098,10 +9098,14 @@ const Chatbot = () => {
       setMessages(prev => [...prev, botMsg]);
     } catch (error) {
       console.error("Chatbot Error:", error);
+      const errorMessage =
+        axios.isAxiosError(error)
+          ? String(error.response?.data?.message || error.response?.data?.error || "")
+          : "";
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: config?.chatbotFallbackMessage || "I'm sorry, I'm having trouble connecting right now. Please try again later.",
+        content: errorMessage || config?.chatbotFallbackMessage || "I'm sorry, I'm having trouble connecting right now. Please try again later.",
         createdAt: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMsg]);
