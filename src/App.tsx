@@ -9144,10 +9144,11 @@ const Chatbot = () => {
         axios.isAxiosError(error)
           ? String(error.response?.data?.message || error.response?.data?.error || "")
           : "";
+      const normalizedErrorMessage = errorMessage.toLowerCase();
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: errorMessage
+        content: errorMessage && !normalizedErrorMessage.includes("trouble connecting") && !normalizedErrorMessage.includes("server error")
           ? errorMessage
           : buildStaticMaiRideReply(input),
         createdAt: new Date().toISOString()
