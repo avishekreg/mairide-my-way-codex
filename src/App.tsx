@@ -2007,8 +2007,8 @@ const ContactUnlockCard = ({
   const display = formatPhoneForDisplay(phoneNumber);
 
   return (
-    <div className="mt-2 bg-green-50 p-3 rounded-xl flex items-center justify-between gap-3 text-green-700">
-      <div className="flex items-center space-x-2 min-w-0">
+    <div className="mt-2 bg-green-50 p-3 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-green-700">
+      <div className="flex items-center gap-2 min-w-0 w-full">
         <Phone className="w-4 h-4 shrink-0" />
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-widest text-green-700/70">{label}</p>
@@ -2024,7 +2024,7 @@ const ContactUnlockCard = ({
       {dialable ? (
         <a
           href={`tel:${dialable}`}
-          className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-green-700 border border-green-100 hover:bg-green-100 transition-colors"
+          className="w-full sm:w-auto text-center shrink-0 rounded-full bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-green-700 border border-green-100 hover:bg-green-100 transition-colors"
         >
           Call Now
         </a>
@@ -5353,8 +5353,8 @@ const finalizeTravelerRazorpayPayment = async (
   if (loading) return <LoadingScreen />;
 
   return (
-    <div className="max-w-4xl mx-auto p-8">
-      <div className="flex justify-between items-center mb-8">
+    <div className="max-w-4xl mx-auto px-4 py-6 md:p-8 min-w-0 overflow-x-hidden">
+      <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-center mb-8">
         <h1 className="text-3xl font-bold text-mairide-primary">My Bookings</h1>
         <div className="bg-mairide-primary text-white px-6 py-3 rounded-2xl flex items-center space-x-3 shadow-lg shadow-mairide-primary/20">
           <Bot className="w-5 h-5 text-mairide-accent" />
@@ -5409,8 +5409,8 @@ const finalizeTravelerRazorpayPayment = async (
             const statusLabel = getBookingStateLabel(booking);
 
             return (
-            <div key={booking.id} className="bg-white p-8 rounded-[32px] border border-mairide-secondary shadow-sm hover:shadow-md transition-all">
-              <div className="flex justify-between items-start mb-6">
+            <div key={booking.id} className="bg-white p-4 md:p-8 rounded-[32px] border border-mairide-secondary shadow-sm hover:shadow-md transition-all min-w-0">
+              <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-start mb-6 min-w-0">
                 <div className="flex items-start gap-4">
                   <div className="w-14 h-14 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center shrink-0">
                     {booking.driverPhotoUrl ? (
@@ -5419,8 +5419,8 @@ const finalizeTravelerRazorpayPayment = async (
                       <Car className="w-6 h-6 text-mairide-accent" />
                     )}
                   </div>
-                  <div>
-                  <h3 className="font-bold text-xl text-mairide-primary mb-1">{booking.origin} → {booking.destination}</h3>
+                  <div className="min-w-0">
+                  <h3 className="font-bold text-lg md:text-xl text-mairide-primary mb-1 break-words">{booking.origin} → {booking.destination}</h3>
                   <p className="text-sm text-mairide-secondary">Driver: {booking.driverName}</p>
                   {booking.feePaid && booking.driverFeePaid ? (
                     <ContactUnlockCard label="Driver contact" phoneNumber={booking.driverPhone} />
@@ -5461,7 +5461,7 @@ const finalizeTravelerRazorpayPayment = async (
               {hasDriverCounterOffer && (
                 <div className="mb-6 p-6 bg-mairide-accent/10 border border-mairide-accent rounded-2xl">
                   <p className="font-bold text-mairide-primary mb-2">Counter offer received: {formatCurrency(displayFare)}</p>
-                  <div className="flex space-x-3">
+                  <div className="flex flex-col sm:flex-row gap-3">
                     <button 
                       onClick={() => handleNegotiation(booking.id, 'accepted', booking.negotiatedFare)}
                       className={cn("flex-1 bg-mairide-primary text-white py-3 text-sm", primaryActionButtonClass)}
@@ -5516,7 +5516,7 @@ const finalizeTravelerRazorpayPayment = async (
               </div>
 
               {booking.status === 'confirmed' && !booking.feePaid && (
-                <div className="flex space-x-4">
+                <div className="flex flex-col sm:flex-row gap-4">
                   <button 
                     onClick={() => handlePayFee(booking, true)}
                     className="flex-1 bg-mairide-primary text-white py-4 rounded-2xl font-bold hover:bg-mairide-accent transition-colors flex items-center justify-center space-x-2"
