@@ -850,18 +850,30 @@ export async function handleUserSearchRides(_req: ReqLike, res: ResLike) {
         .select("id, ride_id, consumer_id, driver_id, status, data, created_at, updated_at"),
       admin
         .from("users")
-        .select("id, role, status, onboarding_complete, verification_status")
-        .eq("role", "driver")
-        .eq("status", "active")
-        .eq("onboarding_complete", true)
-        .eq("verification_status", "approved"),
+        .select("id, role, status, onboarding_complete, verification_status, data"),
     ]);
 
     if (ridesError) throw ridesError;
     if (bookingsError) throw bookingsError;
     if (driversError) throw driversError;
 
-    const approvedDriverIds = new Set((driverRows || []).map((row) => row.id));
+    const approvedDriverIds = new Set(
+      (driverRows || [])
+        .filter((row: any) => {
+          const data = (row.data as Record<string, any>) || {};
+          const role = row.role || data.role;
+          const status = row.status || data.status;
+          const onboardingComplete = row.onboarding_complete ?? data.onboardingComplete;
+          const verificationStatus = row.verification_status || data.verificationStatus;
+          return (
+            role === "driver" &&
+            status === "active" &&
+            onboardingComplete === true &&
+            verificationStatus === "approved"
+          );
+        })
+        .map((row: any) => row.id)
+    );
 
     const rides = (rideRows || [])
       .filter((row) => approvedDriverIds.has(row.driver_id || row.data?.driverId))
