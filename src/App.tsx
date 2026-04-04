@@ -2137,7 +2137,21 @@ const AuthPage = ({
         if (!user && authMode === 'signup' && email && password && displayName) {
           await completeEmailPasswordSignUp();
         } else if (authMode === 'login') {
-          const existingProfile = await resolvePhoneLoginClientSide(phoneNumber || username);
+          let existingProfile: { uid: string; role: string; email: string; phoneNumber: string };
+          try {
+            const resolveResponse = await fetch('/api/health?action=resolve-phone-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phoneNumber: phoneNumber || username }),
+            });
+            existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
+          } catch (error: any) {
+            if (/HTTP (404|405)/.test(error?.message || '') || /NOT_REGISTERED/.test(error?.message || '')) {
+              existingProfile = await resolvePhoneLoginClientSide(phoneNumber || username);
+            } else {
+              throw error;
+            }
+          }
 
           sessionStorage.setItem(PHONE_LOGIN_PROFILE_KEY, existingProfile.uid);
           sessionStorage.setItem(PHONE_LOGIN_NUMBER_KEY, normalizePhoneForAuth(phoneNumber || username));

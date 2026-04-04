@@ -30,9 +30,71 @@ function isApprovedDriver(row: any) {
   );
 }
 
+function normalizePhone(phoneNumber: unknown) {
+  return String(phoneNumber || "").replace(/[^\d]/g, "");
+}
+
+function buildPhoneVariants(phoneNumber: unknown) {
+  const digits = normalizePhone(phoneNumber);
+  const variants = new Set<string>();
+
+  if (!digits) return [];
+
+  variants.add(digits);
+  variants.add(`+${digits}`);
+
+  if (digits.length > 10) {
+    const last10 = digits.slice(-10);
+    variants.add(last10);
+    variants.add(`+${last10}`);
+  }
+
+  return Array.from(variants);
+}
+
 export default async function handler(req: any, res: any) {
   try {
     const action = Array.isArray(req.query?.action) ? req.query.action[0] : req.query?.action;
+    if (action === "resolve-phone-login") {
+      const phoneNumber = req.body?.phoneNumber || req.query?.phoneNumber;
+      const variants = buildPhoneVariants(phoneNumber);
+      if (!variants.length) {
+        return res.status(400).json({ error: "Missing or invalid phone number" });
+      }
+
+      const supabaseAdmin = getSupabaseAdmin();
+      const { data: userRows, error: usersError } = await supabaseAdmin
+        .from("users")
+        .select("*");
+
+      if (usersError) throw usersError;
+
+      const normalizedVariants = new Set(variants.map((value) => normalizePhone(value)));
+      const matchedUser = (userRows || []).find((row: any) => {
+        const data = (row?.data as Record<string, any>) || {};
+        const storedDigits = normalizePhone(row?.phone_number || data.phoneNumber || "");
+        if (!storedDigits) return false;
+        const tail = storedDigits.slice(-10);
+        return (
+          normalizedVariants.has(storedDigits) ||
+          normalizedVariants.has(tail) ||
+          Array.from(normalizedVariants).some((candidate) => storedDigits.endsWith(candidate) || candidate.endsWith(storedDigits))
+        );
+      });
+
+      if (!matchedUser) {
+        return res.status(404).json({ error: "NOT_REGISTERED" });
+      }
+
+      const data = (matchedUser.data as Record<string, any>) || {};
+      return res.status(200).json({
+        uid: matchedUser.id,
+        role: matchedUser.role || data.role || "consumer",
+        email: matchedUser.email || "",
+        phoneNumber: matchedUser.phone_number || data.phoneNumber || "",
+      });
+    }
+
     if (action !== "search-rides") {
       return res.status(200).json({ status: "ok", backend: "supabase" });
     }
