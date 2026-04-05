@@ -14632,11 +14632,52 @@ const App = () => {
     const style = document.createElement('style');
     style.id = styleId;
     style.textContent = `
-      .goog-te-banner-frame.skiptranslate { display: none !important; }
-      body { top: 0 !important; }
+      .goog-te-banner-frame { display: none !important; visibility: hidden !important; }
+      .goog-te-banner-frame.skiptranslate { display: none !important; visibility: hidden !important; }
+      iframe.goog-te-banner-frame { display: none !important; visibility: hidden !important; }
+      .skiptranslate iframe { display: none !important; visibility: hidden !important; }
+      body { top: 0 !important; position: static !important; min-height: 100% !important; }
+      html { top: 0 !important; }
       #goog-gt-tt, .goog-te-balloon-frame { display: none !important; }
+      .goog-tooltip, .goog-tooltip:hover { display: none !important; }
+      .goog-text-highlight { background: none !important; box-shadow: none !important; }
     `;
     document.head.appendChild(style);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const suppressTranslateBanner = () => {
+      const selectors = [
+        '.goog-te-banner-frame',
+        '.goog-te-banner-frame.skiptranslate',
+        'iframe.goog-te-banner-frame',
+        '.skiptranslate',
+      ];
+
+      selectors.forEach((selector) => {
+        document.querySelectorAll(selector).forEach((node) => {
+          const element = node as HTMLElement;
+          element.style.setProperty('display', 'none', 'important');
+          element.style.setProperty('visibility', 'hidden', 'important');
+          element.style.setProperty('height', '0', 'important');
+          element.style.setProperty('min-height', '0', 'important');
+        });
+      });
+
+      document.documentElement.style.setProperty('top', '0px', 'important');
+      document.body.style.setProperty('top', '0px', 'important');
+    };
+
+    suppressTranslateBanner();
+
+    const observer = new MutationObserver(() => {
+      suppressTranslateBanner();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
