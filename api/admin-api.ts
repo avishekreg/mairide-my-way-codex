@@ -685,16 +685,11 @@ async function handleCapacity(req: any, res: any) {
   const transactions = transactionsResult.data || [];
   const tickets = ticketsResult.data || [];
 
-  const allErrors = [
-    usersResult.error,
-    ridesResult.error,
-    bookingsResult.error,
-    transactionsResult.error,
-    ticketsResult.error,
-  ].filter(Boolean);
-  if (allErrors.length) {
-    throw allErrors[0];
-  }
+  if (usersResult.error) capacityNotes.push(`Users feed issue: ${usersResult.error.message}`);
+  if (ridesResult.error) capacityNotes.push(`Rides feed issue: ${ridesResult.error.message}`);
+  if (bookingsResult.error) capacityNotes.push(`Bookings feed issue: ${bookingsResult.error.message}`);
+  if (transactionsResult.error) capacityNotes.push(`Transactions feed issue: ${transactionsResult.error.message}`);
+  if (ticketsResult.error) capacityNotes.push(`Support feed issue: ${ticketsResult.error.message}`);
 
   const daySeries = buildLastDays(90);
   const bucket = new Map(
@@ -1143,8 +1138,9 @@ async function handleCapacity(req: any, res: any) {
 }
 
 export default async function handler(req: any, res: any) {
+  let action = "";
   try {
-    const action = getAction(req);
+    action = getAction(req);
 
     switch (action) {
       case "config":
@@ -1185,6 +1181,45 @@ export default async function handler(req: any, res: any) {
     }
   } catch (error: any) {
     console.error("Standalone admin API failed:", error);
+    if (action === "capacity") {
+      const nowIso = new Date().toISOString();
+      return res.status(200).json({
+        generatedAt: nowIso,
+        limits: {},
+        metrics: [],
+        summary: {
+          liveSessionsNow: 0,
+          staleSessionsNow: 0,
+          offlineLinksNow: 0,
+          antiSpoofAlertsNow: 0,
+          realtimeSignalsLast24h: 0,
+          monthlySignalsEstimate: 0,
+          mauLast30: 0,
+          ridesToday: 0,
+          bookingsToday: 0,
+          completedBookingsToday: 0,
+          revenueToday: 0,
+          gstToday: 0,
+          totalUsersTracked90d: 0,
+          totalRidesTracked90d: 0,
+          totalBookingsTracked90d: 0,
+          totalTransactionsTracked90d: 0,
+          totalTicketsTracked90d: 0,
+        },
+        daily: [],
+        alerts: [],
+        snapshots: [],
+        alertHistory: [],
+        storageStatus: {
+          snapshotsPersisted: false,
+          alertsPersisted: false,
+          notes: [
+            `Capacity endpoint fell back to safe mode: ${error?.message || "unknown error"}.`,
+            "This does not affect booking, payment, or negotiation logic.",
+          ],
+        },
+      });
+    }
     return res.status(error?.status || 500).json({
       error: error?.message || "A server error has occurred",
     });
