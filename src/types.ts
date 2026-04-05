@@ -170,6 +170,8 @@ export interface AppConfig {
   twoFactorApiKey?: string;
   smsOtpProvider?: '2factor' | 'custom';
   smsTemplateName?: string;
+  smsLoginTemplateName?: string;
+  smsPasswordResetTemplateName?: string;
   emailApiUrl?: string;
   emailApiKey?: string;
   emailOtpEnabled?: boolean;

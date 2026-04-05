@@ -11144,6 +11144,8 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     razorpayKeyId: RAZORPAY_KEY_ID || '',
     smsOtpProvider: '2factor',
     smsApiUrl: 'https://2factor.in/API/V1',
+    smsLoginTemplateName: 'Login_otp',
+    smsPasswordResetTemplateName: 'Password_Reset',
     emailOtpEnabled: true,
     emailOtpProvider: 'resend',
     resendApiBaseUrl: 'https://api.resend.com/emails',
@@ -11387,12 +11389,22 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">SMS Template / Route Name</label>
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Login / Signup SMS Template Name</label>
                 <input 
                   type="text"
-                  value={formData.smsTemplateName || ''}
-                  onChange={e => setFormData({ ...formData, smsTemplateName: e.target.value })}
-                  placeholder="AUTOGEN2"
+                  value={formData.smsLoginTemplateName || formData.smsTemplateName || ''}
+                  onChange={e => setFormData({ ...formData, smsLoginTemplateName: e.target.value, smsTemplateName: e.target.value })}
+                  placeholder="Login_otp"
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Password Reset SMS Template Name</label>
+                <input 
+                  type="text"
+                  value={formData.smsPasswordResetTemplateName || ''}
+                  onChange={e => setFormData({ ...formData, smsPasswordResetTemplateName: e.target.value })}
+                  placeholder="Password_Reset"
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
               </div>

@@ -19,9 +19,9 @@ function normalizeOtpValue(value: unknown) {
   return String(value || "").trim();
 }
 
-async function fetchJson(url: string) {
+async function fetchJson(url: string, method: "GET" | "POST" = "GET") {
   const response = await fetch(url, {
-    method: "GET",
+    method,
     headers: {
       Accept: "application/json",
     },
@@ -62,7 +62,8 @@ export async function handleSendOtp(req: ReqLike, res: ResLike) {
 
   try {
     const data = await fetchJson(
-      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/AUTOGEN2`
+      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/AUTOGEN2`,
+      "POST"
     );
     return res.status(200).json(data);
   } catch (error: any) {
@@ -89,7 +90,8 @@ export async function handleSendEmailOtp(req: ReqLike, res: ResLike) {
 
   try {
     const data = await fetchJson(
-      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/EMAIL/${encodeURIComponent(normalizedEmail)}/AUTOGEN`
+      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/EMAIL/${encodeURIComponent(normalizedEmail)}/AUTOGEN`,
+      "POST"
     );
     return res.status(200).json(data);
   } catch (error: any) {
@@ -119,7 +121,8 @@ export async function handleVerifyOtp(req: ReqLike, res: ResLike) {
 
   try {
     const data = await fetchJson(
-      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`
+      `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`,
+      "POST"
     );
     return res.status(200).json(data);
   } catch (error: any) {

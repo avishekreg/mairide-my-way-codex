@@ -94,11 +94,14 @@ async function getAppConfigData(supabaseAdmin?: any) {
 
 async function getSmsOtpConfig(supabaseAdmin?: any) {
   const configData = await getAppConfigData(supabaseAdmin);
+  const fallbackTemplate = String(configData.smsTemplateName || "AUTOGEN2").trim() || "AUTOGEN2";
   return {
     provider: String(configData.smsOtpProvider || "2factor").trim().toLowerCase(),
     apiUrl: String(configData.smsApiUrl || process.env.SMS_API_URL || "https://2factor.in/API/V1").trim(),
     apiKey: String(configData.twoFactorApiKey || configData.smsApiKey || process.env.TWO_FACTOR_API_KEY || "").trim(),
-    templateName: String(configData.smsTemplateName || "AUTOGEN2").trim() || "AUTOGEN2",
+    templateName: fallbackTemplate,
+    loginTemplateName: String(configData.smsLoginTemplateName || fallbackTemplate).trim() || fallbackTemplate,
+    passwordResetTemplateName: String(configData.smsPasswordResetTemplateName || fallbackTemplate).trim() || fallbackTemplate,
   };
 }
 
@@ -261,9 +264,9 @@ async function sendEmailOtpViaResend(emailConfig: Awaited<ReturnType<typeof getE
   };
 }
 
-async function fetchJson(url: string) {
+async function fetchJson(url: string, method: "GET" | "POST" = "GET") {
   const response = await fetch(url, {
-    method: "GET",
+    method,
     headers: {
       Accept: "application/json",
     },
@@ -288,7 +291,7 @@ async function fetchJson(url: string) {
   return payload;
 }
 
-async function sendSmsOtpToPhone(phoneNumber: string) {
+async function sendSmsOtpToPhone(phoneNumber: string, purpose: "login" | "password_reset" = "login") {
   const normalizedPhone = normalizePhone(phoneNumber);
   const smsConfig = await getSmsOtpConfig();
   const apiKey = smsConfig.apiKey;
@@ -304,8 +307,19 @@ async function sendSmsOtpToPhone(phoneNumber: string) {
     };
   }
 
+  // Enforce SMS-only delivery path and block voice/call route misconfiguration.
   const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
-  return fetchJson(`${baseUrl}/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/${encodeURIComponent(smsConfig.templateName)}`);
+  if (/\/voice(\/|$)/i.test(baseUrl) || /\/call(\/|$)/i.test(baseUrl)) {
+    throw Object.assign(new Error("SMS API URL is misconfigured (voice/call route detected)."), { status: 500 });
+  }
+
+  const selectedTemplate =
+    purpose === "password_reset" ? smsConfig.passwordResetTemplateName : smsConfig.loginTemplateName;
+  const templateName = /voice|call/i.test(selectedTemplate) ? "AUTOGEN2" : selectedTemplate;
+  return fetchJson(
+    `${baseUrl}/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/${encodeURIComponent(templateName)}`,
+    "POST"
+  );
 }
 
 async function verifySmsOtpSession(sessionId: string, otp: string) {
@@ -326,7 +340,13 @@ async function verifySmsOtpSession(sessionId: string, otp: string) {
   }
 
   const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
-  return fetchJson(`${baseUrl}/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`);
+  if (/\/voice(\/|$)/i.test(baseUrl) || /\/call(\/|$)/i.test(baseUrl)) {
+    throw Object.assign(new Error("SMS API URL is misconfigured (voice/call route detected)."), { status: 500 });
+  }
+  return fetchJson(
+    `${baseUrl}/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`,
+    "POST"
+  );
 }
 
 async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
@@ -427,7 +447,7 @@ async function generateUniqueReferralCode(supabaseAdmin: any) {
 async function handleSendOtp(req: any, res: any) {
   const { phoneNumber } = req.body || {};
   try {
-    const data = await sendSmsOtpToPhone(phoneNumber);
+    const data = await sendSmsOtpToPhone(phoneNumber, "login");
     return res.status(200).json(data);
   } catch (error: any) {
     console.error("2Factor SMS OTP Error:", error?.payload || error?.message || error);
@@ -551,7 +571,7 @@ async function handleSendPasswordResetOtp(req: any, res: any) {
       return res.status(400).json({ error: "This account has no mobile number linked for OTP reset." });
     }
 
-    const otpResponse = await sendSmsOtpToPhone(normalizedPhone);
+    const otpResponse = await sendSmsOtpToPhone(normalizedPhone, "password_reset");
     if (String(otpResponse?.Status || "").toLowerCase() !== "success" || !otpResponse?.Details) {
       return res.status(500).json({ error: String(otpResponse?.Details || "Failed to send OTP") });
     }
