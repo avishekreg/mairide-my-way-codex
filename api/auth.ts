@@ -6,11 +6,24 @@ const TRAVELER_JOINING_BONUS = 250;
 const TIER1_REWARD = 25;
 const TIER2_REWARD = 5;
 const EMAIL_OTP_SESSION_PREFIX = "emailotp_";
+const PASSWORD_RESET_SESSION_PREFIX = "pwdreset_";
+const PASSWORD_RESET_TOKEN_PREFIX = "pwdtoken_";
 const inMemoryOtpSessions = new Map<string, {
   email: string;
   otpHash: string;
   expiresAt: string;
   consumedAt: string | null;
+}>();
+const inMemoryPasswordResetSessions = new Map<string, {
+  uid: string;
+  phoneNumber: string;
+  otpSessionId: string;
+  expiresAt: string;
+  verifiedAt: string | null;
+}>();
+const inMemoryPasswordResetTokens = new Map<string, {
+  uid: string;
+  expiresAt: string;
 }>();
 
 function getSupabaseAdmin() {
@@ -87,6 +100,13 @@ async function getSmsOtpConfig(supabaseAdmin?: any) {
     apiKey: String(configData.twoFactorApiKey || configData.smsApiKey || process.env.TWO_FACTOR_API_KEY || "").trim(),
     templateName: String(configData.smsTemplateName || "AUTOGEN2").trim() || "AUTOGEN2",
   };
+}
+
+function maskPhoneNumber(phoneNumber: string) {
+  const digits = normalizePhone(phoneNumber);
+  if (!digits) return "";
+  if (digits.length <= 4) return digits;
+  return `${digits[0]}${"*".repeat(Math.max(digits.length - 4, 0))}${digits.slice(-3)}`;
 }
 
 async function getEmailOtpConfig(supabaseAdmin?: any) {
@@ -268,6 +288,47 @@ async function fetchJson(url: string) {
   return payload;
 }
 
+async function sendSmsOtpToPhone(phoneNumber: string) {
+  const normalizedPhone = normalizePhone(phoneNumber);
+  const smsConfig = await getSmsOtpConfig();
+  const apiKey = smsConfig.apiKey;
+  if (!normalizedPhone) {
+    throw Object.assign(new Error("A valid phone number is required."), { status: 400 });
+  }
+
+  if (!apiKey) {
+    console.log(`[DEV] Mock SMS OTP sent to ${normalizedPhone}: 123456`);
+    return {
+      Status: "Success",
+      Details: "mock_sms_session_id",
+    };
+  }
+
+  const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
+  return fetchJson(`${baseUrl}/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/${encodeURIComponent(smsConfig.templateName)}`);
+}
+
+async function verifySmsOtpSession(sessionId: string, otp: string) {
+  const normalizedSessionId = normalizeOtpValue(sessionId);
+  const normalizedOtp = normalizeOtpValue(otp);
+  const smsConfig = await getSmsOtpConfig();
+  const apiKey = smsConfig.apiKey;
+
+  if (!normalizedSessionId || !normalizedOtp) {
+    throw Object.assign(new Error("Session ID and OTP are required."), { status: 400 });
+  }
+
+  if (!apiKey || normalizedSessionId.startsWith("mock_")) {
+    if (normalizedOtp === "123456") {
+      return { Status: "Success", Details: "OTP Matched" };
+    }
+    throw Object.assign(new Error("Invalid OTP"), { status: 400, payload: { Status: "Error", Details: "Invalid OTP" } });
+  }
+
+  const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
+  return fetchJson(`${baseUrl}/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`);
+}
+
 async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
   const target = normalizeEmail(email);
   if (!target) return null;
@@ -365,22 +426,8 @@ async function generateUniqueReferralCode(supabaseAdmin: any) {
 
 async function handleSendOtp(req: any, res: any) {
   const { phoneNumber } = req.body || {};
-  const normalizedPhone = normalizePhone(phoneNumber);
-  const smsConfig = await getSmsOtpConfig();
-  const apiKey = smsConfig.apiKey;
-
-  if (!normalizedPhone) {
-    return res.status(400).json({ Status: "Error", Details: "A valid phone number is required." });
-  }
-
-  if (!apiKey) {
-    console.log(`[DEV] Mock SMS OTP sent to ${normalizedPhone}: 123456`);
-    return res.status(200).json({ Status: "Success", Details: "mock_sms_session_id" });
-  }
-
   try {
-    const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
-    const data = await fetchJson(`${baseUrl}/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/${encodeURIComponent(smsConfig.templateName)}`);
+    const data = await sendSmsOtpToPhone(phoneNumber);
     return res.status(200).json(data);
   } catch (error: any) {
     console.error("2Factor SMS OTP Error:", error?.payload || error?.message || error);
@@ -449,11 +496,7 @@ async function handleSendEmailOtp(req: any, res: any) {
 async function handleVerifyOtp(req: any, res: any) {
   const { sessionId, otp } = req.body || {};
   const normalizedSessionId = normalizeOtpValue(sessionId);
-  const normalizedOtp = normalizeOtpValue(otp);
-  const smsConfig = await getSmsOtpConfig();
-  const apiKey = smsConfig.apiKey;
-
-  if (!normalizedSessionId || !normalizedOtp) {
+  if (!normalizedSessionId || !normalizeOtpValue(otp)) {
     return res.status(400).json({ Status: "Error", Details: "Session ID and OTP are required." });
   }
 
@@ -465,20 +508,149 @@ async function handleVerifyOtp(req: any, res: any) {
     return res.status(200).json({ Status: "Success", Details: "OTP Matched", Email: result.email });
   }
 
-  if (!apiKey || normalizedSessionId.startsWith("mock_")) {
-    if (normalizedOtp === "123456") {
-      return res.status(200).json({ Status: "Success", Details: "OTP Matched" });
-    }
-    return res.status(400).json({ Status: "Error", Details: "Invalid OTP" });
-  }
-
   try {
-    const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
-    const data = await fetchJson(`${baseUrl}/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`);
+    const data = await verifySmsOtpSession(normalizedSessionId, otp);
     return res.status(200).json(data);
   } catch (error: any) {
     console.error("2Factor OTP Verify Error:", error?.payload || error?.message || error);
     return res.status(error?.status || 500).json(error?.payload || { Status: "Error", Details: error?.message || "Failed to verify OTP" });
+  }
+}
+
+async function handleSendPasswordResetOtp(req: any, res: any) {
+  const identifier = String(req.body?.identifier || "").trim();
+  if (!identifier) {
+    return res.status(400).json({ error: "Please enter your email or mobile number." });
+  }
+
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const normalizedEmail = normalizeEmail(identifier);
+    const phoneVariants = buildPhoneVariants(identifier);
+    let userRow: any = null;
+
+    if (isValidEmail(normalizedEmail)) {
+      const { data, error } = await supabaseAdmin.from("users").select("*").eq("email", normalizedEmail).maybeSingle();
+      if (error) throw error;
+      userRow = data || null;
+    }
+
+    if (!userRow && phoneVariants.length) {
+      const { data, error } = await supabaseAdmin.from("users").select("*").in("phone_number", phoneVariants).limit(1);
+      if (error) throw error;
+      userRow = data?.[0] || null;
+    }
+
+    if (!userRow) {
+      return res.status(404).json({ error: "No account found with this email/mobile number." });
+    }
+
+    const phoneNumber = String(userRow.phone_number || userRow.data?.phoneNumber || "");
+    const normalizedPhone = normalizePhone(phoneNumber);
+    if (!normalizedPhone) {
+      return res.status(400).json({ error: "This account has no mobile number linked for OTP reset." });
+    }
+
+    const otpResponse = await sendSmsOtpToPhone(normalizedPhone);
+    if (String(otpResponse?.Status || "").toLowerCase() !== "success" || !otpResponse?.Details) {
+      return res.status(500).json({ error: String(otpResponse?.Details || "Failed to send OTP") });
+    }
+
+    const resetSessionId = `${PASSWORD_RESET_SESSION_PREFIX}${crypto.randomUUID()}`;
+    inMemoryPasswordResetSessions.set(resetSessionId, {
+      uid: userRow.id,
+      phoneNumber: normalizedPhone,
+      otpSessionId: String(otpResponse.Details),
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      verifiedAt: null,
+    });
+
+    return res.status(200).json({
+      message: "OTP sent to your registered mobile number.",
+      resetSessionId,
+      maskedPhone: maskPhoneNumber(normalizedPhone),
+    });
+  } catch (error: any) {
+    console.error("Password reset OTP send error:", error);
+    return res.status(error?.status || 500).json({ error: error?.message || "Failed to send password reset OTP" });
+  }
+}
+
+async function handleVerifyPasswordResetOtp(req: any, res: any) {
+  const resetSessionId = String(req.body?.resetSessionId || "").trim();
+  const otp = String(req.body?.otp || "").trim();
+  if (!resetSessionId || !otp) {
+    return res.status(400).json({ error: "Session ID and OTP are required." });
+  }
+
+  const session = inMemoryPasswordResetSessions.get(resetSessionId);
+  if (!session) {
+    return res.status(404).json({ error: "Reset session expired. Please request a new OTP." });
+  }
+  if (new Date(session.expiresAt).getTime() < Date.now()) {
+    inMemoryPasswordResetSessions.delete(resetSessionId);
+    return res.status(400).json({ error: "Reset session expired. Please request a new OTP." });
+  }
+
+  try {
+    const otpResult = await verifySmsOtpSession(session.otpSessionId, otp);
+    if (String(otpResult?.Status || "").toLowerCase() !== "success") {
+      return res.status(400).json({ error: String(otpResult?.Details || "Invalid OTP") });
+    }
+
+    const resetToken = `${PASSWORD_RESET_TOKEN_PREFIX}${crypto.randomUUID()}`;
+    inMemoryPasswordResetTokens.set(resetToken, {
+      uid: session.uid,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    });
+    inMemoryPasswordResetSessions.delete(resetSessionId);
+
+    return res.status(200).json({
+      message: "OTP verified. You can now reset your password.",
+      resetToken,
+    });
+  } catch (error: any) {
+    console.error("Password reset OTP verify error:", error);
+    return res.status(error?.status || 500).json({ error: error?.message || "Failed to verify OTP" });
+  }
+}
+
+async function handleResetPasswordWithOtp(req: any, res: any) {
+  const resetToken = String(req.body?.resetToken || "").trim();
+  const newPassword = String(req.body?.newPassword || "");
+  if (!resetToken || !newPassword) {
+    return res.status(400).json({ error: "Reset token and new password are required." });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters long." });
+  }
+
+  const tokenData = inMemoryPasswordResetTokens.get(resetToken);
+  if (!tokenData) {
+    return res.status(404).json({ error: "Reset token expired. Please restart password reset." });
+  }
+  if (new Date(tokenData.expiresAt).getTime() < Date.now()) {
+    inMemoryPasswordResetTokens.delete(resetToken);
+    return res.status(400).json({ error: "Reset token expired. Please restart password reset." });
+  }
+
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(tokenData.uid, {
+      password: newPassword,
+    });
+    if (error) throw error;
+
+    await supabaseAdmin.from("users").update({
+      force_password_change: false,
+      updated_at: new Date().toISOString(),
+    }).eq("id", tokenData.uid);
+
+    inMemoryPasswordResetTokens.delete(resetToken);
+    return res.status(200).json({ message: "Password reset successful." });
+  } catch (error: any) {
+    console.error("Password reset final step error:", error);
+    return res.status(error?.status || 500).json({ error: error?.message || "Failed to reset password." });
   }
 }
 
@@ -735,6 +907,9 @@ function getAction(req: any) {
 const handlers: Record<string, (req: any, res: any) => Promise<any> | any> = {
   "complete-signup": handleCompleteSignup,
   "resolve-phone-login": handleResolvePhoneLogin,
+  "send-password-reset-otp": handleSendPasswordResetOtp,
+  "verify-password-reset-otp": handleVerifyPasswordResetOtp,
+  "reset-password-with-otp": handleResetPasswordWithOtp,
   "send-email-otp": handleSendEmailOtp,
   "send-otp": handleSendOtp,
   "verify-otp": handleVerifyOtp,

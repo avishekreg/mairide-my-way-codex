@@ -1066,6 +1066,9 @@ const detectLanguageFromGeolocation = async (): Promise<string | null> => {
 
   const lat = position.coords.latitude;
   const lon = position.coords.longitude;
+  const siliguriLat = 26.7271;
+  const siliguriLng = 88.3953;
+  const nearSiliguri = getDistance(lat, lon, siliguriLat, siliguriLng) <= 100;
   const response = await fetch(
     `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
   ).catch(() => null);
@@ -1073,6 +1076,7 @@ const detectLanguageFromGeolocation = async (): Promise<string | null> => {
   const payload = await response.json().catch(() => null);
   const address = payload?.address || {};
   const state = String(address.state || address.state_district || '').trim().toLowerCase();
+  if (nearSiliguri || state === 'sikkim') return 'ne';
   if (!state) return null;
   return IN_STATE_LANGUAGE_MAP[state] || null;
 };
@@ -2401,6 +2405,15 @@ const AuthPage = ({
   const [step, setStep] = useState<'phone' | 'email-otp' | 'otp'>('phone');
   const [sessionId, setSessionId] = useState('');
   const [emailSessionId, setEmailSessionId] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetIdentifier, setResetIdentifier] = useState('');
+  const [resetSessionId, setResetSessionId] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [resetOtp, setResetOtp] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [confirmResetPassword, setConfirmResetPassword] = useState('');
+  const [resetMaskedPhone, setResetMaskedPhone] = useState('');
+  const [resetStep, setResetStep] = useState<'identifier' | 'otp' | 'password'>('identifier');
   const [truthDeclarationAccepted, setTruthDeclarationAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [marketingOptIn, setMarketingOptIn] = useState(true);
@@ -2439,6 +2452,91 @@ const AuthPage = ({
     }
 
     throw new Error("NOT_REGISTERED");
+  };
+
+  const resetForgotPasswordFlow = () => {
+    setShowForgotPassword(false);
+    setResetIdentifier('');
+    setResetSessionId('');
+    setResetToken('');
+    setResetOtp('');
+    setResetPassword('');
+    setConfirmResetPassword('');
+    setResetMaskedPhone('');
+    setResetStep('identifier');
+  };
+
+  const handleSendResetOtp = async () => {
+    if (!resetIdentifier.trim()) {
+      alert('Please enter your registered email or mobile number.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const response = await postAuthAction(
+        'send-password-reset-otp',
+        { identifier: resetIdentifier.trim() },
+        '/api/auth/send-password-reset-otp'
+      );
+      const data = await parseApiResponse(response, 'Failed to send reset OTP');
+      setResetSessionId(data.resetSessionId || '');
+      setResetMaskedPhone(data.maskedPhone || '');
+      setResetStep('otp');
+    } catch (error: any) {
+      alert(error.message || 'Failed to send reset OTP.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyResetOtp = async () => {
+    if (!resetSessionId || resetOtp.trim().length < 6) {
+      alert('Please enter the 6-digit OTP.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const response = await postAuthAction(
+        'verify-password-reset-otp',
+        { resetSessionId, otp: resetOtp.trim() },
+        '/api/auth/verify-password-reset-otp'
+      );
+      const data = await parseApiResponse(response, 'Failed to verify reset OTP');
+      setResetToken(data.resetToken || '');
+      setResetStep('password');
+      setResetOtp('');
+    } catch (error: any) {
+      alert(error.message || 'Invalid OTP.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmitResetPassword = async () => {
+    if (!resetPassword || resetPassword.length < 6) {
+      alert('Password must be at least 6 characters.');
+      return;
+    }
+    if (resetPassword !== confirmResetPassword) {
+      alert('Passwords do not match.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const response = await postAuthAction(
+        'reset-password-with-otp',
+        { resetToken, newPassword: resetPassword },
+        '/api/auth/reset-password-with-otp'
+      );
+      await parseApiResponse(response, 'Failed to reset password');
+      alert('Password reset successful. Please login with your new password.');
+      resetForgotPasswordFlow();
+      setAuthMode('login');
+    } catch (error: any) {
+      alert(error.message || 'Failed to reset password.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Pre-fill if user changes (e.g. after Google login)
@@ -3253,6 +3351,19 @@ const AuthPage = ({
                   onChange={(e) => setPassword(e.target.value)}
                 />
               )}
+              {!/^\+?[\d\s-]{10,}$/.test(username) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetIdentifier(username.trim());
+                    setShowForgotPassword(true);
+                    setResetStep('identifier');
+                  }}
+                  className="w-full text-right text-xs font-semibold text-mairide-accent hover:text-mairide-primary"
+                >
+                  Forgot password?
+                </button>
+              )}
               <button
                 onClick={handleLogin}
                 disabled={isLoading}
@@ -3283,6 +3394,107 @@ const AuthPage = ({
           </p>
         </div>
       </motion.div>
+
+      <AnimatePresence>
+        {showForgotPassword && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-mairide-primary/40 px-4 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ y: 10, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 10, opacity: 0 }}
+              className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Account recovery</p>
+                  <h3 className="mt-2 text-2xl font-black text-mairide-primary">Reset password with mobile OTP</h3>
+                </div>
+                <button
+                  onClick={resetForgotPasswordFlow}
+                  className="rounded-full bg-mairide-bg p-2 text-mairide-secondary hover:text-mairide-primary"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {resetStep === 'identifier' && (
+                <div className="mt-5 space-y-4">
+                  <input
+                    type="text"
+                    placeholder="Registered email or mobile number"
+                    value={resetIdentifier}
+                    onChange={(e) => setResetIdentifier(e.target.value)}
+                    className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                  />
+                  <button
+                    onClick={handleSendResetOtp}
+                    disabled={isLoading}
+                    className="w-full rounded-2xl bg-mairide-accent py-3 font-bold text-white"
+                  >
+                    {isLoading ? 'Sending OTP...' : 'Send OTP'}
+                  </button>
+                </div>
+              )}
+
+              {resetStep === 'otp' && (
+                <div className="mt-5 space-y-4">
+                  <p className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm text-mairide-secondary">
+                    OTP sent to registered mobile: <span className="font-bold text-mairide-primary">{resetMaskedPhone || 'linked number'}</span>
+                  </p>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    autoComplete="one-time-code"
+                    placeholder="Enter 6-digit OTP"
+                    value={resetOtp}
+                    onChange={(e) => setResetOtp(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+                    className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-center text-xl tracking-[0.18em] text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                  />
+                  <button
+                    onClick={handleVerifyResetOtp}
+                    disabled={isLoading || resetOtp.length !== 6}
+                    className="w-full rounded-2xl bg-mairide-accent py-3 font-bold text-white disabled:opacity-50"
+                  >
+                    {isLoading ? 'Verifying OTP...' : 'Verify OTP'}
+                  </button>
+                </div>
+              )}
+
+              {resetStep === 'password' && (
+                <div className="mt-5 space-y-4">
+                  <input
+                    type="password"
+                    placeholder="New password (min 6 characters)"
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Confirm new password"
+                    value={confirmResetPassword}
+                    onChange={(e) => setConfirmResetPassword(e.target.value)}
+                    className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                  />
+                  <button
+                    onClick={handleSubmitResetPassword}
+                    disabled={isLoading}
+                    className="w-full rounded-2xl bg-mairide-accent py-3 font-bold text-white disabled:opacity-50"
+                  >
+                    {isLoading ? 'Updating password...' : 'Update Password'}
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       <div className="mt-8 flex flex-col items-center space-y-4">
         <div className="flex items-center space-x-4 text-mairide-secondary text-xs">
@@ -14171,6 +14383,7 @@ const App = () => {
   const [translatorReady, setTranslatorReady] = useState(false);
   const [showLanguagePrompt, setShowLanguagePrompt] = useState(false);
   const [suggestedLanguage, setSuggestedLanguage] = useState<string>('en');
+  const [languagePromptOptions, setLanguagePromptOptions] = useState<string[]>(['en', 'hi']);
 
   useEffect(() => {
     if (!isLocalRazorpayEnabled()) return;
@@ -14447,14 +14660,25 @@ const App = () => {
 
     const runDetection = async () => {
       let detected = safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || detectBrowserPreferredLanguage();
+      let nearNepaliRegion = false;
       try {
         const geoDetected = await detectLanguageFromGeolocation();
-        if (geoDetected) detected = geoDetected;
+        if (geoDetected) {
+          detected = geoDetected;
+          nearNepaliRegion = geoDetected === 'ne';
+        }
       } catch {
         // fallback remains detected
       }
       if (!cancelled) {
-        setSuggestedLanguage(getSupportedUiLanguage(detected).value);
+        const normalizedSuggested = getSupportedUiLanguage(detected).value;
+        const options = new Set<string>([normalizedSuggested, 'hi', 'en']);
+        if (nearNepaliRegion) {
+          options.add('bn');
+          options.add('ne');
+        }
+        setSuggestedLanguage(normalizedSuggested);
+        setLanguagePromptOptions(Array.from(options));
         setShowLanguagePrompt(true);
       }
     };
@@ -14471,6 +14695,9 @@ const App = () => {
     safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, normalized);
     safeStorageSet('local', UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
     setShowLanguagePrompt(false);
+    window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 40);
+    window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 220);
+    window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 650);
   };
 
   if (loading) return <ErrorBoundary><LoadingScreen /></ErrorBoundary>;
@@ -14522,18 +14749,17 @@ const App = () => {
                   >
                     Continue in {getSupportedUiLanguage(suggestedLanguage).nativeLabel}
                   </button>
-                  <button
-                    onClick={() => commitUiLanguage('hi')}
-                    className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
-                  >
-                    हिंदी में जारी रखें
-                  </button>
-                  <button
-                    onClick={() => commitUiLanguage('en')}
-                    className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
-                  >
-                    Continue in English
-                  </button>
+                  {languagePromptOptions
+                    .filter((lang) => lang !== suggestedLanguage)
+                    .map((lang) => (
+                      <button
+                        key={lang}
+                        onClick={() => commitUiLanguage(lang)}
+                        className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
+                      >
+                        Continue in {getSupportedUiLanguage(lang).nativeLabel}
+                      </button>
+                    ))}
                 </div>
               </motion.div>
             </motion.div>
@@ -14629,18 +14855,17 @@ const App = () => {
                     >
                       Continue in {getSupportedUiLanguage(suggestedLanguage).nativeLabel}
                     </button>
-                    <button
-                      onClick={() => commitUiLanguage('hi')}
-                      className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
-                    >
-                      हिंदी में जारी रखें
-                    </button>
-                    <button
-                      onClick={() => commitUiLanguage('en')}
-                      className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
-                    >
-                      Continue in English
-                    </button>
+                    {languagePromptOptions
+                      .filter((lang) => lang !== suggestedLanguage)
+                      .map((lang) => (
+                        <button
+                          key={lang}
+                          onClick={() => commitUiLanguage(lang)}
+                          className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
+                        >
+                          Continue in {getSupportedUiLanguage(lang).nativeLabel}
+                        </button>
+                      ))}
                   </div>
                 </motion.div>
               </motion.div>
