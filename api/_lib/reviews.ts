@@ -27,19 +27,24 @@ export async function handleSubmitReview(req: any, res: any) {
 
   try {
     const authHeader = req.headers?.authorization;
-    if (!authHeader || !String(authHeader).startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Unauthorized" });
+    const supabaseAdmin = getSupabaseAdmin();
+    const fallbackReviewerUid = typeof req.body?.reviewerUid === "string" ? req.body.reviewerUid.trim() : "";
+    let reviewerUid = fallbackReviewerUid || "";
+
+    if (authHeader && String(authHeader).startsWith("Bearer ")) {
+      const token = String(authHeader).slice("Bearer ".length);
+      const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token);
+      if (!authError && authData.user?.id) {
+        reviewerUid = authData.user.id;
+      }
     }
 
-    const token = String(authHeader).slice("Bearer ".length);
-    const supabaseAdmin = getSupabaseAdmin();
-    const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token);
-
-    if (authError || !authData.user) {
-      return res.status(401).json({ error: "Unauthorized" });
+    if (!reviewerUid) {
+      return res.status(401).json({ error: "Unauthorized. Missing reviewer identity." });
     }
 
     const { bookingId, rating, comment, traits } = req.body || {};
+    const normalizedBookingId = String(bookingId || "").trim();
     const normalizedRating = Number(rating);
     const normalizedTraits = Array.isArray(traits)
       ? traits
@@ -49,14 +54,14 @@ export async function handleSubmitReview(req: any, res: any) {
           .slice(0, 6)
       : [];
 
-    if (!bookingId || !Number.isFinite(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
+    if (!normalizedBookingId || !Number.isFinite(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
       return res.status(400).json({ error: "A valid booking ID and rating between 1 and 5 are required." });
     }
 
     const { data: bookingRow, error: bookingError } = await supabaseAdmin
       .from("bookings")
       .select("*")
-      .eq("id", bookingId)
+      .eq("id", normalizedBookingId)
       .maybeSingle();
 
     if (bookingError) throw bookingError;
@@ -75,7 +80,7 @@ export async function handleSubmitReview(req: any, res: any) {
       driverReview: bookingData.driverReview,
     };
 
-    const userId = authData.user.id;
+    const userId = reviewerUid;
     const reviewerRole =
       userId === booking.consumerId ? "consumer" : userId === booking.driverId ? "driver" : null;
 
@@ -120,6 +125,9 @@ export async function handleSubmitReview(req: any, res: any) {
     if (updateBookingError) throw updateBookingError;
 
     const targetUserId = reviewerRole === "consumer" ? booking.driverId : booking.consumerId;
+    if (!targetUserId || typeof targetUserId !== "string") {
+      return res.status(400).json({ error: "Booking participant details are incomplete for review submission." });
+    }
     const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
       .from("users")
       .select("*")

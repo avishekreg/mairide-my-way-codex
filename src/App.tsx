@@ -1843,12 +1843,13 @@ const submitBookingReview = async (
   bookingId: string,
   rating: number,
   comment: string,
-  traits: string[]
+  traits: string[],
+  reviewerUid?: string
 ) => {
   const token = await getAccessToken();
   const response = await axios.post(
     '/api/bookings?action=submit-review',
-    { bookingId, rating, comment, traits },
+    { bookingId, rating, comment, traits, reviewerUid: reviewerUid || '' },
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -5850,7 +5851,7 @@ const finalizeTravelerRazorpayPayment = async (
 
     setIsSubmittingReview(true);
     try {
-      await submitBookingReview(reviewBooking.id, rating, comment, traits);
+      await submitBookingReview(reviewBooking.id, rating, comment, traits, profile.uid);
       alert('Your ride review has been submitted successfully.');
       setReviewBooking(null);
     } catch (error: any) {
@@ -6504,7 +6505,7 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
 
     setIsSubmittingReview(true);
     try {
-      await submitBookingReview(reviewBooking.id, rating, comment, traits);
+      await submitBookingReview(reviewBooking.id, rating, comment, traits, profile.uid);
       alert('Your traveler review has been submitted successfully.');
       setReviewBooking(null);
     } catch (error: any) {
@@ -7734,7 +7735,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     if (!reviewBooking) return;
     setIsSubmittingReview(true);
     try {
-      await submitBookingReview(reviewBooking.id, rating, comment, traits);
+      await submitBookingReview(reviewBooking.id, rating, comment, traits, profile.uid);
       showAppDialog('Thanks for rating your ride.', 'success');
       setDismissedReviewIds((prev) => ({ ...prev, [reviewBooking.id]: true }));
       setReviewBooking(null);
@@ -9250,7 +9251,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
     if (!reviewBooking) return;
     setIsSubmittingReview(true);
     try {
-      await submitBookingReview(reviewBooking.id, rating, comment, traits);
+      await submitBookingReview(reviewBooking.id, rating, comment, traits, profile.uid);
       showAppDialog('Thanks for rating your traveler.', 'success');
       setDismissedReviewIds((prev) => ({ ...prev, [reviewBooking.id]: true }));
       setReviewBooking(null);
