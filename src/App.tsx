@@ -840,6 +840,33 @@ const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
 const CONSENT_VERSION = 'consent-v1';
 const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const safeStorageGet = (storageType: 'local' | 'session', key: string) => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const storage = storageType === 'local' ? window.localStorage : window.sessionStorage;
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+const safeStorageSet = (storageType: 'local' | 'session', key: string, value: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const storage = storageType === 'local' ? window.localStorage : window.sessionStorage;
+    storage.setItem(key, value);
+  } catch {
+    // Ignore storage-write failures in restricted browsers
+  }
+};
+const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const storage = storageType === 'local' ? window.localStorage : window.sessionStorage;
+    storage.removeItem(key);
+  } catch {
+    // Ignore storage-remove failures in restricted browsers
+  }
+};
 const adminApiPath = (action: string) => `/api/admin-api?action=${encodeURIComponent(action)}`;
 const adminConfigPath = adminApiPath("config");
 const adminSaveConfigPath = adminApiPath("save-config");
@@ -2559,8 +2586,8 @@ const AuthPage = ({
             }
           }
 
-          sessionStorage.setItem(PHONE_LOGIN_PROFILE_KEY, existingProfile.uid);
-          sessionStorage.setItem(PHONE_LOGIN_NUMBER_KEY, normalizePhoneForAuth(phoneNumber || username));
+          safeStorageSet('session', PHONE_LOGIN_PROFILE_KEY, existingProfile.uid);
+          safeStorageSet('session', PHONE_LOGIN_NUMBER_KEY, normalizePhoneForAuth(phoneNumber || username));
 
           if (!auth.currentUser || !auth.currentUser.isAnonymous) {
             try {
@@ -2701,7 +2728,7 @@ const AuthPage = ({
 
         // Trigger Phone OTP Login
         setPhoneNumber(normalizedLoginPhone);
-        sessionStorage.setItem(PHONE_LOGIN_NUMBER_KEY, normalizedLoginPhone);
+        safeStorageSet('session', PHONE_LOGIN_NUMBER_KEY, normalizedLoginPhone);
         const response = await postAuthAction('send-otp', { phoneNumber: normalizedLoginPhone }, '/api/auth/send-otp');
         const data = await parseApiResponse(response, 'Failed to send OTP');
         if (data.Status === 'Success') {
@@ -2735,7 +2762,7 @@ const AuthPage = ({
     setIsLoading(true);
     setNotRegisteredError(false);
     try {
-      sessionStorage.setItem('mairide_oauth_mode', authMode);
+      safeStorageSet('session', 'mairide_oauth_mode', authMode);
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       if (result?.user) {
@@ -2759,7 +2786,7 @@ const AuthPage = ({
 
   const handleProfileSetup = async (user: User, phone?: string, name?: string, isSignUp: boolean = false) => {
     const path = `users/${user.uid}`;
-    const mappedPhoneProfileId = !isSignUp && user.isAnonymous ? sessionStorage.getItem(PHONE_LOGIN_PROFILE_KEY) : null;
+    const mappedPhoneProfileId = !isSignUp && user.isAnonymous ? safeStorageGet('session', PHONE_LOGIN_PROFILE_KEY) : null;
 
     if (mappedPhoneProfileId) {
       return;
@@ -14136,7 +14163,7 @@ const App = () => {
   const [role, setRole] = useState<'consumer' | 'driver'>('consumer');
   const [uiLanguage, setUiLanguage] = useState<string>(() => {
     if (typeof window === 'undefined') return 'en';
-    return localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || 'en';
+    return safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || 'en';
   });
   const [translatorReady, setTranslatorReady] = useState(false);
   const [showLanguagePrompt, setShowLanguagePrompt] = useState(false);
@@ -14180,8 +14207,8 @@ const App = () => {
       }
 
       if (u) {
-        const mappedPhoneProfileId = u.isAnonymous ? sessionStorage.getItem(PHONE_LOGIN_PROFILE_KEY) : null;
-        const pendingPhoneLogin = u.isAnonymous ? sessionStorage.getItem(PHONE_LOGIN_NUMBER_KEY) : null;
+        const mappedPhoneProfileId = u.isAnonymous ? safeStorageGet('session', PHONE_LOGIN_PROFILE_KEY) : null;
+        const pendingPhoneLogin = u.isAnonymous ? safeStorageGet('session', PHONE_LOGIN_NUMBER_KEY) : null;
         const profileDocId = mappedPhoneProfileId || u.uid;
 
         // Listen to profile changes
@@ -14189,7 +14216,7 @@ const App = () => {
           if (snapshot.exists()) {
             setProfile(snapshot.data() as UserProfile);
             if (u.isAnonymous) {
-              sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
+              safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
             }
             setLoading(false);
           } else if (u.email && !u.isAnonymous) {
@@ -14219,7 +14246,7 @@ const App = () => {
                 }
                 setLoading(false);
               } else {
-                const oauthMode = sessionStorage.getItem('mairide_oauth_mode');
+                const oauthMode = safeStorageGet('session', 'mairide_oauth_mode');
                 if (oauthMode === 'signup') {
                   const newProfile: UserProfile = {
                     uid: u.uid,
@@ -14235,9 +14262,9 @@ const App = () => {
                   await setDoc(doc(db, 'users', u.uid), newProfile);
                   await walletService.initializeUserWallet(u.uid);
                   setProfile(newProfile);
-                  sessionStorage.removeItem('mairide_oauth_mode');
+                  safeStorageRemove('session', 'mairide_oauth_mode');
                 } else {
-                  sessionStorage.removeItem('mairide_oauth_mode');
+                  safeStorageRemove('session', 'mairide_oauth_mode');
                   setNotRegisteredError(true);
                   await signOut(auth);
                   setProfile(null);
@@ -14253,8 +14280,8 @@ const App = () => {
               try {
                 const matchedProfile = await findUserProfileByPhone(pendingPhoneLogin);
                 if (matchedProfile) {
-                  sessionStorage.setItem(PHONE_LOGIN_PROFILE_KEY, matchedProfile.uid);
-                  sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
+                  safeStorageSet('session', PHONE_LOGIN_PROFILE_KEY, matchedProfile.uid);
+                  safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
                   setProfile(matchedProfile);
                   setNotRegisteredError(false);
                   setLoading(false);
@@ -14265,8 +14292,8 @@ const App = () => {
               }
             }
             if (u.isAnonymous) {
-              sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
-              sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
+              safeStorageRemove('session', PHONE_LOGIN_PROFILE_KEY);
+              safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
             }
             setProfile(null);
             setLoading(false);
@@ -14277,8 +14304,8 @@ const App = () => {
           setLoading(false);
         });
       } else {
-        sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
-        sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
+        safeStorageRemove('session', PHONE_LOGIN_PROFILE_KEY);
+        safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
         setProfile(null);
         setLoading(false);
       }
@@ -14291,8 +14318,8 @@ const App = () => {
   }, []);
 
   const handleLogout = () => {
-    sessionStorage.removeItem(PHONE_LOGIN_PROFILE_KEY);
-    sessionStorage.removeItem(PHONE_LOGIN_NUMBER_KEY);
+    safeStorageRemove('session', PHONE_LOGIN_PROFILE_KEY);
+    safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
     return signOut(auth);
   };
 
@@ -14399,7 +14426,7 @@ const App = () => {
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const lang = getSupportedUiLanguage(uiLanguage).value;
-    localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, lang);
+    safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, lang);
     document.documentElement.lang = lang;
     setGoogleTranslateCookie(lang);
     if (translatorReady) {
@@ -14409,14 +14436,14 @@ const App = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined' || user) return;
-    const sessionPrompted = sessionStorage.getItem(UI_LANGUAGE_PROMPT_SESSION_KEY) === '1';
+    const sessionPrompted = safeStorageGet('session', UI_LANGUAGE_PROMPT_SESSION_KEY) === '1';
     if (sessionPrompted) return;
 
     let cancelled = false;
-    sessionStorage.setItem(UI_LANGUAGE_PROMPT_SESSION_KEY, '1');
+    safeStorageSet('session', UI_LANGUAGE_PROMPT_SESSION_KEY, '1');
 
     const runDetection = async () => {
-      let detected = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || detectBrowserPreferredLanguage();
+      let detected = safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || detectBrowserPreferredLanguage();
       try {
         const geoDetected = await detectLanguageFromGeolocation();
         if (geoDetected) detected = geoDetected;
@@ -14438,8 +14465,8 @@ const App = () => {
   const commitUiLanguage = (nextLanguage: string) => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
     setUiLanguage(normalized);
-    localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, normalized);
-    localStorage.setItem(UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
+    safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, normalized);
+    safeStorageSet('local', UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
     setShowLanguagePrompt(false);
   };
 
