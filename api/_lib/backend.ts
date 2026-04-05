@@ -973,8 +973,20 @@ export async function handleUserUploadDriverDoc(req: ReqLike, res: ResLike) {
       ? req.headers.authorization[0]
       : req.headers.authorization;
     const user = await verifyTokenFromHeader(authHeader);
-    if (user.id !== driverId) {
-      return res.status(403).json({ error: "Forbidden" });
+    const supabaseAdmin = getSupabaseAdmin();
+    const requestedDriverId = String(driverId);
+    let targetUserId = user.id;
+
+    if (requestedDriverId !== user.id && user.email) {
+      const { data: profileByEmail, error: profileByEmailError } = await supabaseAdmin
+        .from("users")
+        .select("id,email")
+        .eq("email", String(user.email).toLowerCase())
+        .maybeSingle();
+      if (profileByEmailError) throw profileByEmailError;
+      if (profileByEmail?.id) {
+        targetUserId = String(profileByEmail.id);
+      }
     }
 
     if (String(path).includes("..") || String(path).includes("/")) {
@@ -987,8 +999,7 @@ export async function handleUserUploadDriverDoc(req: ReqLike, res: ResLike) {
     }
 
     const { contentType, buffer } = parseDataUrlPayload(String(dataUrl));
-    const storagePath = `drivers/${driverId}/${path}`;
-    const supabaseAdmin = getSupabaseAdmin();
+    const storagePath = `drivers/${targetUserId}/${path}`;
     const { error: uploadError } = await supabaseAdmin.storage
       .from(bucket)
       .upload(storagePath, buffer, {
@@ -1022,37 +1033,74 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
       ? req.headers.authorization[0]
       : req.headers.authorization;
     const user = await verifyTokenFromHeader(authHeader);
-    if (user.id !== driverId) {
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const requestedDriverId = String(driverId);
+    let targetUserId = user.id || requestedDriverId;
+    let existingProfile = await getUserProfile(targetUserId);
+
+    if (!existingProfile && requestedDriverId && requestedDriverId !== targetUserId) {
+      const fallbackProfile = await getUserProfile(requestedDriverId);
+      if (fallbackProfile) {
+        existingProfile = fallbackProfile;
+        targetUserId = requestedDriverId;
+      }
+    }
+
+    if (!existingProfile && user.email) {
+      const { data: profileByEmail, error: profileByEmailError } = await supabaseAdmin
+        .from("users")
+        .select("*")
+        .eq("email", String(user.email).toLowerCase())
+        .maybeSingle();
+      if (profileByEmailError) throw profileByEmailError;
+      if (profileByEmail) {
+        existingProfile = profileByEmail;
+        targetUserId = profileByEmail.id;
+      }
+    }
+
+    const expectedEmail = String(existingProfile?.email || user.email || "").toLowerCase();
+    const requesterEmail = String(user.email || "").toLowerCase();
+    const isSelfMatch = user.id === targetUserId;
+    const isEmailMatch = Boolean(expectedEmail && requesterEmail && expectedEmail === requesterEmail);
+    if (!isSelfMatch && !isEmailMatch) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const existingProfile = await getUserProfile(driverId);
-    if (!existingProfile) {
-      return res.status(404).json({ error: "Driver profile not found" });
-    }
-
-    const { error } = await getSupabaseAdmin()
-      .from("users")
-      .update({
+    const now = new Date().toISOString();
+    const baseData = (existingProfile?.data as Record<string, any>) || {};
+    const row = {
+      id: targetUserId,
+      email: expectedEmail || null,
+      display_name: existingProfile?.display_name || baseData.displayName || user.email || "Driver",
+      role: "driver",
+      status: existingProfile?.status || baseData.status || "active",
+      phone_number: existingProfile?.phone_number || baseData.phoneNumber || null,
+      onboarding_complete: true,
+      verification_status: "pending",
+      rejection_reason: null,
+      verified_by: null,
+      admin_role: existingProfile?.admin_role || null,
+      force_password_change:
+        typeof existingProfile?.force_password_change === "boolean"
+          ? existingProfile.force_password_change
+          : Boolean(baseData.forcePasswordChange),
+      driver_details: driverDetails,
+      data: {
+        ...baseData,
+        uid: targetUserId,
         role: "driver",
-        onboarding_complete: true,
-        verification_status: "pending",
-        rejection_reason: null,
-        verified_by: null,
-        driver_details: driverDetails,
-        data: {
-          ...((existingProfile.data as Record<string, any>) || {}),
-          uid: driverId,
-          role: "driver",
-          onboardingComplete: true,
-          verificationStatus: "pending",
-          rejectionReason: null,
-          verifiedBy: null,
-          driverDetails,
-        },
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", driverId);
+        onboardingComplete: true,
+        verificationStatus: "pending",
+        rejectionReason: null,
+        verifiedBy: null,
+        driverDetails,
+      },
+      updated_at: now,
+    };
+
+    const { error } = await supabaseAdmin.from("users").upsert(row, { onConflict: "id" });
 
     if (error) throw error;
 

@@ -3832,13 +3832,17 @@ const DriverOnboarding = ({
           },
         }
       );
-      await updateDoc(doc(db, 'users', profile.uid), {
-        onboardingComplete: true,
-        verificationStatus: 'pending',
-        rejectionReason: null,
-        verifiedBy: null,
-        driverDetails: updatedProfile.driverDetails,
-      });
+      try {
+        await updateDoc(doc(db, 'users', profile.uid), {
+          onboardingComplete: true,
+          verificationStatus: 'pending',
+          rejectionReason: null,
+          verifiedBy: null,
+          driverDetails: updatedProfile.driverDetails,
+        });
+      } catch (firestoreSyncError) {
+        console.warn('Driver onboarding Firestore mirror sync failed:', firestoreSyncError);
+      }
       onComplete();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${profile.uid}`);
