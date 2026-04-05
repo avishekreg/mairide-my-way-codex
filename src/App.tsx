@@ -280,6 +280,41 @@ const fileToDataUrl = (file: File) =>
     reader.readAsDataURL(file);
   });
 
+const compressDataUrlImage = (dataUrl: string, maxEdge = 1280, quality = 0.76) =>
+  new Promise<string>((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const sourceWidth = image.naturalWidth || image.width;
+        const sourceHeight = image.naturalHeight || image.height;
+        if (!sourceWidth || !sourceHeight) {
+          resolve(dataUrl);
+          return;
+        }
+
+        const scale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
+        const width = Math.max(1, Math.round(sourceWidth * scale));
+        const height = Math.max(1, Math.round(sourceHeight * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+
+        ctx.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    image.onerror = () => resolve(dataUrl);
+    image.src = dataUrl;
+  });
+
 const generateRideOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 
 const maybeActivateRideLifecycle = async (bookingId: string) => {
@@ -4010,6 +4045,7 @@ const DriverOnboarding = ({
   const handleCapture = async (image: string) => {
     if (capturingField) {
       try {
+        const normalizedImage = await compressDataUrlImage(image);
         const location = await getCurrentLocation();
         const geoTagFieldMap: Record<string, string> = {
           selfiePhoto: 'selfieGeoTag',
@@ -4024,7 +4060,7 @@ const DriverOnboarding = ({
 
         setFormData(prev => ({ 
           ...prev, 
-          [capturingField]: image,
+          [capturingField]: normalizedImage,
           ...(geoTagField ? { [geoTagField]: location } : {}),
           ...(capturingField.startsWith('aadhaar') ? { aadhaarGeoTag: location } : {}),
           ...(capturingField.startsWith('dl') ? { dlGeoTag: location } : {})
@@ -4032,7 +4068,8 @@ const DriverOnboarding = ({
       } catch (error) {
         console.error("Geo-tagging failed:", error);
         // Still set the image even if geo-tagging fails, but maybe alert the user
-        setFormData(prev => ({ ...prev, [capturingField]: image }));
+        const normalizedImage = await compressDataUrlImage(image);
+        setFormData(prev => ({ ...prev, [capturingField]: normalizedImage }));
       }
       setCapturingField(null);
     }
@@ -4116,19 +4153,24 @@ const DriverOnboarding = ({
         }
       );
       try {
-        await updateDoc(doc(db, 'users', profile.uid), {
+        await setDoc(doc(db, 'users', profile.uid), {
           onboardingComplete: true,
           verificationStatus: 'pending',
           rejectionReason: null,
           verifiedBy: null,
           driverDetails: updatedProfile.driverDetails,
-        });
+        }, { merge: true });
       } catch (firestoreSyncError) {
         console.warn('Driver onboarding Firestore mirror sync failed:', firestoreSyncError);
       }
       onComplete();
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${profile.uid}`);
+      console.error('Driver onboarding submit failed:', error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : (error as any)?.response?.data?.error || 'Failed to complete setup. Please retry.';
+      showAppDialog(message, 'error', 'Complete setup failed');
     } finally {
       setIsSubmitting(false);
     }
