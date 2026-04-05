@@ -55,6 +55,10 @@ function normalizeEmail(email: unknown) {
   return String(email || "").trim().toLowerCase();
 }
 
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email);
+}
+
 function normalizeOtpValue(value: unknown) {
   return String(value || "").trim();
 }
@@ -262,6 +266,30 @@ async function fetchJson(url: string) {
   }
 
   return payload;
+}
+
+async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
+  const target = normalizeEmail(email);
+  if (!target) return null;
+
+  let page = 1;
+  const perPage = 200;
+
+  while (page <= 20) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+    if (error) throw error;
+
+    const users = data?.users || [];
+    const found = users.find((entry: any) => normalizeEmail(entry?.email) === target);
+    if (found) return found;
+    if (users.length < perPage) break;
+    page += 1;
+  }
+
+  return null;
 }
 
 function buildSignupRow(input: {
@@ -502,6 +530,9 @@ async function handleCompleteSignup(req: any, res: any) {
     const supabaseAdmin = getSupabaseAdmin();
     const normalizedEmail = normalizeEmail(email);
     const normalizedPhone = normalizePhone(phoneNumber);
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ error: "Please enter a valid email address." });
+    }
     const normalizedReferralCode = String(referralCodeInput || "").trim().toUpperCase();
     const ownReferralCode = await generateUniqueReferralCode(supabaseAdmin);
     let referredBy: string | null = null;
@@ -534,8 +565,75 @@ async function handleCompleteSignup(req: any, res: any) {
 
     if (authError || !authData.user) {
       const message = authError?.message || "Failed to create auth user";
-      const status = /already been registered|already registered|already exists/i.test(message) ? 409 : 500;
-      return res.status(status).json({ error: message });
+      const isDuplicate = /already been registered|already registered|already exists/i.test(message);
+
+      if (!isDuplicate) {
+        return res.status(500).json({ error: message });
+      }
+
+      const existingAuthUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail);
+      if (!existingAuthUser?.id) {
+        return res.status(409).json({ error: "A user with this email already exists. Please sign in instead." });
+      }
+
+      const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
+        .from("users")
+        .select("id")
+        .eq("id", existingAuthUser.id)
+        .maybeSingle();
+
+      if (existingProfileError) {
+        return res.status(500).json({ error: existingProfileError.message || "Failed to recover existing account profile." });
+      }
+
+      if (!existingProfile) {
+        const recoveredRow = buildSignupRow({
+          uid: existingAuthUser.id,
+          email: normalizedEmail,
+          displayName,
+          phoneNumber: normalizedPhone || normalizePhone(existingAuthUser.phone),
+          role,
+          referralCode: ownReferralCode,
+          referredBy,
+          referralPath,
+          consents,
+        });
+
+        const { error: recoverProfileError } = await supabaseAdmin
+          .from("users")
+          .upsert(recoveredRow, { onConflict: "id" });
+        if (recoverProfileError) {
+          return res.status(500).json({ error: recoverProfileError.message || "Failed to recover existing account profile." });
+        }
+
+        const joiningBonus = role === "driver" ? DRIVER_JOINING_BONUS : TRAVELER_JOINING_BONUS;
+        const txId = `init_${existingAuthUser.id}`;
+        await supabaseAdmin.from("transactions").upsert(
+          {
+            id: txId,
+            user_id: existingAuthUser.id,
+            type: "wallet_topup",
+            status: "completed",
+            data: {
+              id: txId,
+              userId: existingAuthUser.id,
+              type: "wallet_topup",
+              amount: joiningBonus,
+              currency: "MAICOIN",
+              status: "completed",
+              description: role === "driver" ? "Driver joining bonus" : "Traveler joining bonus",
+              createdAt: new Date().toISOString(),
+            },
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "id" }
+        );
+      }
+
+      return res.status(409).json({
+        error: "A user with this email already exists. Please sign in or reset your password.",
+      });
     }
 
     const row = buildSignupRow({

@@ -17,6 +17,10 @@ function getSupabaseAdmin() {
 }
 
 export async function handleSubmitReview(req: any, res: any) {
+  if (req.method === "OPTIONS") {
+    return res.status(200).json({ ok: true });
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -80,7 +84,9 @@ export async function handleSubmitReview(req: any, res: any) {
     }
 
     const bookingCompleted =
-      booking.status === "completed" || booking.rideLifecycleStatus === "completed";
+      booking.status === "completed"
+      || booking.rideLifecycleStatus === "completed"
+      || Boolean((bookingData as Record<string, any>)?.rideEndedAt);
     if (!bookingCompleted) {
       return res.status(400).json({ error: "Reviews can only be submitted after the ride is completed." });
     }
@@ -88,18 +94,6 @@ export async function handleSubmitReview(req: any, res: any) {
     const reviewField = reviewerRole === "consumer" ? "consumerReview" : "driverReview";
     if (booking[reviewField]) {
       return res.status(400).json({ error: "You have already submitted a review for this ride." });
-    }
-
-    const targetUserId = reviewerRole === "consumer" ? booking.driverId : booking.consumerId;
-    const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
-      .from("users")
-      .select("*")
-      .eq("id", targetUserId)
-      .maybeSingle();
-
-    if (targetProfileError) throw targetProfileError;
-    if (!targetProfile) {
-      return res.status(404).json({ error: "The user being reviewed could not be found." });
     }
 
     const now = new Date().toISOString();
@@ -124,6 +118,23 @@ export async function handleSubmitReview(req: any, res: any) {
       .eq("id", bookingId);
 
     if (updateBookingError) throw updateBookingError;
+
+    const targetUserId = reviewerRole === "consumer" ? booking.driverId : booking.consumerId;
+    const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
+      .from("users")
+      .select("*")
+      .eq("id", targetUserId)
+      .maybeSingle();
+
+    if (targetProfileError) throw targetProfileError;
+    if (!targetProfile) {
+      return res.status(200).json({
+        message: "Review submitted successfully",
+        review: reviewPayload,
+        reviewStats: null,
+        warning: "Review saved, but aggregate stats could not be updated because the reviewed profile is missing.",
+      });
+    }
 
     const targetData = { ...((targetProfile.data as Record<string, any>) || {}) };
     const existingStats = targetData.reviewStats || {};
