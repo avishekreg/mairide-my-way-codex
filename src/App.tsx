@@ -14652,6 +14652,12 @@ const App = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined' || user) return;
+    const languageSaved = Boolean(safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY));
+    const promptSeen = safeStorageGet('local', UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
+    if (languageSaved && promptSeen) {
+      setShowLanguagePrompt(false);
+      return;
+    }
     const sessionPrompted = safeStorageGet('session', UI_LANGUAGE_PROMPT_SESSION_KEY) === '1';
     if (sessionPrompted) return;
 
