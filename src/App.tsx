@@ -2076,15 +2076,21 @@ const LoadingScreen = () => (
   </div>
 );
 
-const AppFooter = () => (
-  <footer className="px-4 pb-6">
-    <div className="max-w-7xl mx-auto flex justify-center">
-      <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
-        Release {APP_VERSION} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
-      </p>
-    </div>
-  </footer>
-);
+const AppFooter = () => {
+  const { config } = useAppConfig();
+  const configuredVersion = String(config?.appVersion || '').trim();
+  const releaseVersion = configuredVersion || APP_VERSION;
+
+  return (
+    <footer className="px-4 pb-6">
+      <div className="max-w-7xl mx-auto flex justify-center">
+        <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
+          Release {releaseVersion} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
+        </p>
+      </div>
+    </footer>
+  );
+};
 
 const AppDialogHost = () => {
   const [dialog, setDialog] = useState<AppDialogDetail | null>(null);
