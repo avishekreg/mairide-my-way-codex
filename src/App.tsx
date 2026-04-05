@@ -4107,7 +4107,6 @@ const CameraCapture = ({ onCapture, onCancel, title }: { onCapture: (image: stri
 const WalletDashboard = ({ profile }: { profile: UserProfile }) => {
   const [stats, setStats] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
   const [driverCompletedBookings, setDriverCompletedBookings] = useState<Booking[]>([]);
   const [showEarningsDetail, setShowEarningsDetail] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -12896,6 +12895,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map'>('revenue');
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
   const hasMapsIssue = Boolean(loadError || authFailure);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showAddUser, setShowAddUser] = useState(false);
