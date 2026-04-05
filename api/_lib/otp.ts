@@ -16,7 +16,13 @@ function normalizeEmail(email: unknown) {
 }
 
 function normalizeOtpValue(value: unknown) {
-  return String(value || "").trim();
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const compactDigits = raw.replace(/[^\d]/g, "");
+  if (compactDigits.length >= 4 && compactDigits.length <= 6) return compactDigits;
+  const match = raw.match(/\b(\d{4,6})\b/);
+  if (match?.[1]) return match[1];
+  return compactDigits;
 }
 
 async function fetchJson(url: string, method: "GET" | "POST" = "GET") {

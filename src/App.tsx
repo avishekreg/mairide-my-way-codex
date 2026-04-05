@@ -3455,7 +3455,7 @@ const AuthPage = ({
                   className="w-full px-5 py-4 bg-mairide-bg border border-mairide-secondary rounded-[28px] outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center text-xl tracking-[0.18em] font-semibold"
                   value={otp}
                   maxLength={6}
-                  onChange={(e) => setOtp(e.target.value)}
+                  onChange={(e) => setOtp(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
                 />
                 <button
                   onClick={handleVerifyEmailOtp}
@@ -3496,7 +3496,7 @@ const AuthPage = ({
                   className="w-full px-5 py-4 bg-mairide-bg border border-mairide-secondary rounded-[28px] outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center text-xl tracking-[0.18em] font-semibold"
                   value={otp}
                   maxLength={6}
-                  onChange={(e) => setOtp(e.target.value)}
+                  onChange={(e) => setOtp(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
                 />
                 <button
                   onClick={handleVerifyOtp}
@@ -3538,7 +3538,7 @@ const AuthPage = ({
                 className="w-full px-5 py-4 bg-mairide-bg border border-mairide-secondary rounded-[28px] outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary text-center text-xl tracking-[0.18em] font-semibold"
                 value={otp}
                 maxLength={6}
-                onChange={(e) => setOtp(e.target.value)}
+                onChange={(e) => setOtp(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
               />
               <button
                 onClick={handleVerifyOtp}
