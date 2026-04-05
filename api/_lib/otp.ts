@@ -69,7 +69,7 @@ export async function handleSendOtp(req: ReqLike, res: ResLike) {
   try {
     const data = await fetchJson(
       `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/AUTOGEN2`,
-      "POST"
+      "GET"
     );
     return res.status(200).json(data);
   } catch (error: any) {
@@ -97,7 +97,7 @@ export async function handleSendEmailOtp(req: ReqLike, res: ResLike) {
   try {
     const data = await fetchJson(
       `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/EMAIL/${encodeURIComponent(normalizedEmail)}/AUTOGEN`,
-      "POST"
+      "GET"
     );
     return res.status(200).json(data);
   } catch (error: any) {
@@ -128,7 +128,7 @@ export async function handleVerifyOtp(req: ReqLike, res: ResLike) {
   try {
     const data = await fetchJson(
       `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`,
-      "POST"
+      "GET"
     );
     return res.status(200).json(data);
   } catch (error: any) {

@@ -324,7 +324,7 @@ async function sendSmsOtpToPhone(phoneNumber: string, purpose: "login" | "passwo
   const templateName = /voice|call/i.test(selectedTemplate) ? "AUTOGEN2" : selectedTemplate;
   return fetchJson(
     `${baseUrl}/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/${encodeURIComponent(templateName)}`,
-    "POST"
+    "GET"
   );
 }
 
@@ -351,7 +351,7 @@ async function verifySmsOtpSession(sessionId: string, otp: string) {
   }
   return fetchJson(
     `${baseUrl}/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`,
-    "POST"
+    "GET"
   );
 }
 
