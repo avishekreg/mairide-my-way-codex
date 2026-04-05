@@ -16,6 +16,16 @@ function getSupabaseAdmin() {
   });
 }
 
+function formatSupabaseError(error: any, fallback: string) {
+  if (!error) return fallback;
+  if (typeof error === "string" && error.trim()) return error;
+  if (typeof error?.message === "string" && error.message.trim()) return error.message;
+  if (typeof error?.details === "string" && error.details.trim()) return error.details;
+  if (typeof error?.hint === "string" && error.hint.trim()) return error.hint;
+  if (typeof error?.code === "string") return `${fallback} (${error.code})`;
+  return fallback;
+}
+
 export async function handleSubmitReview(req: any, res: any) {
   if (req.method === "OPTIONS") {
     return res.status(200).json({ ok: true });
@@ -64,7 +74,11 @@ export async function handleSubmitReview(req: any, res: any) {
       .eq("id", normalizedBookingId)
       .maybeSingle();
 
-    if (bookingError) throw bookingError;
+    if (bookingError) {
+      return res.status(500).json({
+        error: formatSupabaseError(bookingError, "Failed to fetch booking for review."),
+      });
+    }
     if (!bookingRow) {
       return res.status(404).json({ error: "Booking not found." });
     }
@@ -120,9 +134,13 @@ export async function handleSubmitReview(req: any, res: any) {
         data: updatedBookingData,
         updated_at: now,
       })
-      .eq("id", bookingId);
+      .eq("id", normalizedBookingId);
 
-    if (updateBookingError) throw updateBookingError;
+    if (updateBookingError) {
+      return res.status(500).json({
+        error: formatSupabaseError(updateBookingError, "Failed to save review on booking."),
+      });
+    }
 
     const targetUserId = reviewerRole === "consumer" ? booking.driverId : booking.consumerId;
     if (!targetUserId || typeof targetUserId !== "string") {
@@ -134,7 +152,11 @@ export async function handleSubmitReview(req: any, res: any) {
       .eq("id", targetUserId)
       .maybeSingle();
 
-    if (targetProfileError) throw targetProfileError;
+    if (targetProfileError) {
+      return res.status(500).json({
+        error: formatSupabaseError(targetProfileError, "Failed to load reviewed profile."),
+      });
+    }
     if (!targetProfile) {
       return res.status(200).json({
         message: "Review submitted successfully",
@@ -174,7 +196,11 @@ export async function handleSubmitReview(req: any, res: any) {
       .update(updatePayload)
       .eq("id", targetUserId);
 
-    if (updateUserError) throw updateUserError;
+    if (updateUserError) {
+      return res.status(500).json({
+        error: formatSupabaseError(updateUserError, "Review saved, but user rating update failed."),
+      });
+    }
 
     return res.status(200).json({
       message: "Review submitted successfully",
@@ -183,6 +209,6 @@ export async function handleSubmitReview(req: any, res: any) {
     });
   } catch (error: any) {
     console.error("Error submitting ride review:", error);
-    return res.status(500).json({ error: error.message || "Failed to submit review" });
+    return res.status(500).json({ error: formatSupabaseError(error, "Failed to submit review") });
   }
 }

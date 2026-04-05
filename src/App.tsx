@@ -14717,6 +14717,12 @@ const App = () => {
       .goog-te-banner-frame { display: none !important; visibility: hidden !important; }
       .goog-te-banner-frame.skiptranslate { display: none !important; visibility: hidden !important; }
       iframe.goog-te-banner-frame { display: none !important; visibility: hidden !important; }
+      .goog-te-gadget-icon { display: none !important; visibility: hidden !important; }
+      .goog-te-gadget-simple { display: none !important; visibility: hidden !important; }
+      .goog-te-spinner-pos { display: none !important; visibility: hidden !important; }
+      .VIpgJd-ZVi9od-ORHb-OEVmcd { display: none !important; visibility: hidden !important; }
+      .VIpgJd-ZVi9od-ORHb { display: none !important; visibility: hidden !important; }
+      .VIpgJd-ZVi9od-aZ2wEe-wOHMyf { display: none !important; visibility: hidden !important; }
       .skiptranslate iframe { display: none !important; visibility: hidden !important; }
       body { top: 0 !important; position: static !important; min-height: 100% !important; }
       html { top: 0 !important; }
@@ -14735,6 +14741,12 @@ const App = () => {
         '.goog-te-banner-frame',
         '.goog-te-banner-frame.skiptranslate',
         'iframe.goog-te-banner-frame',
+        '.goog-te-gadget-icon',
+        '.goog-te-gadget-simple',
+        '.goog-te-spinner-pos',
+        '.VIpgJd-ZVi9od-ORHb-OEVmcd',
+        '.VIpgJd-ZVi9od-ORHb',
+        '.VIpgJd-ZVi9od-aZ2wEe-wOHMyf',
         '.skiptranslate',
       ];
 

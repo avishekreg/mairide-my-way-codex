@@ -8,6 +8,10 @@ function getAction(req: any) {
 }
 
 export default async function handler(req: any, res: any) {
+  if (req.method === "OPTIONS") {
+    return res.status(200).json({ ok: true });
+  }
+
   const action = getAction(req);
 
   if (action !== "submit-review") {
