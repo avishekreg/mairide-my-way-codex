@@ -2005,6 +2005,57 @@ const submitBookingReview = async (
   return result;
 };
 
+const listSupportTickets = async (all = false) => {
+  const token = await getAccessToken();
+  const query = all ? '?action=list-tickets&all=1' : '?action=list-tickets';
+  const response = await axios.get(`/api/support${query}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return Array.isArray(response.data?.tickets) ? (response.data.tickets as SupportTicket[]) : [];
+};
+
+const createSupportTicket = async (payload: { subject: string; message: string; priority?: SupportTicket['priority'] }) => {
+  const token = await getAccessToken();
+  const response = await axios.post('/api/support?action=create-ticket', payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data?.ticket as SupportTicket | undefined;
+};
+
+const respondSupportTicket = async (payload: { ticketId: string; message: string }) => {
+  const token = await getAccessToken();
+  const response = await axios.post('/api/support?action=respond-ticket', payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data?.ticket as SupportTicket | undefined;
+};
+
+const updateSupportTicketStatus = async (payload: { ticketId: string; status: SupportTicket['status'] }) => {
+  const token = await getAccessToken();
+  const response = await axios.post('/api/support?action=update-ticket-status', payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data?.ticket as SupportTicket | undefined;
+};
+
+const submitSupportFeedback = async (payload: { ticketId: string; rating: number; tags: string[]; comment?: string }) => {
+  const token = await getAccessToken();
+  const response = await axios.post('/api/support?action=submit-ticket-feedback', payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data?.ticket as SupportTicket | undefined;
+};
+
 const LoadingScreen = () => (
   <div className="fixed inset-0 bg-mairide-bg flex flex-col items-center justify-center z-50">
     <motion.div
@@ -10283,7 +10334,7 @@ const Chatbot = ({ userRole, userId }: { userRole?: UserProfile['role']; userId?
 
 // --- Support System Components ---
 
-const CSATFeedbackModal = ({ ticket, onClose }: { ticket: SupportTicket; onClose: () => void }) => {
+const CSATFeedbackModal = ({ ticket, onClose, onSubmitted }: { ticket: SupportTicket; onClose: () => void; onSubmitted?: (ticket: SupportTicket) => void }) => {
   const [rating, setRating] = useState(0);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [comment, setComment] = useState('');
@@ -10308,17 +10359,17 @@ const CSATFeedbackModal = ({ ticket, onClose }: { ticket: SupportTicket; onClose
     if (rating === 0) return;
     setIsSubmitting(true);
     try {
-      await updateDoc(doc(db, 'support_tickets', ticket.id), {
-        feedback: {
-          rating,
-          tags: selectedTags,
-          comment,
-          createdAt: new Date().toISOString()
-        }
+      const updated = await submitSupportFeedback({
+        ticketId: ticket.id,
+        rating,
+        tags: selectedTags,
+        comment,
       });
+      if (updated && onSubmitted) onSubmitted(updated);
       onClose();
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `support_tickets/${ticket.id}`);
+      const message = (error as any)?.response?.data?.error || (error as Error)?.message || 'Failed to submit feedback.';
+      showAppDialog(message, 'error', 'Feedback submit failed');
     } finally {
       setIsSubmitting(false);
     }
@@ -10413,21 +10464,24 @@ const SupportSystem = ({ profile }: { profile: UserProfile }) => {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [feedbackTicket, setFeedbackTicket] = useState<SupportTicket | null>(null);
 
+  const refreshTickets = async () => {
+    try {
+      const data = await listSupportTickets(false);
+      setTickets(data);
+      const resolvedWithoutFeedback = data.find((t) => t.status === 'resolved' && !t.feedback);
+      setFeedbackTicket(resolvedWithoutFeedback || null);
+    } catch (error) {
+      const message = (error as any)?.response?.data?.error || (error as Error)?.message || 'Failed to load support tickets.';
+      showAppDialog(message, 'error', 'Support unavailable');
+    }
+  };
+
   useEffect(() => {
-    const q = query(collection(db, 'support_tickets'), where('userId', '==', profile.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ticketsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SupportTicket));
-      setTickets(ticketsData);
-      
-      // Check for resolved tickets without feedback
-      const resolvedWithoutFeedback = ticketsData.find(t => t.status === 'resolved' && !t.feedback);
-      if (resolvedWithoutFeedback) {
-        setFeedbackTicket(resolvedWithoutFeedback);
-      }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'support_tickets');
-    });
-    return () => unsubscribe();
+    refreshTickets();
+    const interval = window.setInterval(() => {
+      refreshTickets().catch(() => undefined);
+    }, 8000);
+    return () => window.clearInterval(interval);
   }, [profile.uid]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -10436,25 +10490,14 @@ const SupportSystem = ({ profile }: { profile: UserProfile }) => {
 
     setIsSubmitting(true);
     try {
-      const ticketRef = doc(collection(db, 'support_tickets'));
-      const newTicket: SupportTicket = {
-        id: ticketRef.id,
-        userId: profile.uid,
-        userName: profile.displayName,
-        userEmail: profile.email,
-        subject,
-        message,
-        status: 'open',
-        priority: 'medium',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      await setDoc(ticketRef, newTicket);
+      await createSupportTicket({ subject, message, priority: 'medium' });
       setSubject('');
       setMessage('');
-      alert("Support ticket submitted successfully!");
+      showAppDialog('Support ticket submitted successfully.', 'success');
+      await refreshTickets();
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'support_tickets');
+      const message = (error as any)?.response?.data?.error || (error as Error)?.message || 'Failed to submit support ticket.';
+      showAppDialog(message, 'error', 'Support submit failed');
     } finally {
       setIsSubmitting(false);
     }
@@ -10542,7 +10585,10 @@ const SupportSystem = ({ profile }: { profile: UserProfile }) => {
       {feedbackTicket && (
         <CSATFeedbackModal 
           ticket={feedbackTicket} 
-          onClose={() => setFeedbackTicket(null)} 
+          onClose={() => setFeedbackTicket(null)}
+          onSubmitted={(updatedTicket) => {
+            setTickets((prev) => prev.map((item) => (item.id === updatedTicket.id ? updatedTicket : item)));
+          }}
         />
       )}
     </div>
@@ -10554,50 +10600,64 @@ const AdminSupportView = () => {
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
   const [response, setResponse] = useState('');
 
+  const refreshTickets = async () => {
+    try {
+      const data = await listSupportTickets(true);
+      setTickets(data);
+      if (selectedTicket) {
+        const latest = data.find((item) => item.id === selectedTicket.id) || null;
+        setSelectedTicket(latest);
+      }
+    } catch (error) {
+      const message = (error as any)?.response?.data?.error || (error as Error)?.message || 'Failed to load support tickets.';
+      showAppDialog(message, 'error', 'Support unavailable');
+    }
+  };
+
   useEffect(() => {
-    const q = query(collection(db, 'support_tickets'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ticketsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SupportTicket));
-      setTickets(ticketsData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'support_tickets');
-    });
-    return () => unsubscribe();
-  }, []);
+    refreshTickets();
+    const interval = window.setInterval(() => {
+      refreshTickets().catch(() => undefined);
+    }, 8000);
+    return () => window.clearInterval(interval);
+  }, [selectedTicket?.id]);
 
   const handleSendResponse = async () => {
     if (!selectedTicket || !response) return;
 
     try {
-      const ticketRef = doc(db, 'support_tickets', selectedTicket.id);
       const newResponse = {
         senderId: auth.currentUser?.uid || 'admin',
         senderName: 'MaiRide Support',
         message: response,
         createdAt: new Date().toISOString()
       };
-
-      await updateDoc(ticketRef, {
-        responses: [...(selectedTicket.responses || []), newResponse],
-        status: 'in-progress',
-        updatedAt: new Date().toISOString()
-      });
+      const updated = await respondSupportTicket({ ticketId: selectedTicket.id, message: newResponse.message });
+      if (updated) {
+        setSelectedTicket(updated);
+      }
 
       setResponse('');
-      alert("Response sent!");
+      showAppDialog('Response sent successfully.', 'success');
+      await refreshTickets();
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `support_tickets/${selectedTicket.id}`);
+      const message = (error as any)?.response?.data?.error || (error as Error)?.message || 'Failed to send support response.';
+      showAppDialog(message, 'error', 'Support reply failed');
     }
   };
 
   const handleUpdateStatus = async (ticketId: string, newStatus: SupportTicket['status']) => {
     try {
-      await updateDoc(doc(db, 'support_tickets', ticketId), { 
-        status: newStatus,
-        updatedAt: new Date().toISOString()
-      });
+      const updated = await updateSupportTicketStatus({ ticketId, status: newStatus });
+      if (updated) {
+        setTickets((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+        if (selectedTicket?.id === updated.id) {
+          setSelectedTicket(updated);
+        }
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `support_tickets/${ticketId}`);
+      const message = (error as any)?.response?.data?.error || (error as Error)?.message || 'Failed to update ticket status.';
+      showAppDialog(message, 'error', 'Status update failed');
     }
   };
 
