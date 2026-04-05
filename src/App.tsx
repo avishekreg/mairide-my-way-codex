@@ -1861,7 +1861,7 @@ const AppDialogHost = () => {
 
     window.addEventListener(APP_DIALOG_EVENT, handleDialog);
     return () => window.removeEventListener(APP_DIALOG_EVENT, handleDialog);
-  }, [profile.email]);
+  }, []);
 
   if (!dialog) return null;
 
