@@ -4226,6 +4226,11 @@ const DriverOnboarding = ({
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
+      const activeUid = auth.currentUser?.uid || profile.uid;
+      if (!activeUid) {
+        throw new Error('Missing user identity. Please login again and retry onboarding.');
+      }
+
       // Upload images to storage
       const selfieUrl = await uploadImage(formData.selfiePhoto, 'selfie.jpg');
       const aadhaarFrontUrl = await uploadImage(formData.aadhaarFrontPhoto, 'aadhaar_front.jpg');
@@ -4235,55 +4240,72 @@ const DriverOnboarding = ({
       const vehicleUrl = await uploadImage(formData.vehiclePhoto, 'vehicle.jpg');
       const rcUrl = await uploadImage(formData.rcPhoto, 'rc.jpg');
 
-      const updatedProfile: UserProfile = {
-        ...profile,
+      const driverDetails = {
+        ...formData,
+        selfiePhoto: selfieUrl,
+        aadhaarFrontPhoto: aadhaarFrontUrl,
+        aadhaarBackPhoto: aadhaarBackUrl,
+        dlFrontPhoto: dlFrontUrl,
+        dlBackPhoto: dlBackUrl,
+        vehiclePhoto: vehicleUrl,
+        rcPhoto: rcUrl,
+        isOnline: false,
+        rating: 5.0,
+        totalEarnings: profile.driverDetails?.totalEarnings || 0,
+      };
+
+      const finalizedProfile: Partial<UserProfile> = {
+        uid: activeUid,
+        email: profile.email || auth.currentUser?.email || '',
+        displayName: profile.displayName || auth.currentUser?.displayName || 'Driver',
+        role: 'driver',
+        status: profile.status || 'active',
+        phoneNumber: profile.phoneNumber || auth.currentUser?.phoneNumber || '',
+        photoURL: profile.photoURL || auth.currentUser?.photoURL || '',
         onboardingComplete: true,
         verificationStatus: 'pending',
-        driverDetails: {
-          ...formData,
-          selfiePhoto: selfieUrl,
-          aadhaarFrontPhoto: aadhaarFrontUrl,
-          aadhaarBackPhoto: aadhaarBackUrl,
-          dlFrontPhoto: dlFrontUrl,
-          dlBackPhoto: dlBackUrl,
-          vehiclePhoto: vehicleUrl,
-          rcPhoto: rcUrl,
-          isOnline: false,
-          rating: 5.0,
-          totalEarnings: 0,
-        }
+        rejectionReason: null,
+        verifiedBy: null as any,
+        driverDetails,
       };
-      let token = '';
-      try {
-        token = await getAccessToken();
-      } catch {
-        token = '';
-      }
-      await axios.post(
-        '/api/user?action=complete-driver-onboarding',
+
+      const nowIso = new Date().toISOString();
+      await setDoc(
+        doc(db, 'users', activeUid),
         {
-          driverId: profile.uid,
-          driverDetails: updatedProfile.driverDetails,
+          ...finalizedProfile,
+          createdAt: profile.createdAt || nowIso,
+          updatedAt: nowIso,
         },
-        {
-          headers: token
-            ? {
-                Authorization: `Bearer ${token}`,
-              }
-            : undefined,
-        }
+        { merge: true }
       );
+
+      // Non-blocking mirror sync for backend compatibility.
       try {
-        await setDoc(doc(db, 'users', profile.uid), {
-          onboardingComplete: true,
-          verificationStatus: 'pending',
-          rejectionReason: null,
-          verifiedBy: null,
-          driverDetails: updatedProfile.driverDetails,
-        }, { merge: true });
-      } catch (firestoreSyncError) {
-        console.warn('Driver onboarding Firestore mirror sync failed:', firestoreSyncError);
+        let token = '';
+        try {
+          token = await getAccessToken();
+        } catch {
+          token = '';
+        }
+        await axios.post(
+          '/api/user?action=complete-driver-onboarding',
+          {
+            driverId: activeUid,
+            driverDetails,
+          },
+          {
+            headers: token
+              ? {
+                  Authorization: `Bearer ${token}`,
+                }
+              : undefined,
+          }
+        );
+      } catch (mirrorError) {
+        console.warn('Driver onboarding backend mirror sync failed (non-blocking):', mirrorError);
       }
+
       onComplete();
     } catch (error) {
       console.error('Driver onboarding submit failed:', error);
