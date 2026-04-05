@@ -4077,49 +4077,53 @@ const DriverOnboarding = ({
 
   const uploadImage = async (base64: string, path: string) => {
     if (!base64) return '';
-    const token = await getAccessToken();
-    const response = await axios.post(
-      '/api/user?action=upload-driver-doc',
-      {
-        driverId: profile.uid,
-        path,
-        dataUrl: base64,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-
-    if (!response.data?.url) {
-      throw new Error('Failed to upload driver document');
+    let token = '';
+    try {
+      token = await getAccessToken();
+    } catch {
+      token = '';
     }
 
-    return response.data.url as string;
+    try {
+      const response = await axios.post(
+        '/api/user?action=upload-driver-doc',
+        {
+          driverId: profile.uid,
+          path,
+          dataUrl: base64,
+        },
+        {
+          headers: token
+            ? {
+                Authorization: `Bearer ${token}`,
+              }
+            : undefined,
+        }
+      );
+
+      if (response.data?.url) {
+        return response.data.url as string;
+      }
+      throw new Error('Failed to upload driver document');
+    } catch (apiUploadError) {
+      console.warn('Driver doc API upload failed, using Firebase storage fallback:', apiUploadError);
+      const fallbackRef = storageRef(storage, `drivers/${profile.uid}/${path}`);
+      await uploadString(fallbackRef, base64, 'data_url');
+      return await getDownloadURL(fallbackRef);
+    }
   };
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
       // Upload images to storage
-      const [
-        selfieUrl, 
-        aadhaarFrontUrl, 
-        aadhaarBackUrl, 
-        dlFrontUrl, 
-        dlBackUrl, 
-        vehicleUrl, 
-        rcUrl
-      ] = await Promise.all([
-        uploadImage(formData.selfiePhoto, 'selfie.jpg'),
-        uploadImage(formData.aadhaarFrontPhoto, 'aadhaar_front.jpg'),
-        uploadImage(formData.aadhaarBackPhoto, 'aadhaar_back.jpg'),
-        uploadImage(formData.dlFrontPhoto, 'dl_front.jpg'),
-        uploadImage(formData.dlBackPhoto, 'dl_back.jpg'),
-        uploadImage(formData.vehiclePhoto, 'vehicle.jpg'),
-        uploadImage(formData.rcPhoto, 'rc.jpg')
-      ]);
+      const selfieUrl = await uploadImage(formData.selfiePhoto, 'selfie.jpg');
+      const aadhaarFrontUrl = await uploadImage(formData.aadhaarFrontPhoto, 'aadhaar_front.jpg');
+      const aadhaarBackUrl = await uploadImage(formData.aadhaarBackPhoto, 'aadhaar_back.jpg');
+      const dlFrontUrl = await uploadImage(formData.dlFrontPhoto, 'dl_front.jpg');
+      const dlBackUrl = await uploadImage(formData.dlBackPhoto, 'dl_back.jpg');
+      const vehicleUrl = await uploadImage(formData.vehiclePhoto, 'vehicle.jpg');
+      const rcUrl = await uploadImage(formData.rcPhoto, 'rc.jpg');
 
       const updatedProfile: UserProfile = {
         ...profile,
@@ -4139,7 +4143,12 @@ const DriverOnboarding = ({
           totalEarnings: 0,
         }
       };
-      const token = await getAccessToken();
+      let token = '';
+      try {
+        token = await getAccessToken();
+      } catch {
+        token = '';
+      }
       await axios.post(
         '/api/user?action=complete-driver-onboarding',
         {
@@ -4147,9 +4156,11 @@ const DriverOnboarding = ({
           driverDetails: updatedProfile.driverDetails,
         },
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: token
+            ? {
+                Authorization: `Bearer ${token}`,
+              }
+            : undefined,
         }
       );
       try {
