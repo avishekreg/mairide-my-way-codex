@@ -631,7 +631,9 @@ async function handleCapacity(req: any, res: any) {
     vercelDeploymentsDaily: safeNumber(configData.capacityVercelDeploymentsDaily, 100),
   };
 
-  const [usersResult, ridesResult, bookingsResult, transactionsResult, ticketsResult, sessionsResult] = await Promise.all([
+  const capacityNotes: string[] = [];
+
+  const [usersResult, ridesResult, bookingsResult, transactionsResult, ticketsResult] = await Promise.all([
     auth.supabaseAdmin
       .from("users")
       .select("id, role, status, created_at, updated_at, data")
@@ -652,18 +654,36 @@ async function handleCapacity(req: any, res: any) {
       .from("support_tickets")
       .select("id, status, priority, created_at, updated_at, data")
       .gte("created_at", ninetyDaysAgo),
-    auth.supabaseAdmin
+  ]);
+
+  let sessions: any[] = [];
+  try {
+    const sessionsResult = await auth.supabaseAdmin
       .from("tripSessions")
       .select("id, created_at, updated_at, data")
-      .gte("updated_at", ninetyDaysAgo),
-  ]);
+      .gte("updated_at", ninetyDaysAgo);
+    if (sessionsResult.error) {
+      const errMsg = String(sessionsResult.error.message || "").toLowerCase();
+      const isMissingRelation =
+        errMsg.includes("does not exist") ||
+        errMsg.includes("relation") ||
+        errMsg.includes("schema cache");
+      if (!isMissingRelation) {
+        throw sessionsResult.error;
+      }
+      capacityNotes.push("Trip session table not available yet. Tracking metrics will appear after tracking schema is applied.");
+    } else {
+      sessions = sessionsResult.data || [];
+    }
+  } catch (sessionError: any) {
+    capacityNotes.push(`Trip session feed unavailable (${sessionError?.message || "unknown error"}).`);
+  }
 
   const users = usersResult.data || [];
   const rides = ridesResult.data || [];
   const bookings = bookingsResult.data || [];
   const transactions = transactionsResult.data || [];
   const tickets = ticketsResult.data || [];
-  const sessions = sessionsResult.data || [];
 
   const allErrors = [
     usersResult.error,
@@ -671,7 +691,6 @@ async function handleCapacity(req: any, res: any) {
     bookingsResult.error,
     transactionsResult.error,
     ticketsResult.error,
-    sessionsResult.error,
   ].filter(Boolean);
   if (allErrors.length) {
     throw allErrors[0];
@@ -1017,7 +1036,7 @@ async function handleCapacity(req: any, res: any) {
   const storageStatus = {
     snapshotsPersisted: false,
     alertsPersisted: false,
-    notes: [] as string[],
+    notes: [...capacityNotes] as string[],
   };
 
   try {
