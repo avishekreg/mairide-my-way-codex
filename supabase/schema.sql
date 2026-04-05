@@ -96,6 +96,39 @@ create table if not exists public.otp_sessions (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.platform_capacity_snapshots (
+  id text primary key,
+  snapshot_day date not null unique,
+  generated_at timestamptz not null default now(),
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.platform_capacity_alerts (
+  id text primary key,
+  metric_key text not null,
+  severity text not null default 'warning',
+  utilization numeric not null default 0,
+  observed_at timestamptz not null default now(),
+  status text not null default 'open',
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.platform_usage_events (
+  id text primary key,
+  provider text,
+  metric_key text not null,
+  value numeric not null default 0,
+  units text,
+  observed_at timestamptz not null default now(),
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -138,6 +171,18 @@ drop trigger if exists otp_sessions_set_updated_at on public.otp_sessions;
 create trigger otp_sessions_set_updated_at before update on public.otp_sessions
 for each row execute procedure public.set_updated_at();
 
+drop trigger if exists platform_capacity_snapshots_set_updated_at on public.platform_capacity_snapshots;
+create trigger platform_capacity_snapshots_set_updated_at before update on public.platform_capacity_snapshots
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists platform_capacity_alerts_set_updated_at on public.platform_capacity_alerts;
+create trigger platform_capacity_alerts_set_updated_at before update on public.platform_capacity_alerts
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists platform_usage_events_set_updated_at on public.platform_usage_events;
+create trigger platform_usage_events_set_updated_at before update on public.platform_usage_events
+for each row execute procedure public.set_updated_at();
+
 alter table public.users enable row level security;
 alter table public.app_config enable row level security;
 alter table public.rides enable row level security;
@@ -146,6 +191,9 @@ alter table public.transactions enable row level security;
 alter table public.referrals enable row level security;
 alter table public.support_tickets enable row level security;
 alter table public.otp_sessions enable row level security;
+alter table public.platform_capacity_snapshots enable row level security;
+alter table public.platform_capacity_alerts enable row level security;
+alter table public.platform_usage_events enable row level security;
 
 drop policy if exists "authenticated users can read users" on public.users;
 create policy "authenticated users can read users"
@@ -268,3 +316,26 @@ on public.support_tickets for update
 to authenticated
 using (user_id = auth.uid()::text or (data->>'userId') = auth.uid()::text)
 with check (user_id = auth.uid()::text or (data->>'userId') = auth.uid()::text);
+
+drop policy if exists "authenticated users can read capacity snapshots" on public.platform_capacity_snapshots;
+create policy "authenticated users can read capacity snapshots"
+on public.platform_capacity_snapshots for select
+to authenticated
+using (true);
+
+drop policy if exists "authenticated users can read capacity alerts" on public.platform_capacity_alerts;
+create policy "authenticated users can read capacity alerts"
+on public.platform_capacity_alerts for select
+to authenticated
+using (true);
+
+drop policy if exists "authenticated users can read usage events" on public.platform_usage_events;
+create policy "authenticated users can read usage events"
+on public.platform_usage_events for select
+to authenticated
+using (true);
+
+create index if not exists idx_capacity_snapshots_day on public.platform_capacity_snapshots(snapshot_day);
+create index if not exists idx_capacity_alerts_observed on public.platform_capacity_alerts(observed_at desc);
+create index if not exists idx_capacity_alerts_metric on public.platform_capacity_alerts(metric_key);
+create index if not exists idx_platform_usage_events_observed on public.platform_usage_events(observed_at desc);

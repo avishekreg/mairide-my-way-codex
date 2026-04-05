@@ -949,6 +949,7 @@ const adminSaveConfigPath = adminApiPath("save-config");
 const adminTransactionsPath = adminApiPath("transactions");
 const adminUsersPath = adminApiPath("users");
 const adminVerifyDriverPath = adminApiPath("verify-driver");
+const adminCapacityPath = adminApiPath("capacity");
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
@@ -12663,6 +12664,309 @@ const AdminCashFlowAnalytics = ({ bookings, users }: { bookings: any[], users: U
   );
 };
 
+const AdminCapacityView = () => {
+  type CapacityMetric = {
+    key: string;
+    label: string;
+    category: string;
+    used: number;
+    capacity: number;
+    utilization: number;
+    severity: 'healthy' | 'watch' | 'warning' | 'critical';
+    unit: string;
+    notes?: string;
+  };
+  type CapacityAlert = {
+    id: string;
+    metricKey: string;
+    metricLabel: string;
+    category: string;
+    severity: 'healthy' | 'watch' | 'warning' | 'critical';
+    utilization: number;
+    message: string;
+    observedAt: string;
+  };
+  type CapacityDaily = {
+    day: string;
+    signups: number;
+    driverSignups: number;
+    travelerSignups: number;
+    bookingsCreated: number;
+    completedBookings: number;
+    ridesCreated: number;
+    revenue: number;
+    gst: number;
+    liveSessions: number;
+    realtimeSignals: number;
+    staleSessions: number;
+  };
+  type CapacityPayload = {
+    generatedAt: string;
+    metrics: CapacityMetric[];
+    daily: CapacityDaily[];
+    alerts: CapacityAlert[];
+    storageStatus?: {
+      snapshotsPersisted?: boolean;
+      alertsPersisted?: boolean;
+      notes?: string[];
+    };
+    summary?: {
+      liveSessionsNow?: number;
+      staleSessionsNow?: number;
+      offlineLinksNow?: number;
+      antiSpoofAlertsNow?: number;
+      realtimeSignalsLast24h?: number;
+      monthlySignalsEstimate?: number;
+      mauLast30?: number;
+      ridesToday?: number;
+      bookingsToday?: number;
+      completedBookingsToday?: number;
+      revenueToday?: number;
+      gstToday?: number;
+    };
+  };
+
+  const [payload, setPayload] = useState<CapacityPayload | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const loadCapacity = async (withLoader = false) => {
+    if (withLoader) setIsLoading(true);
+    try {
+      const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
+      const response = await axios.get(adminCapacityPath, { headers });
+      setPayload(response.data || null);
+      setErrorMessage('');
+    } catch (error: any) {
+      setErrorMessage(getApiErrorMessage(error, 'Unable to load capacity monitor right now.'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      if (!mounted) return;
+      await loadCapacity(true);
+    })();
+    const timer = window.setInterval(() => {
+      void loadCapacity(false);
+    }, 30000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const summaryCards = [
+    {
+      label: 'Live sessions',
+      value: payload?.summary?.liveSessionsNow ?? 0,
+      accent: 'text-mairide-primary',
+    },
+    {
+      label: 'Stale sessions',
+      value: payload?.summary?.staleSessionsNow ?? 0,
+      accent: 'text-mairide-accent',
+    },
+    {
+      label: 'Offline links',
+      value: payload?.summary?.offlineLinksNow ?? 0,
+      accent: 'text-mairide-primary',
+    },
+    {
+      label: 'Anti-spoof alerts',
+      value: payload?.summary?.antiSpoofAlertsNow ?? 0,
+      accent: 'text-red-600',
+    },
+  ];
+
+  const utilizationBars = (payload?.metrics || []).sort((a, b) => b.utilization - a.utilization);
+  const topAlerts = (payload?.alerts || []).slice(0, 5);
+  const trend30 = (payload?.daily || []).slice(-30).map((row) => ({
+    day: row.day.slice(5),
+    bookings: row.bookingsCreated,
+    revenue: Number(row.revenue.toFixed(0)),
+    signals: row.realtimeSignals,
+  }));
+  const byCategory = Object.values(
+    utilizationBars.reduce((acc: Record<string, { category: string; utilization: number; count: number }>, metric) => {
+      if (!acc[metric.category]) {
+        acc[metric.category] = { category: metric.category, utilization: 0, count: 0 };
+      }
+      acc[metric.category].utilization += metric.utilization;
+      acc[metric.category].count += 1;
+      return acc;
+    }, {})
+  ).map((row) => ({
+    category: row.category,
+    utilization: Number((row.utilization / Math.max(row.count, 1)).toFixed(2)),
+  }));
+
+  const severityTone = (severity: CapacityMetric['severity']) => {
+    if (severity === 'critical') return 'bg-red-100 text-red-600';
+    if (severity === 'warning') return 'bg-orange-100 text-orange-600';
+    if (severity === 'watch') return 'bg-amber-100 text-amber-700';
+    return 'bg-green-100 text-green-600';
+  };
+
+  if (isLoading) {
+    return (
+      <div className="rounded-[32px] border border-mairide-secondary bg-white p-10 text-center">
+        <p className="text-sm font-bold text-mairide-secondary uppercase tracking-widest">Loading capacity monitor...</p>
+      </div>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <div className="rounded-[32px] border border-red-200 bg-red-50 p-8">
+        <p className="text-xs font-bold uppercase tracking-widest text-red-600">Capacity monitor unavailable</p>
+        <p className="mt-3 text-sm text-red-700">{errorMessage}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">MVP Performance Control</p>
+            <h3 className="mt-2 text-2xl font-black text-mairide-primary">Capacity and cost guardrails</h3>
+            <p className="mt-1 text-sm text-mairide-secondary">Live usage visibility with early warning flags at 80% and 95%.</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Updated</p>
+            <p className="text-sm font-bold text-mairide-primary">
+              {payload?.generatedAt ? new Date(payload.generatedAt).toLocaleString() : '—'}
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {summaryCards.map((card) => (
+            <div key={card.label} className="rounded-2xl border border-mairide-secondary/40 bg-mairide-bg p-4">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{card.label}</p>
+              <p className={cn("mt-2 text-3xl font-black", card.accent)}>{card.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+          <h4 className="text-lg font-bold text-mairide-primary">30-day trend</h4>
+          <p className="text-xs text-mairide-secondary mt-1">Bookings, tracking signals, and revenue movement.</p>
+          <div className="mt-4 h-[280px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trend30}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8EAED" />
+                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#8E9299' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#8E9299' }} />
+                <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 12px 30px rgba(0,0,0,0.12)' }} />
+                <Legend />
+                <Line type="monotone" dataKey="bookings" stroke="#25343F" strokeWidth={2.5} dot={false} name="Bookings" />
+                <Line type="monotone" dataKey="signals" stroke="#F27D26" strokeWidth={2.5} dot={false} name="Tracking Signals" />
+                <Line type="monotone" dataKey="revenue" stroke="#00A63E" strokeWidth={2.5} dot={false} name="Revenue ₹" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+          <h4 className="text-lg font-bold text-mairide-primary">Average utilization by stack</h4>
+          <p className="text-xs text-mairide-secondary mt-1">Helps decide where to scale first after MVP.</p>
+          <div className="mt-4 h-[280px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={byCategory}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8EAED" />
+                <XAxis dataKey="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#8E9299' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#8E9299' }} />
+                <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 12px 30px rgba(0,0,0,0.12)' }} />
+                <Bar dataKey="utilization" fill="#F27D26" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+          <h4 className="text-lg font-bold text-mairide-primary">Threshold monitor</h4>
+          <p className="text-xs text-mairide-secondary mt-1">Red = 95% critical, Orange = 80% warning.</p>
+          <div className="mt-4 space-y-3">
+            {utilizationBars.map((metric) => (
+              <div key={metric.key} className="rounded-2xl border border-mairide-secondary/30 p-4 bg-mairide-bg/50">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-mairide-primary">{metric.label}</p>
+                    <p className="text-[11px] text-mairide-secondary">{metric.used} / {metric.capacity} {metric.unit}</p>
+                    {metric.notes ? <p className="text-[10px] text-mairide-secondary mt-1">{metric.notes}</p> : null}
+                  </div>
+                  <span className={cn("px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest", severityTone(metric.severity))}>
+                    {metric.utilization.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="mt-3 h-2.5 w-full rounded-full bg-mairide-secondary/20 overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      metric.utilization >= 95 ? 'bg-red-500' : metric.utilization >= 80 ? 'bg-orange-500' : metric.utilization >= 60 ? 'bg-amber-400' : 'bg-green-500'
+                    )}
+                    style={{ width: `${Math.min(metric.utilization, 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+            {!utilizationBars.length && (
+              <p className="text-sm text-mairide-secondary">No capacity metrics available yet.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+          <h4 className="text-lg font-bold text-mairide-primary">Active alerts</h4>
+          <p className="text-xs text-mairide-secondary mt-1">Immediate signals for cost or scale risk.</p>
+          <div className="mt-4 space-y-3">
+            {topAlerts.length ? (
+              topAlerts.map((alert) => (
+                <div key={alert.id} className="rounded-2xl border border-mairide-secondary/30 bg-mairide-bg p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-bold text-mairide-primary">{alert.metricLabel}</p>
+                    <span className={cn("px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest", severityTone(alert.severity))}>
+                      {alert.severity}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-mairide-secondary">{alert.message}</p>
+                  <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                    {new Date(alert.observedAt).toLocaleString()}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-green-200 bg-green-50 p-3">
+                <p className="text-xs font-bold text-green-700">All systems healthy</p>
+                <p className="mt-1 text-xs text-green-700">No threshold breaches detected right now.</p>
+              </div>
+            )}
+          </div>
+          {!!payload?.storageStatus?.notes?.length && (
+            <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-orange-700">Setup notes</p>
+              <div className="mt-2 space-y-1">
+                {payload.storageStatus.notes.map((note, idx) => (
+                  <p key={`${note}-${idx}`} className="text-xs text-orange-800">{note}</p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AdminSecurityView = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -12892,7 +13196,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map'>('revenue');
+  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity'>('revenue');
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
@@ -13635,6 +13939,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             { id: 'users', label: 'Users', icon: Users, roles: ['super_admin', 'compliance'] },
             { id: 'rides', label: 'Rides', icon: Car, roles: ['super_admin', 'compliance'] },
             { id: 'revenue', label: 'Revenue', icon: IndianRupee, roles: ['super_admin', 'finance'] },
+            { id: 'capacity', label: 'Capacity', icon: TrendingUp, roles: ['super_admin', 'finance', 'support'] },
             { id: 'analytics', label: 'Analytics', icon: LineChartIcon, roles: ['super_admin', 'finance'] },
             { id: 'transactions', label: 'Transactions', icon: Receipt, roles: ['super_admin', 'finance', 'support'] },
             { id: 'config', label: 'Config', icon: Settings, roles: ['super_admin', 'finance'] },
@@ -14300,6 +14605,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             <AdminRevenueAnalysis bookings={bookings} users={users} />
           </div>
         )}
+
+        {activeTab === 'capacity' && <AdminCapacityView />}
 
         {activeTab === 'analytics' && (
           <AdminCashFlowAnalytics bookings={bookings} users={users} />

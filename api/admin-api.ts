@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
+type CapacityMetricSeverity = "healthy" | "watch" | "warning" | "critical";
+
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -485,6 +487,642 @@ async function handleDeleteUser(req: any, res: any) {
   return res.status(200).json({ message: "User deleted successfully." });
 }
 
+function normalizeToIso(input: any) {
+  if (!input) return null;
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+function dayKeyFromIso(iso: string) {
+  return iso.slice(0, 10);
+}
+
+function utcDayStartIso(date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())).toISOString();
+}
+
+function daysBackIso(days: number) {
+  const now = Date.now();
+  return new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function safeNumber(value: any, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function estimateRowBytes(row: any) {
+  try {
+    return Buffer.byteLength(JSON.stringify(row ?? {}), "utf8");
+  } catch {
+    return 0;
+  }
+}
+
+function metricSeverity(utilizationPercent: number): CapacityMetricSeverity {
+  if (utilizationPercent >= 95) return "critical";
+  if (utilizationPercent >= 80) return "warning";
+  if (utilizationPercent >= 60) return "watch";
+  return "healthy";
+}
+
+function makeMetric(input: {
+  key: string;
+  label: string;
+  category: string;
+  used: number;
+  capacity: number;
+  unit: string;
+  notes?: string;
+}) {
+  const safeCapacity = Math.max(1, safeNumber(input.capacity, 1));
+  const used = Math.max(0, safeNumber(input.used, 0));
+  const utilization = Number(((used / safeCapacity) * 100).toFixed(2));
+  const severity = metricSeverity(utilization);
+  return {
+    ...input,
+    used,
+    capacity: safeCapacity,
+    utilization,
+    severity,
+    threshold80Reached: utilization >= 80,
+    threshold95Reached: utilization >= 95,
+  };
+}
+
+function pluckTimestamp(row: any, ...keys: string[]) {
+  for (const key of keys) {
+    const value = row?.[key];
+    const normalized = normalizeToIso(value);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function buildLastDays(dayCount: number) {
+  const days: string[] = [];
+  const now = new Date();
+  for (let i = dayCount - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setUTCDate(now.getUTCDate() - i);
+    days.push(dayKeyFromIso(d.toISOString()));
+  }
+  return days;
+}
+
+function roleFromUserRow(row: any) {
+  return String(row?.role || row?.data?.role || "consumer").toLowerCase();
+}
+
+function bookingStatusFromRow(row: any) {
+  return String(row?.status || row?.data?.status || "").toLowerCase();
+}
+
+function rideLifecycleFromRow(row: any) {
+  return String(row?.data?.rideLifecycleStatus || "").toLowerCase();
+}
+
+function transactionRevenueFromRow(row: any) {
+  const metadata = row?.data?.metadata || {};
+  if (typeof metadata?.revenue === "number") return metadata.revenue;
+  const amount = safeNumber(row?.data?.amount, 0);
+  if (String(row?.type || row?.data?.type) === "maintenance_fee_payment" && amount > 0) {
+    return amount;
+  }
+  return 0;
+}
+
+function transactionGstFromRow(row: any) {
+  const metadata = row?.data?.metadata || {};
+  return safeNumber(metadata?.gstAmount, 0);
+}
+
+async function handleCapacity(req: any, res: any) {
+  const auth = await getAuthenticatedAdmin(req, false);
+  if ("error" in auth) {
+    return res.status(auth.error.status).json({ error: auth.error.message });
+  }
+
+  const nowIso = new Date().toISOString();
+  const ninetyDaysAgo = daysBackIso(90);
+  const thirtyDaysAgo = daysBackIso(30);
+  const twentyFourHoursAgo = daysBackIso(1);
+
+  const { data: configRow } = await auth.supabaseAdmin
+    .from("app_config")
+    .select("data")
+    .eq("id", "global")
+    .maybeSingle();
+  const configData = (configRow?.data as Record<string, any>) || {};
+
+  const limits = {
+    dailySignups: safeNumber(configData.capacityDailySignups, 250),
+    dailyDriverOnboarding: safeNumber(configData.capacityDailyDriverOnboarding, 80),
+    dailyTravelerOnboarding: safeNumber(configData.capacityDailyTravelerOnboarding, 200),
+    dailyBookings: safeNumber(configData.capacityDailyBookings, 200),
+    concurrentLiveTrips: safeNumber(configData.capacityConcurrentLiveTrips, 40),
+    supabaseMau: safeNumber(configData.capacitySupabaseMau, 50000),
+    supabaseRealtimeMessagesMonthly: safeNumber(configData.capacitySupabaseRealtimeMessagesMonthly, 2000000),
+    supabaseDbStorageMb: safeNumber(configData.capacitySupabaseDbStorageMb, 500),
+    supabaseBandwidthGbMonthly: safeNumber(configData.capacitySupabaseBandwidthGbMonthly, 10),
+    googleMapsLoadsMonthly: safeNumber(configData.capacityGoogleMapsLoadsMonthly, 10000),
+    geminiRequestsDaily: safeNumber(configData.capacityGeminiRequestsDaily, 1500),
+    vercelDeploymentsDaily: safeNumber(configData.capacityVercelDeploymentsDaily, 100),
+  };
+
+  const [usersResult, ridesResult, bookingsResult, transactionsResult, ticketsResult, sessionsResult] = await Promise.all([
+    auth.supabaseAdmin
+      .from("users")
+      .select("id, role, status, created_at, updated_at, data")
+      .gte("created_at", ninetyDaysAgo),
+    auth.supabaseAdmin
+      .from("rides")
+      .select("id, status, created_at, updated_at, data")
+      .gte("created_at", ninetyDaysAgo),
+    auth.supabaseAdmin
+      .from("bookings")
+      .select("id, status, created_at, updated_at, data")
+      .gte("created_at", ninetyDaysAgo),
+    auth.supabaseAdmin
+      .from("transactions")
+      .select("id, type, status, created_at, updated_at, data")
+      .gte("created_at", ninetyDaysAgo),
+    auth.supabaseAdmin
+      .from("support_tickets")
+      .select("id, status, priority, created_at, updated_at, data")
+      .gte("created_at", ninetyDaysAgo),
+    auth.supabaseAdmin
+      .from("tripSessions")
+      .select("id, created_at, updated_at, data")
+      .gte("updated_at", ninetyDaysAgo),
+  ]);
+
+  const users = usersResult.data || [];
+  const rides = ridesResult.data || [];
+  const bookings = bookingsResult.data || [];
+  const transactions = transactionsResult.data || [];
+  const tickets = ticketsResult.data || [];
+  const sessions = sessionsResult.data || [];
+
+  const allErrors = [
+    usersResult.error,
+    ridesResult.error,
+    bookingsResult.error,
+    transactionsResult.error,
+    ticketsResult.error,
+    sessionsResult.error,
+  ].filter(Boolean);
+  if (allErrors.length) {
+    throw allErrors[0];
+  }
+
+  const daySeries = buildLastDays(90);
+  const bucket = new Map(
+    daySeries.map((day) => [
+      day,
+      {
+        day,
+        signups: 0,
+        driverSignups: 0,
+        travelerSignups: 0,
+        ridesCreated: 0,
+        bookingsCreated: 0,
+        completedBookings: 0,
+        revenue: 0,
+        gst: 0,
+        supportTickets: 0,
+        liveSessions: 0,
+        realtimeSignals: 0,
+        staleSessions: 0,
+      },
+    ])
+  );
+
+  const todayKey = dayKeyFromIso(nowIso);
+
+  let liveSessionsNow = 0;
+  let staleSessionsNow = 0;
+  let offlineLinksNow = 0;
+  let antiSpoofAlertsNow = 0;
+  let realtimeSignalsLast24h = 0;
+  let geminiCallsLast24h = 0;
+
+  const realtimeActiveThresholdMs = 60_000;
+  const nowMs = Date.now();
+
+  users.forEach((row: any) => {
+    const createdAt = pluckTimestamp(row, "created_at", "updated_at");
+    if (!createdAt) return;
+    const key = dayKeyFromIso(createdAt);
+    const target = bucket.get(key);
+    if (!target) return;
+    target.signups += 1;
+    const role = roleFromUserRow(row);
+    if (role === "driver") target.driverSignups += 1;
+    if (role === "consumer") target.travelerSignups += 1;
+  });
+
+  rides.forEach((row: any) => {
+    const createdAt = pluckTimestamp(row, "created_at");
+    if (!createdAt) return;
+    const target = bucket.get(dayKeyFromIso(createdAt));
+    if (!target) return;
+    target.ridesCreated += 1;
+  });
+
+  bookings.forEach((row: any) => {
+    const createdAt = pluckTimestamp(row, "created_at");
+    if (!createdAt) return;
+    const target = bucket.get(dayKeyFromIso(createdAt));
+    if (!target) return;
+    target.bookingsCreated += 1;
+    const status = bookingStatusFromRow(row);
+    const lifecycle = rideLifecycleFromRow(row);
+    if (status === "completed" || lifecycle === "completed") {
+      target.completedBookings += 1;
+    }
+  });
+
+  transactions.forEach((row: any) => {
+    const createdAt = pluckTimestamp(row, "created_at");
+    if (!createdAt) return;
+    const target = bucket.get(dayKeyFromIso(createdAt));
+    if (!target) return;
+    target.revenue += transactionRevenueFromRow(row);
+    target.gst += transactionGstFromRow(row);
+    const txType = String(row?.type || row?.data?.type || "").toLowerCase();
+    if (txType === "llm_chat" || txType === "chatbot_usage") {
+      const createdMs = new Date(createdAt).getTime();
+      if (createdMs >= new Date(twentyFourHoursAgo).getTime()) {
+        geminiCallsLast24h += 1;
+      }
+    }
+  });
+
+  tickets.forEach((row: any) => {
+    const createdAt = pluckTimestamp(row, "created_at");
+    if (!createdAt) return;
+    const target = bucket.get(dayKeyFromIso(createdAt));
+    if (!target) return;
+    target.supportTickets += 1;
+  });
+
+  sessions.forEach((row: any) => {
+    const sessionData = (row?.data as Record<string, any>) || {};
+    const updatedAt = normalizeToIso(row?.updated_at || sessionData.updatedAt || sessionData.lastSignalAt || row?.created_at);
+    if (!updatedAt) return;
+    const key = dayKeyFromIso(updatedAt);
+    const target = bucket.get(key);
+    if (target) {
+      target.liveSessions += 1;
+      const auditTrail = Array.isArray(sessionData.auditTrail) ? sessionData.auditTrail : [];
+      target.realtimeSignals += auditTrail.length;
+      if (sessionData.isStale) target.staleSessions += 1;
+    }
+
+    const status = String(sessionData.status || "").toLowerCase();
+    const networkState = String(sessionData.networkState || "").toLowerCase();
+    const isStale = Boolean(sessionData.isStale);
+    const updatedMs = new Date(updatedAt).getTime();
+    const isFresh = nowMs - updatedMs <= realtimeActiveThresholdMs;
+
+    if ((status === "live" || status === "preparing") && isFresh) {
+      liveSessionsNow += 1;
+    }
+    if (isStale) {
+      staleSessionsNow += 1;
+    }
+    if (networkState === "offline") {
+      offlineLinksNow += 1;
+    }
+
+    const auditTrail = Array.isArray(sessionData.auditTrail) ? sessionData.auditTrail : [];
+    auditTrail.forEach((entry: any) => {
+      const entryTime = normalizeToIso(entry?.createdAt);
+      if (!entryTime) return;
+      if (new Date(entryTime).getTime() >= new Date(twentyFourHoursAgo).getTime()) {
+        realtimeSignalsLast24h += 1;
+      }
+      if (entry?.meta?.spoofDetected) {
+        antiSpoofAlertsNow += 1;
+      }
+    });
+  });
+
+  const today = bucket.get(todayKey) || {
+    day: todayKey,
+    signups: 0,
+    driverSignups: 0,
+    travelerSignups: 0,
+    ridesCreated: 0,
+    bookingsCreated: 0,
+    completedBookings: 0,
+    revenue: 0,
+    gst: 0,
+    supportTickets: 0,
+    liveSessions: 0,
+    realtimeSignals: 0,
+    staleSessions: 0,
+  };
+
+  const monthlySignalsEstimate = Math.round(realtimeSignalsLast24h * 30);
+  const mauLast30 = new Set(
+    users
+      .filter((row: any) => {
+        const activeAt = normalizeToIso(row?.updated_at || row?.created_at || row?.data?.updatedAt);
+        return activeAt ? new Date(activeAt).getTime() >= new Date(thirtyDaysAgo).getTime() : false;
+      })
+      .map((row: any) => row.id)
+  ).size;
+
+  const dbFootprintMbEstimate = Number(
+    (
+      [users, rides, bookings, transactions, tickets, sessions]
+        .flat()
+        .reduce((total: number, row: any) => total + estimateRowBytes(row), 0) /
+      (1024 * 1024)
+    ).toFixed(2)
+  );
+
+  const mapsLoadsMonthlyEstimate = Math.round((mauLast30 || 0) * 24);
+  const bandwidthMonthlyEstimateGb = Number(((monthlySignalsEstimate * 0.0012) / 1024).toFixed(3));
+
+  const metrics = [
+    makeMetric({
+      key: "daily_signups",
+      label: "Daily signups",
+      category: "Onboarding",
+      used: today.signups,
+      capacity: limits.dailySignups,
+      unit: "users/day",
+      notes: "Total traveler + driver signups today.",
+    }),
+    makeMetric({
+      key: "daily_driver_onboarding",
+      label: "Daily driver onboarding",
+      category: "Onboarding",
+      used: today.driverSignups,
+      capacity: limits.dailyDriverOnboarding,
+      unit: "drivers/day",
+      notes: "Driver account creation throughput.",
+    }),
+    makeMetric({
+      key: "daily_traveler_onboarding",
+      label: "Daily traveler onboarding",
+      category: "Onboarding",
+      used: today.travelerSignups,
+      capacity: limits.dailyTravelerOnboarding,
+      unit: "travelers/day",
+      notes: "Traveler account creation throughput.",
+    }),
+    makeMetric({
+      key: "daily_bookings",
+      label: "Daily bookings",
+      category: "Marketplace",
+      used: today.bookingsCreated,
+      capacity: limits.dailyBookings,
+      unit: "bookings/day",
+      notes: "Bookings created today.",
+    }),
+    makeMetric({
+      key: "live_trip_concurrency",
+      label: "Live trip concurrency",
+      category: "Tracking",
+      used: liveSessionsNow,
+      capacity: limits.concurrentLiveTrips,
+      unit: "live sessions",
+      notes: "Active session heartbeat in last 60s.",
+    }),
+    makeMetric({
+      key: "supabase_mau",
+      label: "Supabase MAU (30d)",
+      category: "Supabase",
+      used: mauLast30,
+      capacity: limits.supabaseMau,
+      unit: "users / 30d",
+      notes: "Approx from users table activity.",
+    }),
+    makeMetric({
+      key: "supabase_realtime_monthly_est",
+      label: "Realtime messages (monthly estimate)",
+      category: "Supabase",
+      used: monthlySignalsEstimate,
+      capacity: limits.supabaseRealtimeMessagesMonthly,
+      unit: "events/month",
+      notes: "Derived from trip session audit signals.",
+    }),
+    makeMetric({
+      key: "supabase_db_storage_est",
+      label: "DB storage (estimated)",
+      category: "Supabase",
+      used: dbFootprintMbEstimate,
+      capacity: limits.supabaseDbStorageMb,
+      unit: "MB",
+      notes: "Payload approximation from sampled operational tables.",
+    }),
+    makeMetric({
+      key: "supabase_bandwidth_monthly_est",
+      label: "Bandwidth (monthly estimate)",
+      category: "Supabase",
+      used: bandwidthMonthlyEstimateGb,
+      capacity: limits.supabaseBandwidthGbMonthly,
+      unit: "GB/month",
+      notes: "Derived estimate from tracking signal volume.",
+    }),
+    makeMetric({
+      key: "google_maps_loads_monthly_est",
+      label: "Google Maps loads (monthly estimate)",
+      category: "Google Maps",
+      used: mapsLoadsMonthlyEstimate,
+      capacity: limits.googleMapsLoadsMonthly,
+      unit: "loads/month",
+      notes: "Estimated map views from active users.",
+    }),
+    makeMetric({
+      key: "gemini_daily_requests",
+      label: "Gemini requests (24h)",
+      category: "LLM",
+      used: geminiCallsLast24h,
+      capacity: limits.geminiRequestsDaily,
+      unit: "requests/day",
+      notes: "Tracks logged chatbot usage events.",
+    }),
+    makeMetric({
+      key: "vercel_deployments_daily",
+      label: "Vercel deployments (manual tracker)",
+      category: "Vercel",
+      used: 0,
+      capacity: limits.vercelDeploymentsDaily,
+      unit: "deploys/day",
+      notes: "Set by deployment event logging; currently manual fallback.",
+    }),
+  ];
+
+  const alerts = metrics
+    .filter((metric) => metric.utilization >= 80)
+    .sort((a, b) => b.utilization - a.utilization)
+    .map((metric) => ({
+      id: `alert_${metric.key}_${todayKey}`,
+      metricKey: metric.key,
+      metricLabel: metric.label,
+      category: metric.category,
+      severity: metricSeverity(metric.utilization),
+      utilization: metric.utilization,
+      used: metric.used,
+      capacity: metric.capacity,
+      unit: metric.unit,
+      threshold: metric.utilization >= 95 ? 95 : 80,
+      message:
+        metric.utilization >= 95
+          ? `${metric.label} is above 95% capacity. Immediate action required.`
+          : `${metric.label} has crossed 80% capacity. Plan scaling action now.`,
+      observedAt: nowIso,
+    }));
+
+  const daily = daySeries.map((day) => {
+    const row = bucket.get(day)!;
+    return {
+      ...row,
+      revenue: Number(row.revenue.toFixed(2)),
+      gst: Number(row.gst.toFixed(2)),
+    };
+  });
+
+  const snapshotPayload = {
+    id: todayKey,
+    snapshot_day: todayKey,
+    generated_at: nowIso,
+    data: {
+      generatedAt: nowIso,
+      limits,
+      metrics,
+      summary: {
+        liveSessionsNow,
+        staleSessionsNow,
+        offlineLinksNow,
+        antiSpoofAlertsNow,
+        realtimeSignalsLast24h,
+        monthlySignalsEstimate,
+        mauLast30,
+        ridesToday: today.ridesCreated,
+        bookingsToday: today.bookingsCreated,
+        completedBookingsToday: today.completedBookings,
+        revenueToday: Number(today.revenue.toFixed(2)),
+        gstToday: Number(today.gst.toFixed(2)),
+      },
+    },
+  };
+
+  const storageStatus = {
+    snapshotsPersisted: false,
+    alertsPersisted: false,
+    notes: [] as string[],
+  };
+
+  try {
+    const { error: snapshotError } = await auth.supabaseAdmin
+      .from("platform_capacity_snapshots")
+      .upsert(snapshotPayload, { onConflict: "id" });
+    if (snapshotError) throw snapshotError;
+    storageStatus.snapshotsPersisted = true;
+  } catch (error: any) {
+    storageStatus.notes.push(
+      `Snapshot table unavailable (${error?.message || "unknown error"}). Run latest schema SQL on Supabase.`
+    );
+  }
+
+  try {
+    if (alerts.length) {
+      const alertRows = alerts.map((alert) => ({
+        id: `${alert.metricKey}_${todayKey}_${alert.threshold}`,
+        metric_key: alert.metricKey,
+        severity: alert.severity,
+        utilization: alert.utilization,
+        observed_at: alert.observedAt,
+        status: "open",
+        data: alert,
+      }));
+      const { error: alertError } = await auth.supabaseAdmin
+        .from("platform_capacity_alerts")
+        .upsert(alertRows, { onConflict: "id" });
+      if (alertError) throw alertError;
+    }
+    storageStatus.alertsPersisted = true;
+  } catch (error: any) {
+    storageStatus.notes.push(
+      `Alert table unavailable (${error?.message || "unknown error"}). Run latest schema SQL on Supabase.`
+    );
+  }
+
+  let snapshots: any[] = [];
+  let alertHistory: any[] = [];
+  try {
+    const snapshotsRes = await auth.supabaseAdmin
+      .from("platform_capacity_snapshots")
+      .select("id, snapshot_day, generated_at, data")
+      .gte("snapshot_day", daySeries[0])
+      .order("snapshot_day", { ascending: true });
+    if (!snapshotsRes.error) {
+      snapshots = snapshotsRes.data || [];
+    }
+  } catch {
+    // Ignore history fetch failure and return current snapshot payload only
+  }
+
+  try {
+    const alertsRes = await auth.supabaseAdmin
+      .from("platform_capacity_alerts")
+      .select("id, metric_key, severity, utilization, observed_at, status, data")
+      .gte("observed_at", ninetyDaysAgo)
+      .order("observed_at", { ascending: false })
+      .limit(120);
+    if (!alertsRes.error) {
+      alertHistory = alertsRes.data || [];
+    }
+  } catch {
+    // Ignore history fetch failure and return computed alerts
+  }
+
+  return res.status(200).json({
+    generatedAt: nowIso,
+    limits,
+    metrics,
+    summary: {
+      liveSessionsNow,
+      staleSessionsNow,
+      offlineLinksNow,
+      antiSpoofAlertsNow,
+      realtimeSignalsLast24h,
+      monthlySignalsEstimate,
+      mauLast30,
+      ridesToday: today.ridesCreated,
+      bookingsToday: today.bookingsCreated,
+      completedBookingsToday: today.completedBookings,
+      revenueToday: Number(today.revenue.toFixed(2)),
+      gstToday: Number(today.gst.toFixed(2)),
+      totalUsersTracked90d: users.length,
+      totalRidesTracked90d: rides.length,
+      totalBookingsTracked90d: bookings.length,
+      totalTransactionsTracked90d: transactions.length,
+      totalTicketsTracked90d: tickets.length,
+    },
+    daily,
+    alerts,
+    storageStatus,
+    snapshots,
+    alertHistory: alertHistory.map((row: any) => ({
+      id: row.id,
+      metricKey: row.metric_key,
+      severity: row.severity,
+      utilization: safeNumber(row.utilization, 0),
+      observedAt: row.observed_at,
+      status: row.status,
+      ...(row.data || {}),
+    })),
+  });
+}
+
 export default async function handler(req: any, res: any) {
   try {
     const action = getAction(req);
@@ -520,6 +1158,9 @@ export default async function handler(req: any, res: any) {
       case "delete-user":
         if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
         return handleDeleteUser(req, res);
+      case "capacity":
+        if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+        return handleCapacity(req, res);
       default:
         return res.status(404).json({ error: "Admin action not found" });
     }
