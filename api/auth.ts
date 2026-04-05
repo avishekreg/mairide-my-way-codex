@@ -25,6 +25,14 @@ const inMemoryPasswordResetTokens = new Map<string, {
   uid: string;
   expiresAt: string;
 }>();
+const SMS_OTP_SESSION_PREFIX = "smsotp_";
+const inMemorySmsOtpSessions = new Map<string, {
+  phoneNumber: string;
+  otpHash: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  purpose: "login" | "password_reset";
+}>();
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -151,6 +159,89 @@ async function getEmailOtpConfig(supabaseAdmin?: any) {
 
 function hashOtp(code: string) {
   return crypto.createHash("sha256").update(code).digest("hex");
+}
+
+function generateOtpCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+async function persistSmsOtpSession(
+  supabaseAdmin: any,
+  sessionId: string,
+  phoneNumber: string,
+  otpHash: string,
+  expiresAt: string,
+  purpose: "login" | "password_reset"
+) {
+  try {
+    const { error } = await supabaseAdmin.from("otp_sessions").upsert(
+      {
+        id: sessionId,
+        channel: "sms",
+        recipient: phoneNumber,
+        otp_hash: otpHash,
+        expires_at: expiresAt,
+        consumed_at: null,
+        attempts: 0,
+        data: { purpose },
+      },
+      { onConflict: "id" }
+    );
+
+    if (error) throw error;
+    return true;
+  } catch {
+    inMemorySmsOtpSessions.set(sessionId, {
+      phoneNumber,
+      otpHash,
+      expiresAt,
+      consumedAt: null,
+      purpose,
+    });
+    return false;
+  }
+}
+
+async function consumeSmsOtpSession(supabaseAdmin: any, sessionId: string, otp: string) {
+  const hashedOtp = hashOtp(otp);
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("otp_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .eq("channel", "sms")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return { ok: false, message: "Invalid OTP session." };
+    if (data.consumed_at) return { ok: false, message: "OTP has already been used." };
+    if (new Date(data.expires_at).getTime() < Date.now()) return { ok: false, message: "OTP has expired." };
+
+    if (String(data.otp_hash || "") !== hashedOtp) {
+      await supabaseAdmin
+        .from("otp_sessions")
+        .update({ attempts: Number(data.attempts || 0) + 1 })
+        .eq("id", sessionId);
+      return { ok: false, message: "Invalid OTP." };
+    }
+
+    await supabaseAdmin
+      .from("otp_sessions")
+      .update({ consumed_at: new Date().toISOString(), attempts: Number(data.attempts || 0) + 1 })
+      .eq("id", sessionId);
+
+    return { ok: true };
+  } catch {
+    const session = inMemorySmsOtpSessions.get(sessionId);
+    if (!session) return { ok: false, message: "Invalid OTP session." };
+    if (session.consumedAt) return { ok: false, message: "OTP has already been used." };
+    if (new Date(session.expiresAt).getTime() < Date.now()) return { ok: false, message: "OTP has expired." };
+    if (session.otpHash !== hashedOtp) return { ok: false, message: "Invalid OTP." };
+    session.consumedAt = new Date().toISOString();
+    inMemorySmsOtpSessions.set(sessionId, session);
+    return { ok: true };
+  }
 }
 
 async function persistEmailOtpSession(supabaseAdmin: any, sessionId: string, email: string, otpHash: string, expiresAt: string) {
@@ -311,10 +402,14 @@ async function sendSmsOtpToPhone(phoneNumber: string, purpose: "login" | "passwo
   }
 
   if (!apiKey) {
+    const code = "123456";
+    const sessionId = `${SMS_OTP_SESSION_PREFIX}${crypto.randomUUID()}`;
+    const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    await persistSmsOtpSession(getSupabaseAdmin(), sessionId, normalizedPhone, hashOtp(code), expiresAt, purpose);
     console.log(`[DEV] Mock SMS OTP sent to ${normalizedPhone}: 123456`);
     return {
       Status: "Success",
-      Details: "mock_sms_session_id",
+      Details: sessionId,
     };
   }
 
@@ -324,40 +419,49 @@ async function sendSmsOtpToPhone(phoneNumber: string, purpose: "login" | "passwo
     throw Object.assign(new Error("SMS API URL is misconfigured (voice/call route detected)."), { status: 500 });
   }
 
+  const otpCode = generateOtpCode();
+  const sessionId = `${SMS_OTP_SESSION_PREFIX}${crypto.randomUUID()}`;
+  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
   const selectedTemplate =
     purpose === "password_reset" ? smsConfig.passwordResetTemplateName : smsConfig.loginTemplateName;
   const templateName = /voice|call/i.test(selectedTemplate) ? "AUTOGEN2" : selectedTemplate;
-  return fetchJson(
-    `${baseUrl}/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/${encodeURIComponent(templateName)}`,
+
+  // 2Factor custom OTP send endpoint with app-generated OTP.
+  const response = await fetchJson(
+    `${baseUrl}/${encodeURIComponent(apiKey)}/SMS/${encodeURIComponent(normalizedPhone)}/${encodeURIComponent(otpCode)}/${encodeURIComponent(templateName)}`,
     "GET"
   );
+
+  if (String(response?.Status || "").toLowerCase() !== "success") {
+    throw Object.assign(new Error(String(response?.Details || "Failed to send OTP")), {
+      status: 500,
+      payload: response,
+    });
+  }
+
+  await persistSmsOtpSession(getSupabaseAdmin(), sessionId, normalizedPhone, hashOtp(otpCode), expiresAt, purpose);
+  return {
+    Status: "Success",
+    Details: sessionId,
+  };
 }
 
 async function verifySmsOtpSession(sessionId: string, otp: string) {
   const normalizedSessionId = normalizeSessionValue(sessionId);
   const normalizedOtp = normalizeOtpValue(otp);
-  const smsConfig = await getSmsOtpConfig();
-  const apiKey = smsConfig.apiKey;
 
   if (!normalizedSessionId || !normalizedOtp) {
     throw Object.assign(new Error("Session ID and OTP are required."), { status: 400 });
   }
 
-  if (!apiKey || normalizedSessionId.startsWith("mock_")) {
-    if (normalizedOtp === "123456") {
-      return { Status: "Success", Details: "OTP Matched" };
-    }
-    throw Object.assign(new Error("Invalid OTP"), { status: 400, payload: { Status: "Error", Details: "Invalid OTP" } });
+  const result = await consumeSmsOtpSession(getSupabaseAdmin(), normalizedSessionId, normalizedOtp);
+  if (!result.ok) {
+    throw Object.assign(new Error(result.message || "Invalid OTP"), {
+      status: 400,
+      payload: { Status: "Error", Details: result.message || "Invalid OTP" },
+    });
   }
-
-  const baseUrl = smsConfig.apiUrl.replace(/\/+$/, "");
-  if (/\/voice(\/|$)/i.test(baseUrl) || /\/call(\/|$)/i.test(baseUrl)) {
-    throw Object.assign(new Error("SMS API URL is misconfigured (voice/call route detected)."), { status: 500 });
-  }
-  return fetchJson(
-    `${baseUrl}/${encodeURIComponent(apiKey)}/SMS/VERIFY/${encodeURIComponent(normalizedSessionId)}/${encodeURIComponent(normalizedOtp)}`,
-    "GET"
-  );
+  return { Status: "Success", Details: "OTP Matched" };
 }
 
 async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
