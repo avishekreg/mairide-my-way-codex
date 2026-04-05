@@ -26,6 +26,10 @@ function normalizeOtpValue(value: unknown) {
   return compactDigits;
 }
 
+function normalizeSessionValue(value: unknown) {
+  return String(value || "").trim();
+}
+
 async function fetchJson(url: string, method: "GET" | "POST" = "GET") {
   const response = await fetch(url, {
     method,
@@ -112,7 +116,7 @@ export async function handleSendEmailOtp(req: ReqLike, res: ResLike) {
 export async function handleVerifyOtp(req: ReqLike, res: ResLike) {
   const { sessionId, otp } = req.body || {};
   const apiKey = process.env.TWO_FACTOR_API_KEY;
-  const normalizedSessionId = normalizeOtpValue(sessionId);
+  const normalizedSessionId = normalizeSessionValue(sessionId);
   const normalizedOtp = normalizeOtpValue(otp);
 
   if (!normalizedSessionId || !normalizedOtp) {

@@ -83,6 +83,10 @@ function normalizeOtpValue(value: unknown) {
   return compactDigits;
 }
 
+function normalizeSessionValue(value: unknown) {
+  return String(value || "").trim();
+}
+
 async function getAppConfigData(supabaseAdmin?: any) {
   try {
     const admin = supabaseAdmin || getSupabaseAdmin();
@@ -330,7 +334,7 @@ async function sendSmsOtpToPhone(phoneNumber: string, purpose: "login" | "passwo
 }
 
 async function verifySmsOtpSession(sessionId: string, otp: string) {
-  const normalizedSessionId = normalizeOtpValue(sessionId);
+  const normalizedSessionId = normalizeSessionValue(sessionId);
   const normalizedOtp = normalizeOtpValue(otp);
   const smsConfig = await getSmsOtpConfig();
   const apiKey = smsConfig.apiKey;
@@ -522,7 +526,7 @@ async function handleSendEmailOtp(req: any, res: any) {
 
 async function handleVerifyOtp(req: any, res: any) {
   const { sessionId, otp } = req.body || {};
-  const normalizedSessionId = normalizeOtpValue(sessionId);
+  const normalizedSessionId = normalizeSessionValue(sessionId);
   const normalizedOtp = normalizeOtpValue(otp);
   if (!normalizedSessionId || !normalizedOtp) {
     return res.status(400).json({ Status: "Error", Details: "Session ID and OTP are required." });
