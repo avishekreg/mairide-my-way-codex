@@ -14,6 +14,7 @@ export type ResLike = {
 };
 
 let supabaseAdmin: any = null;
+const DRIVER_JOINING_BONUS = 500;
 
 function extractErrorMessage(error: any, fallback: string) {
   if (!error) return fallback;
@@ -1085,6 +1086,20 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
 
     const now = new Date().toISOString();
     const baseData = (existingProfile?.data as Record<string, any>) || {};
+    const existingWalletRaw = existingProfile?.wallet || baseData.wallet || null;
+    const parsedExistingBalance = Number((existingWalletRaw as any)?.balance);
+    const parsedExistingPending = Number((existingWalletRaw as any)?.pendingBalance);
+    const shouldInitializeWallet =
+      !existingWalletRaw
+      || Number.isNaN(parsedExistingBalance)
+      || Number.isNaN(parsedExistingPending);
+    const resolvedWallet = shouldInitializeWallet
+      ? { balance: DRIVER_JOINING_BONUS, pendingBalance: 0 }
+      : {
+          balance: parsedExistingBalance,
+          pendingBalance: parsedExistingPending,
+        };
+
     const row = {
       id: targetUserId,
       email: expectedEmail || null,
@@ -1101,6 +1116,7 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
         typeof existingProfile?.force_password_change === "boolean"
           ? existingProfile.force_password_change
           : Boolean(baseData.forcePasswordChange),
+      wallet: resolvedWallet,
       driver_details: driverDetails,
       data: {
         ...baseData,
@@ -1110,6 +1126,7 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
         verificationStatus: "pending",
         rejectionReason: null,
         verifiedBy: null,
+        wallet: resolvedWallet,
         driverDetails,
       },
       updated_at: now,
@@ -1118,6 +1135,31 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
     const { error } = await supabaseAdmin.from("users").upsert(row, { onConflict: "id" });
 
     if (error) throw error;
+
+    if (shouldInitializeWallet) {
+      const txId = `init_${targetUserId}`;
+      await supabaseAdmin.from("transactions").upsert(
+        {
+          id: txId,
+          user_id: targetUserId,
+          type: "wallet_topup",
+          status: "completed",
+          data: {
+            id: txId,
+            userId: targetUserId,
+            type: "wallet_topup",
+            amount: DRIVER_JOINING_BONUS,
+            currency: "MAICOIN",
+            status: "completed",
+            description: "Driver joining bonus",
+            createdAt: now,
+          },
+          created_at: now,
+          updated_at: now,
+        },
+        { onConflict: "id" }
+      );
+    }
 
     return res.status(200).json({ message: "Driver onboarding submitted successfully." });
   } catch (error: any) {
