@@ -44,7 +44,8 @@ import {
   getDocFromServer,
   getDocsFromServer,
   orderBy,
-  limit
+  limit,
+  runTransaction
 } from 'firebase/firestore';
 import { 
   ref as storageRef, 
@@ -1872,7 +1873,9 @@ const parseApiResponse = async (response: Response, fallback: string) => {
 };
 
 const hasSubmittedBookingReview = (booking: Booking, reviewerRole: 'consumer' | 'driver') =>
-  reviewerRole === 'consumer' ? !!booking.consumerReview : !!booking.driverReview;
+  reviewerRole === 'consumer'
+    ? Boolean(booking.consumerReview || booking.reviewWorkflow?.consumerSubmittedAt)
+    : Boolean(booking.driverReview || booking.reviewWorkflow?.driverSubmittedAt);
 
 const submitBookingReview = async (
   bookingId: string,
@@ -1881,18 +1884,125 @@ const submitBookingReview = async (
   traits: string[],
   reviewerUid?: string
 ) => {
-  const token = await getAccessToken();
-  const response = await axios.post(
-    '/api/bookings?action=submit-review',
-    { bookingId, rating, comment, traits, reviewerUid: reviewerUid || '' },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  const normalizedBookingId = String(bookingId || '').trim();
+  const normalizedReviewerUid = String(reviewerUid || auth.currentUser?.uid || '').trim();
+  const normalizedRating = Number(rating);
+  const normalizedComment = typeof comment === 'string' ? comment.trim() : '';
+  const normalizedTraits = Array.isArray(traits)
+    ? traits
+        .filter((trait) => typeof trait === 'string')
+        .map((trait) => trait.trim())
+        .filter(Boolean)
+        .slice(0, 6)
+    : [];
 
-  return response.data;
+  if (!normalizedBookingId) throw new Error('Missing booking ID for review submission.');
+  if (!normalizedReviewerUid) throw new Error('Missing reviewer identity for review submission.');
+  if (!Number.isFinite(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
+    throw new Error('Please provide a valid rating between 1 and 5.');
+  }
+
+  const now = new Date().toISOString();
+  const bookingRef = doc(db, 'bookings', normalizedBookingId);
+
+  const result = await runTransaction(db, async (tx) => {
+    const bookingSnap = await tx.get(bookingRef);
+    if (!bookingSnap.exists()) {
+      throw new Error('Booking not found.');
+    }
+
+    const bookingData = bookingSnap.data() as Booking;
+    const reviewerRole =
+      normalizedReviewerUid === bookingData.consumerId
+        ? 'consumer'
+        : normalizedReviewerUid === bookingData.driverId
+          ? 'driver'
+          : null;
+    if (!reviewerRole) {
+      throw new Error('You are not authorized to review this booking.');
+    }
+
+    const bookingCompleted =
+      bookingData.status === 'completed' ||
+      bookingData.rideLifecycleStatus === 'completed' ||
+      Boolean(bookingData.rideEndedAt);
+    if (!bookingCompleted) {
+      throw new Error('Reviews can only be submitted after ride completion.');
+    }
+
+    const reviewField = reviewerRole === 'consumer' ? 'consumerReview' : 'driverReview';
+    const alreadySubmitted =
+      reviewerRole === 'consumer'
+        ? Boolean(bookingData.consumerReview || bookingData.reviewWorkflow?.consumerSubmittedAt)
+        : Boolean(bookingData.driverReview || bookingData.reviewWorkflow?.driverSubmittedAt);
+    if (alreadySubmitted) {
+      throw new Error('You have already submitted a review for this ride.');
+    }
+
+    const reviewPayload = {
+      rating: normalizedRating,
+      comment: normalizedComment,
+      traits: normalizedTraits,
+      createdAt: now,
+    };
+
+    const currentWorkflow = bookingData.reviewWorkflow || {
+      version: 2,
+      activatedAt: bookingData.rideEndedAt || now,
+      consumerPending: true,
+      driverPending: true,
+    };
+    const nextWorkflow =
+      reviewerRole === 'consumer'
+        ? {
+            ...currentWorkflow,
+            version: 2,
+            consumerPending: false,
+            consumerSubmittedAt: now,
+          }
+        : {
+            ...currentWorkflow,
+            version: 2,
+            driverPending: false,
+            driverSubmittedAt: now,
+          };
+
+    tx.update(bookingRef, {
+      [reviewField]: reviewPayload,
+      reviewWorkflow: nextWorkflow,
+      updatedAt: now,
+    } as any);
+
+    const targetUserId = reviewerRole === 'consumer' ? bookingData.driverId : bookingData.consumerId;
+    const targetUserRef = doc(db, 'users', targetUserId);
+    const targetUserSnap = await tx.get(targetUserRef);
+    if (targetUserSnap.exists()) {
+      const targetUser = targetUserSnap.data() as UserProfile;
+      const currentCount = Number(targetUser.reviewStats?.ratingCount || 0);
+      const currentAverage = Number(targetUser.reviewStats?.averageRating || 0);
+      const nextCount = currentCount + 1;
+      const nextAverage = Number((((currentAverage * currentCount) + normalizedRating) / nextCount).toFixed(1));
+
+      const targetUpdate: Record<string, any> = {
+        reviewStats: {
+          averageRating: nextAverage,
+          ratingCount: nextCount,
+          lastReviewAt: now,
+        },
+        updatedAt: now,
+      };
+
+      if (targetUser.role === 'driver') {
+        targetUpdate['driverDetails.rating'] = nextAverage;
+      }
+
+      tx.set(targetUserRef, targetUpdate, { merge: true });
+    }
+
+    return { review: reviewPayload, workflow: nextWorkflow };
+  });
+
+  return result;
 };
 
 const LoadingScreen = () => (
@@ -9268,6 +9378,12 @@ const finalizeDriverDashboardRazorpayPayment = async (
         rideEndOtpVerifiedAt: completedAt,
         status: 'completed',
         driverEarningsCreditedAt: booking.driverEarningsCreditedAt || completedAt,
+        reviewWorkflow: {
+          version: 2,
+          activatedAt: completedAt,
+          consumerPending: true,
+          driverPending: true,
+        },
       });
 
       await updateDoc(doc(db, 'rides', booking.rideId), {

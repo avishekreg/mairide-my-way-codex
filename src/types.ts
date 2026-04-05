@@ -294,6 +294,14 @@ export interface Booking {
     traits?: string[];
     createdAt: string;
   };
+  reviewWorkflow?: {
+    version: number;
+    activatedAt: string;
+    consumerPending: boolean;
+    driverPending: boolean;
+    consumerSubmittedAt?: string;
+    driverSubmittedAt?: string;
+  };
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'negotiating' | 'rejected';
   createdAt: string;
 }
