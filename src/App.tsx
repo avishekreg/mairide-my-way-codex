@@ -6966,27 +6966,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
-
-  if (loadError || authFailure) {
-    return (
-      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-red-100">
-        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-gray-900 mb-2">Google Maps Error</h2>
-        <p className="text-gray-600 mb-4">
-          {loadError ? loadError.message : "Authentication Failure (Check API Key restrictions or billing)"}
-        </p>
-        <div className="text-sm bg-red-50 p-4 rounded-lg text-red-700 font-mono break-all text-left">
-          <p className="font-bold mb-2">Possible Causes:</p>
-          <ul className="list-disc ml-4 space-y-1">
-            <li><strong>RefererNotAllowedMapError:</strong> Your domain restriction in Google Cloud Console is incorrect.</li>
-            <li><strong>ApiNotActivatedMapError:</strong> Maps JavaScript API is not enabled.</li>
-            <li><strong>BillingNotEnabledMapError:</strong> Billing is not linked to this project.</li>
-          </ul>
-          <p className="mt-4 text-xs opacity-70">API Key: {GOOGLE_MAPS_API_KEY.substring(0, 10)}...</p>
-        </div>
-      </div>
-    );
-  }
+  const hasMapsIssue = Boolean(loadError || authFailure);
   const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [drivers, setDrivers] = useState<UserProfile[]>([]);
   const [selectedRide, setSelectedRide] = useState<any | null>(null);
@@ -7732,6 +7712,27 @@ const finalizeTravelerDashboardRazorpayPayment = async (
     }
   };
 
+  if (hasMapsIssue) {
+    return (
+      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-red-100">
+        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-gray-900 mb-2">Google Maps Error</h2>
+        <p className="text-gray-600 mb-4">
+          {loadError ? loadError.message : "Authentication Failure (Check API Key restrictions or billing)"}
+        </p>
+        <div className="text-sm bg-red-50 p-4 rounded-lg text-red-700 font-mono break-all text-left">
+          <p className="font-bold mb-2">Possible Causes:</p>
+          <ul className="list-disc ml-4 space-y-1">
+            <li><strong>RefererNotAllowedMapError:</strong> Your domain restriction in Google Cloud Console is incorrect.</li>
+            <li><strong>ApiNotActivatedMapError:</strong> Maps JavaScript API is not enabled.</li>
+            <li><strong>BillingNotEnabledMapError:</strong> Billing is not linked to this project.</li>
+          </ul>
+          <p className="mt-4 text-xs opacity-70">API Key: {GOOGLE_MAPS_API_KEY.substring(0, 10)}...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
       {activeTab === 'search' && (
@@ -8329,25 +8330,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, []);
   const [isPostingRide, setIsPostingRide] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'requests' | 'history' | 'wallet' | 'support' | 'profile'>('dashboard');
-
-  if (loadError || authFailure) {
-    return (
-      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-red-100">
-        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-gray-900 mb-2">Google Maps Error</h2>
-        <p className="text-gray-600 mb-4">
-          {loadError ? loadError.message : "Authentication Failure (Check API Key restrictions or billing)"}
-        </p>
-        <div className="text-sm bg-red-50 p-4 rounded-lg text-red-700 font-mono break-all text-left">
-          <p className="font-bold mb-2">Possible Causes:</p>
-          <ul className="list-disc ml-4 space-y-1">
-            <li><strong>RefererNotAllowedMapError:</strong> Your domain restriction in Google Cloud Console is incorrect.</li>
-            <li><strong>ApiNotActivatedMapError:</strong> Maps JavaScript API is not enabled.</li>
-          </ul>
-        </div>
-      </div>
-    );
-  }
+  const hasMapsIssue = Boolean(loadError || authFailure);
   const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [autocompleteFrom, setAutocompleteFrom] = useState<any | null>(null);
   const [autocompleteTo, setAutocompleteTo] = useState<any | null>(null);
@@ -9027,6 +9010,25 @@ const finalizeDriverDashboardRazorpayPayment = async (
       setIsSubmittingReview(false);
     }
   };
+
+  if (hasMapsIssue) {
+    return (
+      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-red-100">
+        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-gray-900 mb-2">Google Maps Error</h2>
+        <p className="text-gray-600 mb-4">
+          {loadError ? loadError.message : "Authentication Failure (Check API Key restrictions or billing)"}
+        </p>
+        <div className="text-sm bg-red-50 p-4 rounded-lg text-red-700 font-mono break-all text-left">
+          <p className="font-bold mb-2">Possible Causes:</p>
+          <ul className="list-disc ml-4 space-y-1">
+            <li><strong>RefererNotAllowedMapError:</strong> Your domain restriction in Google Cloud Console is incorrect.</li>
+            <li><strong>ApiNotActivatedMapError:</strong> Maps JavaScript API is not enabled.</li>
+          </ul>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
