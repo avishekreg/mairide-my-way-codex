@@ -2732,15 +2732,16 @@ const AuthPage = ({
   };
 
   const handleVerifyResetOtp = async () => {
-    if (!resetSessionId || resetOtp.trim().length < 6) {
-      alert('Please enter the 6-digit OTP.');
+    const otpDigits = resetOtp.replace(/[^\d]/g, '').slice(0, 6);
+    if (!resetSessionId || otpDigits.length < 4) {
+      alert('Please enter a valid OTP.');
       return;
     }
     setIsLoading(true);
     try {
       const response = await postAuthAction(
         'verify-password-reset-otp',
-        { resetSessionId, otp: resetOtp.trim() },
+        { resetSessionId, otp: otpDigits },
         '/api/auth/verify-password-reset-otp'
       );
       const data = await parseApiResponse(response, 'Failed to verify reset OTP');
@@ -2855,10 +2856,11 @@ const AuthPage = ({
   };
 
   const handleVerifyEmailOtp = async () => {
-    if (!otp || !emailSessionId) return;
+    const otpDigits = otp.replace(/[^\d]/g, '').slice(0, 6);
+    if (!otpDigits || !emailSessionId) return;
     setIsLoading(true);
     try {
-      const response = await postAuthAction('verify-otp', { sessionId: emailSessionId, otp }, '/api/auth/verify-otp');
+      const response = await postAuthAction('verify-otp', { sessionId: emailSessionId, otp: otpDigits }, '/api/auth/verify-otp');
       const data = await parseApiResponse(response, 'Failed to verify Email OTP');
       if (data.Status === 'Success' && data.Details === 'OTP Matched') {
         setOtp(''); // Clear OTP for next step
@@ -2899,11 +2901,12 @@ const AuthPage = ({
   };
 
   const handleVerifyOtp = async () => {
-    if (!otp || !sessionId) return;
+    const otpDigits = otp.replace(/[^\d]/g, '').slice(0, 6);
+    if (!otpDigits || !sessionId) return;
     setIsLoading(true);
     setNotRegisteredError(false);
     try {
-      const response = await postAuthAction('verify-otp', { sessionId, otp }, '/api/auth/verify-otp');
+      const response = await postAuthAction('verify-otp', { sessionId, otp: otpDigits }, '/api/auth/verify-otp');
       const data = await parseApiResponse(response, 'Failed to verify OTP');
       if (data.Status === 'Success' && data.Details === 'OTP Matched') {
         setOtp('');
