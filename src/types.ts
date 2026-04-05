@@ -307,3 +307,42 @@ export interface Booking {
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'negotiating' | 'rejected';
   createdAt: string;
 }
+
+export interface TripSession {
+  id: string;
+  bookingId: string;
+  rideId: string;
+  driverId: string;
+  consumerId: string;
+  status: 'preparing' | 'live' | 'completed' | 'cancelled';
+  driverLocation?: {
+    lat: number;
+    lng: number;
+    accuracy?: number;
+    heading?: number;
+    speedKmph?: number;
+    capturedAt: string;
+  };
+  travelerLocation?: {
+    lat: number;
+    lng: number;
+    accuracy?: number;
+    capturedAt: string;
+  };
+  etaMinutes?: number;
+  distanceKm?: number;
+  staleAfterMs?: number;
+  lastSignalAt?: string;
+  isStale?: boolean;
+  networkState?: 'online' | 'offline' | 'recovered';
+  appState?: 'foreground' | 'background' | 'resumed';
+  auditTrail?: {
+    actorId: string;
+    actorRole: 'driver' | 'consumer' | 'admin' | 'system';
+    action: string;
+    createdAt: string;
+    meta?: Record<string, any>;
+  }[];
+  createdAt: string;
+  updatedAt: string;
+}

@@ -54,7 +54,7 @@ import {
 } from 'firebase/storage';
 import { auth, db, storage } from './lib/firebase';
 import { supabase } from './lib/supabase';
-import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride } from './types';
+import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import Webcam from 'react-webcam';
 import { motion, AnimatePresence } from 'motion/react';
@@ -317,6 +317,46 @@ const compressDataUrlImage = (dataUrl: string, maxEdge = 1280, quality = 0.76) =
   });
 
 const generateRideOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
+
+const TRIP_SESSION_STALE_AFTER_MS = 60_000;
+const TRIP_SIGNAL_UPDATE_INTERVAL_MS = 3_000;
+const TRIP_AUDIT_MAX_ITEMS = 40;
+const TRIP_MAX_VALID_SPEED_KMPH = 170;
+
+const getBookingRealtimeStatus = (booking: Booking): TripSession['status'] => {
+  if (booking.status === 'cancelled' || booking.status === 'rejected') return 'cancelled';
+  if (booking.rideLifecycleStatus === 'completed' || Boolean(booking.rideEndedAt) || booking.status === 'completed') return 'completed';
+  if (booking.rideLifecycleStatus === 'in_progress' || Boolean(booking.rideStartedAt)) return 'live';
+  return 'preparing';
+};
+
+const isBookingTrackable = (booking: Booking) => {
+  if ((booking as any).rideRetired) return false;
+  if (['cancelled', 'rejected', 'completed'].includes(booking.status)) return false;
+  if (booking.rideLifecycleStatus === 'completed' || Boolean(booking.rideEndedAt)) return false;
+  return ['pending', 'confirmed', 'negotiating'].includes(booking.status);
+};
+
+const deriveTripEtaMinutes = (
+  travelerLocation: { lat: number; lng: number } | undefined,
+  destinationLocation: { lat: number; lng: number } | undefined,
+  speedKmph?: number
+) => {
+  if (!travelerLocation || !destinationLocation) return undefined;
+  const distanceKm = getDistance(
+    travelerLocation.lat,
+    travelerLocation.lng,
+    destinationLocation.lat,
+    destinationLocation.lng
+  );
+  const effectiveSpeed = Math.max(22, Math.min(80, Number(speedKmph || 0) || 36));
+  return Math.max(1, Math.round((distanceKm / effectiveSpeed) * 60));
+};
+
+const appendTripAuditEntry = (
+  existing: TripSession['auditTrail'],
+  nextEntry: NonNullable<TripSession['auditTrail']>[number]
+) => [...(existing || []), nextEntry].slice(-TRIP_AUDIT_MAX_ITEMS);
 
 const maybeActivateRideLifecycle = async (bookingId: string) => {
   const bookingRef = doc(db, 'bookings', bookingId);
@@ -2003,6 +2043,162 @@ const submitBookingReview = async (
   });
 
   return result;
+};
+
+const upsertTripSession = async ({
+  booking,
+  actorRole,
+  actorId,
+  location,
+  networkState,
+  appState,
+  forceStatus,
+  note,
+}: {
+  booking: Booking;
+  actorRole: 'driver' | 'consumer' | 'admin' | 'system';
+  actorId: string;
+  location?: {
+    lat: number;
+    lng: number;
+    accuracy?: number;
+    speedKmph?: number;
+    heading?: number;
+  };
+  networkState?: TripSession['networkState'];
+  appState?: TripSession['appState'];
+  forceStatus?: TripSession['status'];
+  note?: string;
+}) => {
+  const now = new Date().toISOString();
+  const sessionRef = doc(db, 'tripSessions', booking.id);
+  const snapshot = await getDoc(sessionRef);
+  const previous = snapshot.exists() ? (snapshot.data() as TripSession) : null;
+  const resolvedStatus = forceStatus || getBookingRealtimeStatus(booking);
+  const previousActorLocation =
+    actorRole === 'driver'
+      ? previous?.driverLocation
+      : actorRole === 'consumer'
+        ? previous?.travelerLocation
+        : undefined;
+
+  let spoofDetected = false;
+  let spoofMeta: Record<string, any> | undefined;
+  if (location && previousActorLocation?.capturedAt) {
+    const elapsedMs = Date.parse(now) - Date.parse(previousActorLocation.capturedAt);
+    if (elapsedMs > 0) {
+      const distanceKm = getDistance(
+        previousActorLocation.lat,
+        previousActorLocation.lng,
+        location.lat,
+        location.lng
+      );
+      const computedSpeedKmph = (distanceKm / elapsedMs) * 3_600_000;
+      if (computedSpeedKmph > TRIP_MAX_VALID_SPEED_KMPH) {
+        spoofDetected = true;
+        spoofMeta = {
+          previous: previousActorLocation,
+          current: location,
+          elapsedMs,
+          computedSpeedKmph: Number(computedSpeedKmph.toFixed(2)),
+        };
+      }
+    }
+  }
+
+  const driverLocationPatch =
+    actorRole === 'driver' && location
+      ? {
+          lat: location.lat,
+          lng: location.lng,
+          accuracy: location.accuracy,
+          speedKmph: location.speedKmph,
+          heading: location.heading,
+          capturedAt: now,
+        }
+      : previous?.driverLocation;
+
+  const travelerLocationPatch =
+    actorRole === 'consumer' && location
+      ? {
+          lat: location.lat,
+          lng: location.lng,
+          accuracy: location.accuracy,
+          capturedAt: now,
+        }
+      : previous?.travelerLocation;
+
+  const sessionPayload: TripSession = {
+    id: booking.id,
+    bookingId: booking.id,
+    rideId: booking.rideId,
+    driverId: booking.driverId,
+    consumerId: booking.consumerId,
+    status: resolvedStatus,
+    driverLocation: driverLocationPatch,
+    travelerLocation: travelerLocationPatch,
+    distanceKm:
+      driverLocationPatch && travelerLocationPatch
+        ? Number(
+            getDistance(
+              driverLocationPatch.lat,
+              driverLocationPatch.lng,
+              travelerLocationPatch.lat,
+              travelerLocationPatch.lng
+            ).toFixed(2)
+          )
+        : previous?.distanceKm,
+    etaMinutes: deriveTripEtaMinutes(
+      travelerLocationPatch
+        ? { lat: travelerLocationPatch.lat, lng: travelerLocationPatch.lng }
+        : undefined,
+      (booking as any).destinationLocation,
+      driverLocationPatch?.speedKmph
+    ),
+    staleAfterMs: TRIP_SESSION_STALE_AFTER_MS,
+    lastSignalAt: now,
+    isStale: false,
+    networkState:
+      networkState ||
+      (previous?.networkState === 'offline' ? 'recovered' : previous?.networkState) ||
+      'online',
+    appState: appState || previous?.appState || 'foreground',
+    auditTrail: appendTripAuditEntry(previous?.auditTrail, {
+      actorId,
+      actorRole,
+      action: note || `${actorRole}_sync`,
+      createdAt: now,
+      meta: {
+        bookingStatus: booking.status,
+        rideLifecycleStatus: booking.rideLifecycleStatus || null,
+        resolvedStatus,
+        spoofDetected,
+        ...(spoofMeta ? { spoofMeta } : {}),
+      },
+    }),
+    createdAt: previous?.createdAt || now,
+    updatedAt: now,
+  };
+
+  await setDoc(sessionRef, sessionPayload, { merge: true });
+  return sessionPayload;
+};
+
+const markTripSessionStale = async (session: TripSession) => {
+  const staleAfterMs = Number(session.staleAfterMs || TRIP_SESSION_STALE_AFTER_MS);
+  const lastSignal = session.lastSignalAt ? new Date(session.lastSignalAt).getTime() : 0;
+  if (!lastSignal) return;
+  if (Date.now() - lastSignal <= staleAfterMs) return;
+
+  await setDoc(
+    doc(db, 'tripSessions', session.id),
+    {
+      isStale: true,
+      networkState: 'offline',
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  );
 };
 
 const listSupportTickets = async (all = false) => {
@@ -3911,6 +4107,7 @@ const CameraCapture = ({ onCapture, onCancel, title }: { onCapture: (image: stri
 const WalletDashboard = ({ profile }: { profile: UserProfile }) => {
   const [stats, setStats] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
   const [driverCompletedBookings, setDriverCompletedBookings] = useState<Booking[]>([]);
   const [showEarningsDetail, setShowEarningsDetail] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -5049,6 +5246,7 @@ const RideReviewModal = ({
 
 const TravelerDashboardSummary = ({
   bookings,
+  tripSessions,
   rideStatusById = {},
   ridesResolved = false,
   config,
@@ -5062,6 +5260,7 @@ const TravelerDashboardSummary = ({
   onOpenBooking,
 }: {
   bookings: Booking[];
+  tripSessions: Record<string, TripSession>;
   rideStatusById?: Record<string, Ride['status']>;
   ridesResolved?: boolean;
   config: AppConfig;
@@ -5106,6 +5305,12 @@ const TravelerDashboardSummary = ({
           const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
           const statusLabel = getBookingStateLabel(booking);
           const travelerFeeBreakdown = getBookingPaymentBreakdown(booking as Booking, 'consumer', config);
+          const tripSession = tripSessions[booking.id];
+          const showLiveTrackingPanel =
+            booking.status === 'confirmed' ||
+            booking.rideLifecycleStatus === 'awaiting_start_otp' ||
+            booking.rideLifecycleStatus === 'in_progress' ||
+            Boolean(booking.rideStartedAt);
 
           return (
           <div key={booking.id} className="bg-white border border-mairide-secondary rounded-[28px] p-4 md:p-6 shadow-sm min-w-0 overflow-hidden">
@@ -5242,6 +5447,48 @@ const TravelerDashboardSummary = ({
                 ) : null}
               </div>
             )}
+            {showLiveTrackingPanel && tripSession && (
+              <div className={cn(
+                "mt-4 rounded-2xl border p-4",
+                tripSession.isStale ? "border-orange-200 bg-orange-50" : "border-green-200 bg-green-50"
+              )}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-mairide-primary">Live Trip Session</p>
+                  <span className={cn(
+                    "rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest",
+                    tripSession.status === 'live'
+                      ? "bg-green-100 text-green-700"
+                      : tripSession.status === 'completed'
+                        ? "bg-mairide-bg text-mairide-primary"
+                        : "bg-orange-100 text-orange-700"
+                  )}>
+                    {tripSession.status}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-xl bg-white/80 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">ETA</p>
+                    <p className="mt-1 text-lg font-black text-mairide-primary">
+                      {tripSession.etaMinutes ? `${tripSession.etaMinutes} min` : 'Updating...'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-white/80 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Driver Signal</p>
+                    <p className="mt-1 text-sm font-bold text-mairide-primary">
+                      {tripSession.lastSignalAt ? new Date(tripSession.lastSignalAt).toLocaleTimeString() : 'Pending'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-white/80 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Network</p>
+                    <p className="mt-1 text-sm font-bold capitalize text-mairide-primary">
+                      {tripSession.networkState || 'online'}
+                      {tripSession.isStale ? ' (stale)' : ''}
+                    </p>
+                  </div>
+                </div>
+                <TripSessionMiniMap session={tripSession} />
+              </div>
+            )}
             {booking.status === 'confirmed' && booking.feePaid && booking.driverFeePaid && !booking.rideStartedAt && booking.rideStartOtp && (
               <div className="mt-4 rounded-2xl border border-mairide-primary/20 bg-mairide-primary/5 p-4">
                 <p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Ride Start OTP</p>
@@ -5376,8 +5623,51 @@ const TravelerCounterOffersSummary = ({
   );
 };
 
+const TripSessionMiniMap = ({ session }: { session: TripSession }) => {
+  if (typeof window === 'undefined' || !window.google) return null;
+  if (!session.driverLocation || !session.travelerLocation) return null;
+
+  const center = {
+    lat: Number(((session.driverLocation.lat + session.travelerLocation.lat) / 2).toFixed(6)),
+    lng: Number(((session.driverLocation.lng + session.travelerLocation.lng) / 2).toFixed(6)),
+  };
+
+  return (
+    <div className="mt-3 h-44 overflow-hidden rounded-xl border border-mairide-secondary/30 bg-white">
+      <GoogleMap
+        mapContainerStyle={{ width: '100%', height: '100%' }}
+        center={center}
+        zoom={10}
+        options={{
+          disableDefaultUI: true,
+          zoomControl: true,
+          gestureHandling: 'cooperative',
+        }}
+      >
+        <Marker
+          position={{ lat: session.driverLocation.lat, lng: session.driverLocation.lng }}
+          title="Driver"
+          icon={{
+            url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+            scaledSize: new window.google.maps.Size(32, 32),
+          }}
+        />
+        <Marker
+          position={{ lat: session.travelerLocation.lat, lng: session.travelerLocation.lng }}
+          title="Traveler"
+          icon={{
+            url: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png',
+            scaledSize: new window.google.maps.Size(30, 30),
+          }}
+        />
+      </GoogleMap>
+    </div>
+  );
+};
+
 const DriverDashboardSummary = ({
   requests,
+  tripSessions,
   config,
   onAccept,
   onReject,
@@ -5390,6 +5680,7 @@ const DriverDashboardSummary = ({
   onEndRide,
 }: {
   requests: Booking[];
+  tripSessions: Record<string, TripSession>;
   config: AppConfig;
   onAccept: (request: Booking) => void;
   onReject: (request: Booking) => void;
@@ -5430,6 +5721,7 @@ const DriverDashboardSummary = ({
           const displayFare = getNegotiationDisplayFare(request);
           const listedFare = getListedFare(request);
           const driverFeeBreakdown = getBookingPaymentBreakdown(request as Booking, 'driver', config);
+          const tripSession = tripSessions[request.id];
           const requestedOrigin = request.requestedOrigin || request.origin;
           const requestedDestination = request.requestedDestination || request.destination;
           const showsDetour =
@@ -5541,6 +5833,48 @@ const DriverDashboardSummary = ({
                 {request.feePaid && request.driverFeePaid ? (
                   <ContactUnlockCard label="Traveler contact" phoneNumber={request.consumerPhone} />
                 ) : null}
+              </div>
+            )}
+            {tripSession && (
+              <div className={cn(
+                "mt-4 rounded-2xl border p-4",
+                tripSession.isStale ? "border-orange-200 bg-orange-50" : "border-green-200 bg-green-50"
+              )}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-mairide-primary">Trip Tracking Health</p>
+                  <span className={cn(
+                    "rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest",
+                    tripSession.status === 'live'
+                      ? "bg-green-100 text-green-700"
+                      : tripSession.status === 'completed'
+                        ? "bg-mairide-bg text-mairide-primary"
+                        : "bg-orange-100 text-orange-700"
+                  )}>
+                    {tripSession.status}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-xl bg-white/80 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler ETA</p>
+                    <p className="mt-1 text-lg font-black text-mairide-primary">
+                      {tripSession.etaMinutes ? `${tripSession.etaMinutes} min` : 'Updating...'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-white/80 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Last Signal</p>
+                    <p className="mt-1 text-sm font-bold text-mairide-primary">
+                      {tripSession.lastSignalAt ? new Date(tripSession.lastSignalAt).toLocaleTimeString() : 'Pending'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-white/80 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Session State</p>
+                    <p className="mt-1 text-sm font-bold capitalize text-mairide-primary">
+                      {tripSession.networkState || 'online'}
+                      {tripSession.isStale ? ' (stale)' : ''}
+                    </p>
+                  </div>
+                </div>
+                <TripSessionMiniMap session={tripSession} />
               </div>
             )}
             {request.status === 'confirmed' && request.feePaid && request.driverFeePaid && !request.rideStartedAt && (
@@ -7481,7 +7815,14 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [searchLocationTo, setSearchLocationTo] = useState<{ lat: number, lng: number } | null>(null);
   const [directionsResponse, setDirectionsResponse] = useState<any | null>(null);
   const [rideStatusById, setRideStatusById] = useState<Record<string, Ride['status']>>({});
+  const [tripSessions, setTripSessions] = useState<Record<string, TripSession>>({});
   const [ridesResolved, setRidesResolved] = useState(false);
+  const [tripNetworkState, setTripNetworkState] = useState<TripSession['networkState']>(
+    typeof navigator !== 'undefined' && navigator.onLine ? 'online' : 'offline'
+  );
+  const [tripAppState, setTripAppState] = useState<TripSession['appState']>(
+    typeof document !== 'undefined' && document.visibilityState === 'visible' ? 'foreground' : 'background'
+  );
   const seenDriverCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedDriverCountersRef = useRef(false);
 
@@ -7506,6 +7847,25 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'bookings');
     });
+    return () => unsubscribe();
+  }, [profile.uid]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'tripSessions'), where('consumerId', '==', profile.uid));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const next: Record<string, TripSession> = {};
+        snapshot.docs.forEach((snapshotDoc) => {
+          const data = snapshotDoc.data() as TripSession;
+          next[data.bookingId || snapshotDoc.id] = { ...data, id: snapshotDoc.id };
+        });
+        setTripSessions(next);
+      },
+      (error) => {
+        console.error('Trip session subscription error (traveler):', error);
+      }
+    );
     return () => unsubscribe();
   }, [profile.uid]);
 
@@ -7642,6 +8002,66 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       return () => navigator.geolocation.clearWatch(watchId);
     }
   }, [profile.uid]);
+
+  useEffect(() => {
+    const handleOnline = () => setTripNetworkState('recovered');
+    const handleOffline = () => setTripNetworkState('offline');
+    const handleVisibility = () => setTripAppState(document.visibilityState === 'visible' ? 'foreground' : 'background');
+    const handleFocus = () => setTripAppState('resumed');
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  useEffect(() => {
+    const activeBookings = dashboardBookings.filter(isBookingTrackable);
+    if (!activeBookings.length) return;
+
+    const sync = () => {
+      activeBookings.forEach((booking) => {
+        void upsertTripSession({
+          booking,
+          actorRole: 'consumer',
+          actorId: profile.uid,
+          location: userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined,
+          networkState: tripNetworkState,
+          appState: tripAppState,
+          note: 'traveler_presence_sync',
+        }).catch((error) => {
+          console.error('Traveler trip session sync failed:', error);
+        });
+      });
+      if (tripNetworkState === 'recovered') {
+        setTripNetworkState('online');
+      }
+      if (tripAppState === 'resumed') {
+        setTripAppState(document.visibilityState === 'visible' ? 'foreground' : 'background');
+      }
+    };
+
+    sync();
+    const timer = window.setInterval(sync, TRIP_SIGNAL_UPDATE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [dashboardBookings, profile.uid, userLocation, tripNetworkState, tripAppState]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      Object.values(tripSessions).forEach((session) => {
+        void markTripSessionStale(session).catch((error) => {
+          console.error('Failed to mark stale traveler trip session:', error);
+        });
+      });
+    }, 10_000);
+
+    return () => window.clearInterval(timer);
+  }, [tripSessions]);
 
   useEffect(() => {
     // Listen for online drivers within 100km radius
@@ -8235,6 +8655,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
       {activeTab === 'search' && (
         <TravelerDashboardSummary
           bookings={dashboardBookings}
+          tripSessions={tripSessions}
           rideStatusById={rideStatusById}
           ridesResolved={ridesResolved}
           config={config}
@@ -8842,6 +9263,20 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
   const [driverBookings, setDriverBookings] = useState<Booking[]>([]);
+  const [tripSessions, setTripSessions] = useState<Record<string, TripSession>>({});
+  const [tripNetworkState, setTripNetworkState] = useState<TripSession['networkState']>(
+    typeof navigator !== 'undefined' && navigator.onLine ? 'online' : 'offline'
+  );
+  const [tripAppState, setTripAppState] = useState<TripSession['appState']>(
+    typeof document !== 'undefined' && document.visibilityState === 'visible' ? 'foreground' : 'background'
+  );
+  const [driverSignalLocation, setDriverSignalLocation] = useState<{
+    lat: number;
+    lng: number;
+    accuracy?: number;
+    heading?: number;
+    speedKmph?: number;
+  } | null>(null);
   const seenTravelerCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedTravelerCountersRef = useRef(false);
   const activeDashboardRequests = useMemo(
@@ -8894,6 +9329,25 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     });
     return () => unsubscribe();
   }, [profile.uid, retiredRideIds]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'tripSessions'), where('driverId', '==', profile.uid));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const next: Record<string, TripSession> = {};
+        snapshot.docs.forEach((snapshotDoc) => {
+          const data = snapshotDoc.data() as TripSession;
+          next[data.bookingId || snapshotDoc.id] = { ...data, id: snapshotDoc.id };
+        });
+        setTripSessions(next);
+      },
+      (error) => {
+        console.error('Trip session subscription error (driver):', error);
+      }
+    );
+    return () => unsubscribe();
+  }, [profile.uid]);
 
   useEffect(() => {
     const q = query(collection(db, 'bookings'), where('driverId', '==', profile.uid));
@@ -8961,12 +9415,36 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, [requests]);
 
   useEffect(() => {
+    const handleOnline = () => setTripNetworkState('recovered');
+    const handleOffline = () => setTripNetworkState('offline');
+    const handleVisibility = () => setTripAppState(document.visibilityState === 'visible' ? 'foreground' : 'background');
+    const handleFocus = () => setTripAppState('resumed');
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  useEffect(() => {
     if ("geolocation" in navigator) {
       const watchId = navigator.geolocation.watchPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
           const newLocation = { lat: latitude, lng: longitude };
           setUserLocation(newLocation);
+          setDriverSignalLocation({
+            lat: latitude,
+            lng: longitude,
+            accuracy: position.coords.accuracy,
+            heading: Number.isFinite(position.coords.heading as number) ? Number(position.coords.heading) : undefined,
+            speedKmph: Number.isFinite(position.coords.speed as number) ? Number(position.coords.speed) * 3.6 : undefined,
+          });
           
           // Update location in Firestore
           updateDoc(doc(db, 'users', profile.uid), {
@@ -8982,6 +9460,49 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       return () => navigator.geolocation.clearWatch(watchId);
     }
   }, [profile.uid]);
+
+  useEffect(() => {
+    const trackableRequests = requests.filter(isBookingTrackable);
+    if (!trackableRequests.length) return;
+
+    const sync = () => {
+      trackableRequests.forEach((request) => {
+        void upsertTripSession({
+          booking: request,
+          actorRole: 'driver',
+          actorId: profile.uid,
+          location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
+          networkState: tripNetworkState,
+          appState: tripAppState,
+          note: 'driver_presence_sync',
+        }).catch((error) => {
+          console.error('Driver trip session sync failed:', error);
+        });
+      });
+      if (tripNetworkState === 'recovered') {
+        setTripNetworkState('online');
+      }
+      if (tripAppState === 'resumed') {
+        setTripAppState(document.visibilityState === 'visible' ? 'foreground' : 'background');
+      }
+    };
+
+    sync();
+    const timer = window.setInterval(sync, TRIP_SIGNAL_UPDATE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [requests, profile.uid, driverSignalLocation, userLocation, tripNetworkState, tripAppState]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      Object.values(tripSessions).forEach((session) => {
+        void markTripSessionStale(session).catch((error) => {
+          console.error('Failed to mark stale driver trip session:', error);
+        });
+      });
+    }, 10_000);
+
+    return () => window.clearInterval(timer);
+  }, [tripSessions]);
 
   const toggleOnline = async () => {
     const newState = !isOnline;
@@ -9164,6 +9685,22 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             )
       );
 
+      await upsertTripSession({
+        booking: {
+          ...request,
+          status,
+          fare: acceptedFare,
+          rideLifecycleStatus: status === 'confirmed' ? request.rideLifecycleStatus : request.rideLifecycleStatus,
+        },
+        actorRole: 'driver',
+        actorId: profile.uid,
+        location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
+        forceStatus: status === 'rejected' ? 'cancelled' : undefined,
+        networkState: tripNetworkState,
+        appState: tripAppState,
+        note: status === 'confirmed' ? 'driver_accepted_offer' : 'driver_rejected_offer',
+      });
+
       showAppDialog(status === 'confirmed' ? 'Booking confirmed.' : 'Traveler offer rejected.', 'success');
     } catch (error) {
       try {
@@ -9198,6 +9735,20 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
                   : booking
               )
         );
+        await upsertTripSession({
+          booking: {
+            ...request,
+            status,
+            fare: acceptedFare,
+          },
+          actorRole: 'driver',
+          actorId: profile.uid,
+          location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
+          forceStatus: status === 'rejected' ? 'cancelled' : undefined,
+          networkState: tripNetworkState,
+          appState: tripAppState,
+          note: status === 'confirmed' ? 'driver_accepted_offer' : 'driver_rejected_offer',
+        });
         showAppDialog(status === 'confirmed' ? 'Booking confirmed.' : 'Traveler offer rejected.', 'success');
       } catch (fallbackError) {
         handleFirestoreError(fallbackError, OperationType.UPDATE, `bookings/${request.id}`);
@@ -9244,6 +9795,21 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             : booking
         )
       );
+      await upsertTripSession({
+        booking: {
+          ...request,
+          negotiatedFare: fare,
+          negotiationStatus: 'pending',
+          negotiationActor: 'driver',
+          status: 'negotiating',
+        },
+        actorRole: 'driver',
+        actorId: profile.uid,
+        location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
+        networkState: tripNetworkState,
+        appState: tripAppState,
+        note: 'driver_counter_offer_sent',
+      });
       showAppDialog('Counter offer sent to traveler.', 'success');
     } catch (error) {
       try {
@@ -9263,6 +9829,21 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
               : booking
           )
         );
+        await upsertTripSession({
+          booking: {
+            ...request,
+            negotiatedFare: fare,
+            negotiationStatus: 'pending',
+            negotiationActor: 'driver',
+            status: 'negotiating',
+          },
+          actorRole: 'driver',
+          actorId: profile.uid,
+          location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
+          networkState: tripNetworkState,
+          appState: tripAppState,
+          note: 'driver_counter_offer_sent',
+        });
         showAppDialog('Counter offer sent to traveler.', 'success');
       } catch {
         handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
@@ -9439,6 +10020,22 @@ const finalizeDriverDashboardRazorpayPayment = async (
         'driverDetails.isOnline': false,
       });
 
+      await upsertTripSession({
+        booking: {
+          ...booking,
+          rideLifecycleStatus: 'in_progress',
+          rideStartedAt: new Date().toISOString(),
+          status: 'confirmed',
+        },
+        actorRole: 'driver',
+        actorId: profile.uid,
+        location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
+        forceStatus: 'live',
+        networkState: tripNetworkState,
+        appState: tripAppState,
+        note: 'ride_started',
+      });
+
       setIsOnline(false);
       alert('Ride started. Driver visibility is now hidden until the trip is closed.');
     } catch (error) {
@@ -9470,6 +10067,22 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
       await updateDoc(doc(db, 'rides', booking.rideId), {
         status: 'completed',
+      });
+
+      await upsertTripSession({
+        booking: {
+          ...booking,
+          rideLifecycleStatus: 'completed',
+          rideEndedAt: completedAt,
+          status: 'completed',
+        },
+        actorRole: 'driver',
+        actorId: profile.uid,
+        location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
+        forceStatus: 'completed',
+        networkState: tripNetworkState,
+        appState: tripAppState,
+        note: 'ride_completed',
       });
 
       if (!booking.driverEarningsCreditedAt) {
@@ -9790,6 +10403,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             <div className="mb-8">
               <DriverDashboardSummary
                 requests={activeDashboardRequests}
+                tripSessions={tripSessions}
                 config={config}
                 onAccept={(request) => handleDriverAction(request, 'confirmed')}
                 onReject={(request) => handleDriverAction(request, 'rejected')}
@@ -12442,6 +13056,21 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   }, []);
 
   useEffect(() => {
+    const q = query(collection(db, 'tripSessions'), orderBy('updatedAt', 'desc'), limit(200));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as TripSession) }));
+        setTripSessions(list);
+      },
+      (error) => {
+        console.error('Admin trip session monitor error:', error);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (activeTab !== 'transactions') {
       return;
     }
@@ -12614,6 +13243,33 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     || booking.rideLifecycleStatus === 'awaiting_start_otp'
     || booking.rideLifecycleStatus === 'in_progress'
   );
+  const liveTripSessions = tripSessions.filter((session) => session.status === 'live');
+  const staleTripSessions = tripSessions.filter((session) => session.isStale);
+  const offlineTripSessions = tripSessions.filter((session) => session.networkState === 'offline');
+  const antiSpoofAlerts = tripSessions.reduce((count, session) => {
+    const hits = (session.auditTrail || []).filter((entry) => Boolean(entry.meta?.spoofDetected)).length;
+    return count + hits;
+  }, 0);
+  const liveOpsAlerts = useMemo(() => {
+    return tripSessions
+      .flatMap((session) =>
+        (session.auditTrail || [])
+          .filter((entry) => Boolean(entry.meta?.spoofDetected) || session.isStale || session.networkState === 'offline')
+          .map((entry) => ({
+            bookingId: session.bookingId,
+            createdAt: entry.createdAt,
+            action: entry.action,
+            details:
+              entry.meta?.spoofDetected
+                ? 'Potential location spoof detected'
+                : session.isStale
+                  ? 'Session became stale'
+                  : 'Driver or traveler is offline',
+          }))
+      )
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 6);
+  }, [tripSessions]);
   const getUserRideOffers = (userId: string) =>
     rides.filter((ride) => ride.driverId === userId);
   const getActiveRideOffers = (userId: string) =>
@@ -13592,7 +14248,57 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         )}
 
         {activeTab === 'revenue' && (
-          <AdminRevenueAnalysis bookings={bookings} users={users} />
+          <div className="space-y-6">
+            <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Live Ops Monitor</p>
+                  <h3 className="mt-2 text-2xl font-black text-mairide-primary">Trip session trust and reliability</h3>
+                  <p className="mt-1 text-sm text-mairide-secondary">Real-time health snapshot across active tracking sessions.</p>
+                </div>
+                <div className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                  {tripSessions.length} sessions observed
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Live sessions</p>
+                  <p className="mt-2 text-3xl font-black text-mairide-primary">{liveTripSessions.length}</p>
+                </div>
+                <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Stale sessions</p>
+                  <p className="mt-2 text-3xl font-black text-mairide-accent">{staleTripSessions.length}</p>
+                </div>
+                <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Offline links</p>
+                  <p className="mt-2 text-3xl font-black text-mairide-primary">{offlineTripSessions.length}</p>
+                </div>
+                <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Anti-spoof alerts</p>
+                  <p className="mt-2 text-3xl font-black text-red-600">{antiSpoofAlerts}</p>
+                </div>
+              </div>
+              <div className="mt-5 rounded-2xl border border-mairide-secondary/40 bg-mairide-bg p-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Recent Trust Alerts</p>
+                {liveOpsAlerts.length ? (
+                  <div className="mt-3 space-y-2">
+                    {liveOpsAlerts.map((alert, index) => (
+                      <div key={`${alert.bookingId}-${alert.createdAt}-${index}`} className="rounded-xl bg-white px-3 py-2">
+                        <p className="text-xs font-bold text-mairide-primary">Booking {alert.bookingId.slice(0, 8).toUpperCase()} • {alert.action}</p>
+                        <p className="text-xs text-mairide-secondary">{alert.details}</p>
+                        <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                          {new Date(alert.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-mairide-secondary">No active trust alerts right now.</p>
+                )}
+              </div>
+            </div>
+            <AdminRevenueAnalysis bookings={bookings} users={users} />
+          </div>
         )}
 
         {activeTab === 'analytics' && (
