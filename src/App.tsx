@@ -11758,18 +11758,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map'>('revenue');
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-
-  if (loadError || authFailure) {
-    return (
-      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-red-100">
-        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-gray-900 mb-2">Google Maps Error</h2>
-        <p className="text-gray-600 mb-4">
-          {loadError ? loadError.message : "Authentication Failure (Check API Key restrictions or billing)"}
-        </p>
-      </div>
-    );
-  }
+  const hasMapsIssue = Boolean(loadError || authFailure);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showAddUser, setShowAddUser] = useState(false);
   const [resetPasswordUser, setResetPasswordUser] = useState<UserProfile | null>(null);
@@ -12411,6 +12400,18 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       setIsLoading(false);
     }
   };
+
+  if (hasMapsIssue) {
+    return (
+      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-red-100">
+        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-gray-900 mb-2">Google Maps Error</h2>
+        <p className="text-gray-600 mb-4">
+          {loadError ? loadError.message : "Authentication Failure (Check API Key restrictions or billing)"}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-mairide-bg flex overflow-hidden relative">
