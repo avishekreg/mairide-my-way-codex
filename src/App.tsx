@@ -792,6 +792,10 @@ class ErrorBoundary extends Component<any, any> {
   render() {
     if (this.state.hasError) {
       let displayMessage = "Something went wrong. Please refresh the page.";
+      const fallbackMessage = this.state?.error?.message || this.state?.error?.toString?.() || '';
+      if (fallbackMessage && typeof fallbackMessage === 'string' && fallbackMessage.trim()) {
+        displayMessage = fallbackMessage;
+      }
       try {
         const parsed = JSON.parse(this.state.error.message);
         if (parsed.error && parsed.error.includes("insufficient permissions")) {
@@ -12032,8 +12036,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const filteredUsers = users.filter(user => {
     if (user.uid === profile.uid) return false;
     if (user.role === 'driver' && (!user.onboardingComplete || user.verificationStatus === 'pending')) return false;
-    const matchesSearch = user.displayName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         user.email.toLowerCase().includes(searchTerm.toLowerCase());
+    const normalizedSearch = String(searchTerm || '').toLowerCase();
+    const displayName = String(user.displayName || '').toLowerCase();
+    const email = String(user.email || '').toLowerCase();
+    const matchesSearch = displayName.includes(normalizedSearch) || email.includes(normalizedSearch);
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
