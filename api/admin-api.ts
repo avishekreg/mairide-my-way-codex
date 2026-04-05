@@ -71,6 +71,19 @@ async function getAuthenticatedAdmin(req: any, requireSuperAdmin = false) {
   };
 }
 
+async function generateUniqueReferralCode(supabaseAdmin: any) {
+  while (true) {
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("referral_code", code)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return code;
+  }
+}
+
 async function handleGetConfig(req: any, res: any) {
   const auth = await getAuthenticatedAdmin(req, true);
   if ("error" in auth) {
@@ -297,6 +310,7 @@ async function handleCreateUser(req: any, res: any) {
     throw authCreateError || new Error("Failed to create auth user");
   }
 
+  const referralCode = await generateUniqueReferralCode(auth.supabaseAdmin);
   const row = {
     id: authCreateData.user.id,
     email: normalizedEmail,
@@ -304,6 +318,7 @@ async function handleCreateUser(req: any, res: any) {
     role,
     status: "active",
     phone_number: normalizedPhone || null,
+    referral_code: referralCode,
     onboarding_complete: role !== "driver",
     admin_role: role === "admin" ? adminRole || "support" : null,
     force_password_change: true,
@@ -314,6 +329,7 @@ async function handleCreateUser(req: any, res: any) {
       role,
       status: "active",
       phoneNumber: normalizedPhone || "",
+      referralCode,
       onboardingComplete: role !== "driver",
       adminRole: role === "admin" ? adminRole || "support" : undefined,
       forcePasswordChange: true,

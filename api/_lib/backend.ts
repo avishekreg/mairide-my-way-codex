@@ -159,6 +159,7 @@ function buildUserRow(input: {
   phoneNumber?: string;
   role: string;
   adminRole?: string;
+  referralCode?: string;
   status?: string;
   onboardingComplete?: boolean;
   forcePasswordChange?: boolean;
@@ -170,6 +171,7 @@ function buildUserRow(input: {
     role: input.role,
     status: input.status || "active",
     phone_number: input.phoneNumber || null,
+    referral_code: input.referralCode || null,
     onboarding_complete: input.onboardingComplete ?? input.role !== "driver",
     admin_role: input.role === "admin" ? input.adminRole || "support" : null,
     force_password_change: input.forcePasswordChange ?? false,
@@ -180,6 +182,7 @@ function buildUserRow(input: {
       role: input.role,
       status: input.status || "active",
       phoneNumber: input.phoneNumber || "",
+      referralCode: input.referralCode || "",
       onboardingComplete: input.onboardingComplete ?? input.role !== "driver",
       adminRole: input.role === "admin" ? input.adminRole || "support" : undefined,
       forcePasswordChange: input.forcePasswordChange ?? false,
@@ -189,6 +192,19 @@ function buildUserRow(input: {
       },
     },
   };
+}
+
+async function generateUniqueReferralCode(supabaseAdmin: any) {
+  while (true) {
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("referral_code", code)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return code;
+  }
 }
 
 export async function requireSuperAdmin(req: ReqLike, res: ResLike) {
@@ -497,6 +513,7 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
   }
 
   try {
+    const supabaseAdmin = getSupabaseAdmin();
     const { data: existingUser, error: existingUserError } = await getSupabaseAdmin()
       .from("users")
       .select("id")
@@ -508,7 +525,7 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
       return res.status(409).json({ error: "A user with this email already exists." });
     }
 
-    const { data: authData, error: authError } = await getSupabaseAdmin().auth.admin.createUser({
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: normalizedEmail,
       password,
       email_confirm: true,
@@ -521,6 +538,7 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
       throw authError || new Error("Failed to create auth user");
     }
 
+    const referralCode = await generateUniqueReferralCode(supabaseAdmin);
     const row = buildUserRow({
       uid: authData.user.id,
       email: normalizedEmail,
@@ -528,10 +546,11 @@ export async function handleAdminCreateUser(req: ReqLike, res: ResLike) {
       phoneNumber: normalizedPhone,
       role,
       adminRole,
+      referralCode,
       forcePasswordChange: true,
     });
 
-    const { error: profileError } = await getSupabaseAdmin().from("users").upsert(row, {
+    const { error: profileError } = await supabaseAdmin.from("users").upsert(row, {
       onConflict: "id",
     });
 
@@ -1086,6 +1105,9 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
 
     const now = new Date().toISOString();
     const baseData = (existingProfile?.data as Record<string, any>) || {};
+    const referralCode =
+      String(existingProfile?.referral_code || baseData.referralCode || "").trim().toUpperCase()
+      || await generateUniqueReferralCode(supabaseAdmin);
     const existingWalletRaw = existingProfile?.wallet || baseData.wallet || null;
     const parsedExistingBalance = Number((existingWalletRaw as any)?.balance);
     const parsedExistingPending = Number((existingWalletRaw as any)?.pendingBalance);
@@ -1107,6 +1129,7 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
       role: "driver",
       status: existingProfile?.status || baseData.status || "active",
       phone_number: existingProfile?.phone_number || baseData.phoneNumber || null,
+      referral_code: referralCode,
       onboarding_complete: true,
       verification_status: "pending",
       rejection_reason: null,
@@ -1122,6 +1145,7 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
         ...baseData,
         uid: targetUserId,
         role: "driver",
+        referralCode,
         onboardingComplete: true,
         verificationStatus: "pending",
         rejectionReason: null,
