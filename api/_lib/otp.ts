@@ -20,8 +20,9 @@ function normalizeOtpValue(value: unknown) {
   if (!raw) return "";
   const compactDigits = raw.replace(/[^\d]/g, "");
   if (compactDigits.length >= 4 && compactDigits.length <= 6) return compactDigits;
-  const match = raw.match(/\b(\d{4,6})\b/);
+  const match = raw.match(/(\d{4,6})/);
   if (match?.[1]) return match[1];
+  if (compactDigits.length > 6) return compactDigits.slice(0, 6);
   return compactDigits;
 }
 

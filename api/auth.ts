@@ -77,8 +77,9 @@ function normalizeOtpValue(value: unknown) {
   if (!raw) return "";
   const compactDigits = raw.replace(/[^\d]/g, "");
   if (compactDigits.length >= 4 && compactDigits.length <= 6) return compactDigits;
-  const match = raw.match(/\b(\d{4,6})\b/);
+  const match = raw.match(/(\d{4,6})/);
   if (match?.[1]) return match[1];
+  if (compactDigits.length > 6) return compactDigits.slice(0, 6);
   return compactDigits;
 }
 
@@ -522,7 +523,8 @@ async function handleSendEmailOtp(req: any, res: any) {
 async function handleVerifyOtp(req: any, res: any) {
   const { sessionId, otp } = req.body || {};
   const normalizedSessionId = normalizeOtpValue(sessionId);
-  if (!normalizedSessionId || !normalizeOtpValue(otp)) {
+  const normalizedOtp = normalizeOtpValue(otp);
+  if (!normalizedSessionId || !normalizedOtp) {
     return res.status(400).json({ Status: "Error", Details: "Session ID and OTP are required." });
   }
 
@@ -535,7 +537,7 @@ async function handleVerifyOtp(req: any, res: any) {
   }
 
   try {
-    const data = await verifySmsOtpSession(normalizedSessionId, otp);
+    const data = await verifySmsOtpSession(normalizedSessionId, normalizedOtp);
     return res.status(200).json(data);
   } catch (error: any) {
     console.error("2Factor OTP Verify Error:", error?.payload || error?.message || error);
