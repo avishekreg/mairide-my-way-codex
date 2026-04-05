@@ -1428,8 +1428,26 @@ const primaryActionButtonClass =
 const secondaryActionButtonClass =
   "rounded-xl font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:shadow-sm";
 
-const inferDialogTone = (message: string): AppDialogTone => {
-  const lowered = message.toLowerCase();
+const normalizeDialogMessage = (input: unknown, fallback = 'A server error has occurred'): string => {
+  if (typeof input === 'string' && input.trim()) return input;
+  if (input instanceof Error && typeof input.message === 'string' && input.message.trim()) return input.message;
+  if (input && typeof input === 'object') {
+    const candidate = input as Record<string, any>;
+    if (typeof candidate.message === 'string' && candidate.message.trim()) return candidate.message;
+    if (typeof candidate.error === 'string' && candidate.error.trim()) return candidate.error;
+    if (typeof candidate.code === 'string' && typeof candidate.message === 'string') return `${candidate.code}: ${candidate.message}`;
+    try {
+      const serialized = JSON.stringify(candidate);
+      if (serialized && serialized !== '{}') return serialized;
+    } catch {
+      // ignore serialization failure
+    }
+  }
+  return fallback;
+};
+
+const inferDialogTone = (message: unknown): AppDialogTone => {
+  const lowered = normalizeDialogMessage(message, '').toLowerCase();
   if (lowered.includes('success') || lowered.includes('submitted') || lowered.includes('created') || lowered.includes('copied')) {
     return 'success';
   }
@@ -1442,13 +1460,14 @@ const inferDialogTone = (message: string): AppDialogTone => {
   return 'info';
 };
 
-const showAppDialog = (message: string, tone?: AppDialogTone, title?: string) => {
+const showAppDialog = (message: unknown, tone?: AppDialogTone, title?: string) => {
   if (typeof window === 'undefined') return;
+  const normalizedMessage = normalizeDialogMessage(message);
   window.dispatchEvent(
     new CustomEvent<AppDialogDetail>(APP_DIALOG_EVENT, {
       detail: {
-        message,
-        tone: tone || inferDialogTone(message),
+        message: normalizedMessage,
+        tone: tone || inferDialogTone(normalizedMessage),
         title,
       },
     })
@@ -1762,10 +1781,28 @@ const getResolvedUserPhoto = (user?: UserProfile | null) =>
   user?.photoURL || user?.driverDetails?.selfiePhoto || '';
 
 const getApiErrorMessage = (error: any, fallback: string) => {
+  const normalize = (value: any): string | null => {
+    if (typeof value === 'string' && value.trim()) return value;
+    if (value instanceof Error && typeof value.message === 'string' && value.message.trim()) return value.message;
+    if (value && typeof value === 'object') {
+      if (typeof value.message === 'string' && value.message.trim()) return value.message;
+      if (typeof value.error === 'string' && value.error.trim()) return value.error;
+      if (typeof value.code === 'string' && typeof value.message === 'string') return `${value.code}: ${value.message}`;
+      try {
+        const serialized = JSON.stringify(value);
+        return serialized && serialized !== '{}' ? serialized : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
   const apiError = error?.response?.data?.error;
-  if (typeof apiError === 'string' && apiError.trim()) return apiError;
-  if (apiError?.message) return apiError.message;
-  if (error?.message) return error.message;
+  const normalizedApiError = normalize(apiError);
+  if (normalizedApiError) return normalizedApiError;
+  const normalizedRootError = normalize(error);
+  if (normalizedRootError) return normalizedRootError;
   return fallback;
 };
 
@@ -1894,6 +1931,8 @@ const AppDialogHost = () => {
 
   const tone = dialog.tone || 'info';
   const styles = toneStyles[tone];
+  const safeDialogMessage = normalizeDialogMessage((dialog as any)?.message);
+  const safeDialogTitle = normalizeDialogMessage((dialog as any)?.title, 'MaiRide Update');
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-mairide-primary/30 px-4 backdrop-blur-sm">
@@ -1911,9 +1950,9 @@ const AppDialogHost = () => {
         </div>
         <div className="mt-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
-            {dialog.title || 'MaiRide Update'}
+            {safeDialogTitle}
           </p>
-          <p className="mt-3 text-base leading-7 text-mairide-primary">{dialog.message}</p>
+          <p className="mt-3 text-base leading-7 text-mairide-primary">{safeDialogMessage}</p>
         </div>
         <button
           onClick={() => setDialog(null)}
