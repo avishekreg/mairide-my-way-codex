@@ -54,7 +54,7 @@ import {
 } from 'firebase/storage';
 import { auth, db, storage } from './lib/firebase';
 import { supabase } from './lib/supabase';
-import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession } from './types';
+import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import Webcam from 'react-webcam';
 import { motion, AnimatePresence } from 'motion/react';
@@ -7840,6 +7840,21 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [autocompleteTo, setAutocompleteTo] = useState<any | null>(null);
   const [searchLocationFrom, setSearchLocationFrom] = useState<{ lat: number, lng: number } | null>(null);
   const [searchLocationTo, setSearchLocationTo] = useState<{ lat: number, lng: number } | null>(null);
+  const [showRequestForm, setShowRequestForm] = useState(false);
+  const [isPostingRequest, setIsPostingRequest] = useState(false);
+  const [newRequest, setNewRequest] = useState({
+    origin: '',
+    destination: '',
+    fare: '',
+    seats: '1',
+    departureDay: 'today',
+    departureClock: '09:00',
+  });
+  const [travelerRequests, setTravelerRequests] = useState<TravelerRideRequest[]>([]);
+  const [requestAutocompleteFrom, setRequestAutocompleteFrom] = useState<any | null>(null);
+  const [requestAutocompleteTo, setRequestAutocompleteTo] = useState<any | null>(null);
+  const [requestOriginLocation, setRequestOriginLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [requestDestinationLocation, setRequestDestinationLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [directionsResponse, setDirectionsResponse] = useState<any | null>(null);
   const [rideStatusById, setRideStatusById] = useState<Record<string, Ride['status']>>({});
   const [tripSessions, setTripSessions] = useState<Record<string, TripSession>>({});
@@ -7874,6 +7889,28 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'bookings');
     });
+    return () => unsubscribe();
+  }, [profile.uid]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'travelerRideRequests'), where('consumerId', '==', profile.uid));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: TravelerRideRequest[] = snapshot.docs.map((snapshotDoc) => ({
+          id: snapshotDoc.id,
+          ...(snapshotDoc.data() as TravelerRideRequest),
+        }));
+        setTravelerRequests(
+          list
+            .filter((item) => isRideWithinPlanningWindow(item))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        );
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
+      }
+    );
     return () => unsubscribe();
   }, [profile.uid]);
 
@@ -8121,6 +8158,126 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     });
     return () => unsubscribe();
   }, [userLocation]);
+
+  const geocodeAddress = async (address: string) => {
+    if (!window.google || !window.google.maps) return null;
+    const geocoder = new window.google.maps.Geocoder();
+    try {
+      const result = await geocoder.geocode({ address });
+      const location = result.results?.[0]?.geometry?.location;
+      if (!location) return null;
+      return {
+        lat: location.lat(),
+        lng: location.lng(),
+      };
+    } catch (error) {
+      console.error('Address geocoding failed:', error);
+      return null;
+    }
+  };
+
+  const buildScheduledDeparture = (dayKey: string, timeValue: string) => {
+    const scheduledDate = new Date();
+    if (dayKey === 'tomorrow') {
+      scheduledDate.setDate(scheduledDate.getDate() + 1);
+    } else if (dayKey === 'dayAfter') {
+      scheduledDate.setDate(scheduledDate.getDate() + 2);
+    }
+
+    const [hours, minutes] = (timeValue || '09:00').split(':').map(Number);
+    scheduledDate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0);
+    return scheduledDate.toISOString();
+  };
+
+  const formatDepartureDayLabel = (dayKey: string) => {
+    if (dayKey === 'tomorrow') return 'Tomorrow';
+    if (dayKey === 'dayAfter') return 'Day After';
+    return 'Today';
+  };
+
+  const handlePostTravelerRequest = async () => {
+    const origin = newRequest.origin.trim();
+    const destination = newRequest.destination.trim();
+    const fareValue = Number(newRequest.fare);
+    const seatsNeeded = Number(newRequest.seats);
+
+    if (!origin || !destination) {
+      alert('Please select both origin and destination before posting your ride request.');
+      return;
+    }
+    if (!Number.isFinite(fareValue) || fareValue <= 0) {
+      alert('Please enter a valid target fare greater than zero.');
+      return;
+    }
+    if (!Number.isFinite(seatsNeeded) || seatsNeeded < 1) {
+      alert('Please choose at least one seat.');
+      return;
+    }
+
+    setIsPostingRequest(true);
+    try {
+      const resolvedOriginLocation = requestOriginLocation || userLocation || await geocodeAddress(origin);
+      const resolvedDestinationLocation = requestDestinationLocation || await geocodeAddress(destination);
+      if (!resolvedOriginLocation) {
+        alert('Please allow location access or select a valid origin from suggestions.');
+        return;
+      }
+      if (!resolvedDestinationLocation) {
+        alert('Please select a valid destination from suggestions.');
+        return;
+      }
+
+      const now = new Date().toISOString();
+      await addDoc(collection(db, 'travelerRideRequests'), {
+        consumerId: profile.uid,
+        consumerName: profile.displayName,
+        consumerPhone: profile.phoneNumber || '',
+        origin,
+        destination,
+        originLocation: resolvedOriginLocation,
+        destinationLocation: resolvedDestinationLocation,
+        fare: fareValue,
+        seatsNeeded,
+        status: 'open',
+        departureDay: newRequest.departureDay,
+        departureDayLabel: formatDepartureDayLabel(newRequest.departureDay),
+        departureClock: newRequest.departureClock,
+        departureNote: 'Planned departure time may vary due to traffic, road, and operational conditions.',
+        departureTime: buildScheduledDeparture(newRequest.departureDay, newRequest.departureClock),
+        createdAt: now,
+        updatedAt: now,
+      } as Omit<TravelerRideRequest, 'id'>);
+
+      setNewRequest({
+        origin: '',
+        destination: '',
+        fare: '',
+        seats: '1',
+        departureDay: 'today',
+        departureClock: '09:00',
+      });
+      setRequestOriginLocation(null);
+      setRequestDestinationLocation(null);
+      setShowRequestForm(false);
+      alert('Ride request posted successfully. Drivers can now match your request.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'travelerRideRequests');
+    } finally {
+      setIsPostingRequest(false);
+    }
+  };
+
+  const handleCancelTravelerRequest = async (requestId: string) => {
+    try {
+      await updateDoc(doc(db, 'travelerRideRequests', requestId), {
+        status: 'cancelled',
+        updatedAt: new Date().toISOString(),
+      });
+      alert('Ride request cancelled.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `travelerRideRequests/${requestId}`);
+    }
+  };
 
   const handleSearch = async () => {
     setIsLoading(true);
@@ -8969,6 +9126,44 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </button>
           </div>
 
+          <div className="mb-8 flex items-center justify-between gap-3">
+            <h2 className="text-xl font-bold text-mairide-primary">Traveler Ride Requests</h2>
+            <button
+              onClick={() => setShowRequestForm(true)}
+              className="inline-flex items-center gap-2 rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white hover:bg-mairide-accent transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Request a Ride
+            </button>
+          </div>
+
+          {travelerRequests.filter((item) => item.status === 'open').length > 0 && (
+            <div className="mb-12 space-y-4">
+              {travelerRequests
+                .filter((item) => item.status === 'open')
+                .map((item) => (
+                  <div key={item.id} className="rounded-3xl border border-mairide-secondary bg-white p-5 shadow-sm">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-lg font-bold text-mairide-primary">{item.origin} → {item.destination}</p>
+                        <p className="text-sm text-mairide-secondary">Requested fare: {formatCurrency(item.fare)} • Seats: {item.seatsNeeded}</p>
+                        <div className="mt-2 inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-bold text-orange-700">
+                          <Clock className="mr-2 h-3.5 w-3.5" />
+                          Departure: {formatRideDeparture(item)}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleCancelTravelerRequest(item.id)}
+                        className={cn("rounded-2xl border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-600", secondaryActionButtonClass)}
+                      >
+                        Cancel Request
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-mairide-primary flex items-center">
               <Clock className="w-5 h-5 mr-2 text-mairide-accent" />
@@ -9044,6 +9239,171 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               </div>
             )}
           </div>
+
+          <AnimatePresence>
+            {showRequestForm && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-black/60 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.92 }}
+                  className="my-6 w-full max-w-4xl rounded-[40px] border border-mairide-secondary bg-white p-8 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto"
+                >
+                  <div className="mb-6 flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-4xl font-black tracking-tight text-mairide-primary">Request New Ride</h2>
+                      <p className="mt-1 text-sm text-mairide-secondary">Same 3-day planning window as driver offers.</p>
+                    </div>
+                    <button
+                      onClick={() => setShowRequestForm(false)}
+                      className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+                    >
+                      <X className="h-6 w-6" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2 mb-6">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-mairide-primary">Origin</label>
+                      {isLoaded ? (
+                        <Autocomplete
+                          onLoad={(autocomplete) => setRequestAutocompleteFrom(autocomplete)}
+                          onPlaceChanged={() => {
+                            if (!requestAutocompleteFrom) return;
+                            const place = requestAutocompleteFrom.getPlace();
+                            if (place.formatted_address) {
+                              setNewRequest((prev) => ({ ...prev, origin: place.formatted_address! }));
+                            }
+                            if (place.geometry?.location) {
+                              setRequestOriginLocation({
+                                lat: place.geometry.location.lat(),
+                                lng: place.geometry.location.lng(),
+                              });
+                            }
+                          }}
+                        >
+                          <input
+                            type="text"
+                            placeholder="Where should the ride start?"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg p-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                            value={newRequest.origin}
+                            onChange={(e) => setNewRequest((prev) => ({ ...prev, origin: e.target.value }))}
+                          />
+                        </Autocomplete>
+                      ) : (
+                        <input
+                          type="text"
+                          placeholder="Where should the ride start?"
+                          className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg p-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                          value={newRequest.origin}
+                          onChange={(e) => setNewRequest((prev) => ({ ...prev, origin: e.target.value }))}
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-mairide-primary">Destination</label>
+                      {isLoaded ? (
+                        <Autocomplete
+                          onLoad={(autocomplete) => setRequestAutocompleteTo(autocomplete)}
+                          onPlaceChanged={() => {
+                            if (!requestAutocompleteTo) return;
+                            const place = requestAutocompleteTo.getPlace();
+                            if (place.formatted_address) {
+                              setNewRequest((prev) => ({ ...prev, destination: place.formatted_address! }));
+                            }
+                            if (place.geometry?.location) {
+                              setRequestDestinationLocation({
+                                lat: place.geometry.location.lat(),
+                                lng: place.geometry.location.lng(),
+                              });
+                            }
+                          }}
+                        >
+                          <input
+                            type="text"
+                            placeholder="Where should the ride end?"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg p-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                            value={newRequest.destination}
+                            onChange={(e) => setNewRequest((prev) => ({ ...prev, destination: e.target.value }))}
+                          />
+                        </Autocomplete>
+                      ) : (
+                        <input
+                          type="text"
+                          placeholder="Where should the ride end?"
+                          className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg p-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                          value={newRequest.destination}
+                          onChange={(e) => setNewRequest((prev) => ({ ...prev, destination: e.target.value }))}
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-mairide-primary">Your Fare Offer (INR)</label>
+                      <div className="relative">
+                        <IndianRupee className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-mairide-secondary" />
+                        <input
+                          type="number"
+                          placeholder="e.g. 1800"
+                          className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg py-4 pl-12 pr-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                          value={newRequest.fare}
+                          onChange={(e) => setNewRequest((prev) => ({ ...prev, fare: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-mairide-primary">Seats Needed</label>
+                      <div className="relative">
+                        <select
+                          className="w-full appearance-none rounded-2xl border border-mairide-secondary bg-mairide-bg py-4 pl-4 pr-12 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                          value={newRequest.seats}
+                          onChange={(e) => setNewRequest((prev) => ({ ...prev, seats: e.target.value }))}
+                        >
+                          {[1, 2, 3, 4, 5, 6].map((n) => (
+                            <option key={n} value={n}>
+                              {n} {n === 1 ? 'Seat' : 'Seats'}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronRight className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 rotate-90 text-mairide-secondary" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-mairide-primary">Journey Day</label>
+                      <div className="relative">
+                        <select
+                          className="w-full appearance-none rounded-2xl border border-mairide-secondary bg-mairide-bg py-4 pl-4 pr-12 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                          value={newRequest.departureDay}
+                          onChange={(e) => setNewRequest((prev) => ({ ...prev, departureDay: e.target.value }))}
+                        >
+                          <option value="today">Today</option>
+                          <option value="tomorrow">Tomorrow</option>
+                          <option value="dayAfter">Day After</option>
+                        </select>
+                        <ChevronRight className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 rotate-90 text-mairide-secondary" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-mairide-primary">Likely Start Time</label>
+                      <input
+                        type="time"
+                        className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg p-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+                        value={newRequest.departureClock}
+                        onChange={(e) => setNewRequest((prev) => ({ ...prev, departureClock: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handlePostTravelerRequest}
+                    disabled={isPostingRequest}
+                    className="w-full rounded-2xl bg-mairide-accent py-4 font-bold text-white transition-all hover:bg-mairide-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPostingRequest ? 'Posting Request...' : 'Post Ride Request'}
+                  </button>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
           <AnimatePresence>
             {selectedRide && (
@@ -9282,6 +9642,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [originLocation, setOriginLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [destinationLocation, setDestinationLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [consumers, setConsumers] = useState<UserProfile[]>([]);
+  const [travelerRideRequests, setTravelerRideRequests] = useState<TravelerRideRequest[]>([]);
+  const [linkedTravelerRequestId, setLinkedTravelerRequestId] = useState<string | null>(null);
   const [requests, setRequests] = useState<Booking[]>([]);
   const [counterFares, setCounterFares] = useState<{ [key: string]: string }>({});
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
@@ -9310,6 +9672,13 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     () => requests.filter((request) => !retiredRideIds.includes(request.rideId)),
     [requests, retiredRideIds]
   );
+  const activeTravelerRideRequests = useMemo(
+    () =>
+      travelerRideRequests
+        .filter((request) => request.status === 'open')
+        .filter((request) => request.consumerId !== profile.uid),
+    [travelerRideRequests, profile.uid]
+  );
 
   useEffect(() => {
     // Listen for online travelers
@@ -9326,6 +9695,28 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'users');
     });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'travelerRideRequests'), where('status', '==', 'open'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: TravelerRideRequest[] = snapshot.docs.map((snapshotDoc) => ({
+          id: snapshotDoc.id,
+          ...(snapshotDoc.data() as TravelerRideRequest),
+        }));
+        setTravelerRideRequests(
+          list
+            .filter((item) => isRideWithinPlanningWindow(item))
+            .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime())
+        );
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
+      }
+    );
     return () => unsubscribe();
   }, []);
 
@@ -9579,6 +9970,21 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return 'Today';
   };
 
+  const prefillRideOfferFromTravelerRequest = (request: TravelerRideRequest) => {
+    setNewRide({
+      origin: request.origin || '',
+      destination: request.destination || '',
+      price: String(request.fare || ''),
+      seats: String(request.seatsNeeded || 1),
+      departureDay: request.departureDay || 'today',
+      departureClock: request.departureClock || '09:00',
+    });
+    setOriginLocation(request.originLocation || null);
+    setDestinationLocation(request.destinationLocation || null);
+    setLinkedTravelerRequestId(request.id);
+    setShowOfferForm(true);
+  };
+
   const loadRelatedBookingThread = async (seedBooking: Booking) => {
     const snapshot = await getDocs(
       query(
@@ -9653,14 +10059,28 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         createdAt: new Date().toISOString()
       };
 
+      let createdRideId = '';
       if (window.location.hostname === 'localhost') {
-        await axios.post('/api/user/create-ride', ridePayload);
+        const response = await axios.post('/api/user/create-ride', ridePayload);
+        createdRideId = String(response?.data?.rideId || '');
       } else {
-        await addDoc(collection(db, 'rides'), ridePayload);
+        const rideRef = await addDoc(collection(db, 'rides'), ridePayload);
+        createdRideId = rideRef.id;
+      }
+
+      if (linkedTravelerRequestId) {
+        await updateDoc(doc(db, 'travelerRideRequests', linkedTravelerRequestId), {
+          status: 'matched',
+          matchedRideId: createdRideId || null,
+          matchedDriverId: profile.uid,
+          matchedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
       }
       setNewRide({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
       setOriginLocation(null);
       setDestinationLocation(null);
+      setLinkedTravelerRequestId(null);
       setShowOfferForm(false);
       alert("Ride offer posted successfully!");
     } catch (error) {
@@ -10250,7 +10670,10 @@ const finalizeDriverDashboardRazorpayPayment = async (
             </div>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <button 
-                onClick={() => setShowOfferForm(true)}
+                onClick={() => {
+                  setLinkedTravelerRequestId(null);
+                  setShowOfferForm(true);
+                }}
                 className="bg-mairide-accent text-white px-6 py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 hover:bg-mairide-primary transition-all"
               >
                 <Plus className="w-5 h-5" />
@@ -10281,6 +10704,11 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 </button>
               </div>
               <h3 className="text-2xl font-bold text-mairide-primary mb-6">Create New Offer</h3>
+              {linkedTravelerRequestId && (
+                <div className="mb-4 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-700">
+                  Prefilled from a traveler request. Review details and post your ride offer.
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 <div>
                   <label className="block text-sm font-semibold text-mairide-primary mb-2">Origin</label>
@@ -10424,6 +10852,44 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 {isPostingRide ? 'Posting Offer...' : 'Post Ride Offer'}
               </button>
             </motion.div>
+          )}
+
+          {activeTravelerRideRequests.length > 0 && (
+            <div className="mb-8">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-mairide-primary">Live Traveler Ride Requests</h2>
+                <span className="text-xs font-bold uppercase tracking-widest text-mairide-accent">
+                  {activeTravelerRideRequests.length} Live
+                </span>
+              </div>
+              <div className="space-y-4">
+                {activeTravelerRideRequests.map((request) => (
+                  <div key={request.id} className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-lg font-bold text-mairide-primary">{request.origin} → {request.destination}</p>
+                        <p className="text-sm text-mairide-secondary">
+                          Traveler: {request.consumerName} • Seats: {request.seatsNeeded}
+                        </p>
+                        <div className="mt-2 inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-bold text-orange-700">
+                          <Clock className="mr-2 h-3.5 w-3.5" />
+                          Departure: {formatRideDeparture(request)}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-start gap-2 md:items-end">
+                        <p className="text-2xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
+                        <button
+                          onClick={() => prefillRideOfferFromTravelerRequest(request)}
+                          className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white", primaryActionButtonClass)}
+                        >
+                          Match & Offer Ride
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           {activeDashboardRequests.length > 0 && (

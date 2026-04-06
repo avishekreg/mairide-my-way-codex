@@ -152,6 +152,36 @@ export interface Ride {
   createdAt: string;
 }
 
+export interface TravelerRideRequest {
+  id: string;
+  consumerId: string;
+  consumerName: string;
+  consumerPhone?: string;
+  origin: string;
+  destination: string;
+  originLocation?: {
+    lat: number;
+    lng: number;
+  };
+  destinationLocation?: {
+    lat: number;
+    lng: number;
+  };
+  fare: number;
+  seatsNeeded: number;
+  departureTime: string;
+  departureDay?: 'today' | 'tomorrow' | 'dayAfter';
+  departureDayLabel?: string;
+  departureClock?: string;
+  departureNote?: string;
+  status: 'open' | 'matched' | 'cancelled' | 'expired';
+  matchedRideId?: string;
+  matchedDriverId?: string;
+  matchedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppConfig {
   id: string;
   upiId?: string;
