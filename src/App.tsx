@@ -3868,6 +3868,15 @@ const AuthPage = ({
           <p className="text-center text-[10px] text-mairide-secondary px-4 leading-relaxed">
             By continuing, you agree to MaiRide's Terms of Service and Privacy Policy.
           </p>
+
+          <a
+            href="/business-model.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 block w-full rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-center text-sm font-bold text-mairide-primary transition-all hover:bg-mairide-bg"
+          >
+            Learn How MaiRide Works
+          </a>
         </div>
       </motion.div>
 
@@ -16219,7 +16228,11 @@ const App = () => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>(() => {
+    if (typeof window === 'undefined') return 'login';
+    const mode = new URLSearchParams(window.location.search).get('mode');
+    return mode === 'signup' ? 'signup' : 'login';
+  });
   const [notRegisteredError, setNotRegisteredError] = useState(false);
   const [referralCodeInput, setReferralCodeInput] = useState('');
   const [role, setRole] = useState<'consumer' | 'driver'>('consumer');
@@ -16231,6 +16244,16 @@ const App = () => {
   const [showLanguagePrompt, setShowLanguagePrompt] = useState(false);
   const [suggestedLanguage, setSuggestedLanguage] = useState<string>('en');
   const [languagePromptOptions, setLanguagePromptOptions] = useState<string[]>(['en', 'hi']);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') !== 'signup') return;
+    params.delete('mode');
+    const next = params.toString();
+    const target = `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, '', target);
+  }, []);
 
   useEffect(() => {
     if (!isLocalRazorpayEnabled()) return;

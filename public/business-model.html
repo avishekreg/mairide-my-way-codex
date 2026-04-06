@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MaiRide | User Guide & Business Model</title>
+    <meta
+      name="description"
+      content="User-first guide to MaiRide: how the model works, why it saves money, Maicoins and referrals, environmental value, and quick start tutorials."
+    />
+    <style>
+      :root {
+        --bg: #f4f6f8;
+        --card: #ffffff;
+        --ink: #1f3344;
+        --accent: #eb7a2c;
+        --muted: #6c7f90;
+        --line: #90a0af;
+        --ok: #0f9d58;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      .wrap { max-width: 1120px; margin: 0 auto; padding: 26px 16px 52px; }
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 12px;
+      }
+      .lang-box {
+        translate: no;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 10px 12px;
+      }
+      .lang-box select {
+        translate: no;
+        border: 0;
+        outline: none;
+        background: transparent;
+        color: var(--ink);
+        font-weight: 700;
+      }
+      .hero {
+        background: linear-gradient(130deg, #ffffff 0%, #fff7f0 100%);
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        padding: 28px;
+      }
+      h1 { margin: 0; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.08; letter-spacing: -0.02em; }
+      .sub { margin: 14px 0 0; max-width: 800px; color: var(--muted); font-size: clamp(1rem, 2.2vw, 1.18rem); }
+      .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+      .btn {
+        text-decoration: none;
+        border-radius: 15px;
+        border: 1px solid var(--line);
+        padding: 10px 16px;
+        font-weight: 800;
+        font-size: 0.95rem;
+      }
+      .btn-main { background: var(--accent); color: #fff; border-color: var(--accent); }
+      .btn-soft { background: #fff; color: var(--ink); }
+      .grid { margin-top: 18px; display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 18px; }
+      .kpi { grid-column: span 12; }
+      .kpi .title { margin: 0 0 8px; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+      .kpi p { margin: 0; font-size: 1.18rem; font-weight: 800; line-height: 1.35; }
+      .section { margin-top: 18px; }
+      .section h2 { margin: 0 0 10px; font-size: clamp(1.25rem, 2.7vw, 1.7rem); }
+      .section p { margin: 0 0 8px; color: var(--muted); }
+      .list { margin: 8px 0 0; padding-left: 18px; }
+      .list li { margin: 6px 0; }
+      .twocol { display: grid; grid-template-columns: 1fr; gap: 12px; }
+      .impact {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        border-radius: 999px;
+        padding: 6px 12px;
+        background: #e9f7ef;
+        color: var(--ok);
+        font-size: 0.82rem;
+        font-weight: 800;
+      }
+      .footer { margin-top: 24px; text-align: center; color: var(--muted); font-size: 0.9rem; }
+      .hidden-translate-target { display: none; }
+      .notranslate, .notranslate * { translate: no; }
+      @media (min-width: 800px) {
+        .kpi { grid-column: span 4; }
+        .twocol { grid-template-columns: 1fr 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="top notranslate" translate="no">
+        <a class="btn btn-soft" href="/">Back to App</a>
+        <div class="lang-box">
+          <span>🌐</span>
+          <select id="langSelect" aria-label="Language">
+            <option value="en">English (English)</option>
+            <option value="hi">Hindi (हिंदी)</option>
+            <option value="bn">Bengali (বাংলা)</option>
+            <option value="gu">Gujarati (ગુજરાતી)</option>
+            <option value="mr">Marathi (मराठी)</option>
+            <option value="ta">Tamil (தமிழ்)</option>
+            <option value="te">Telugu (తెలుగు)</option>
+            <option value="kn">Kannada (ಕನ್ನಡ)</option>
+            <option value="ml">Malayalam (മലയാളം)</option>
+            <option value="pa">Punjabi (ਪੰਜਾਬੀ)</option>
+            <option value="or">Odia (ଓଡ଼ିଆ)</option>
+            <option value="as">Assamese (অসমীয়া)</option>
+            <option value="ne">Nepali (नेपाली)</option>
+          </select>
+        </div>
+      </div>
+
+      <section class="hero">
+        <h1>MaiRide turns empty return trips into affordable, useful rides for real people.</h1>
+        <p class="sub">
+          If you are a traveler, you save money and get options. If you are a driver, you recover value from dead mileage.
+          Everyone gets transparent booking, negotiation, and support in one app.
+        </p>
+        <div class="actions">
+          <a class="btn btn-main" href="/?mode=signup">Sign Up Now</a>
+          <a class="btn btn-soft" href="/tutorials/index.html" target="_blank" rel="noopener noreferrer">Open User Tutorials</a>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="card kpi">
+          <p class="title">Traveler Benefit</p>
+          <p>Book intercity rides at better value with fare negotiation and multi-day trip visibility.</p>
+        </article>
+        <article class="card kpi">
+          <p class="title">Driver Benefit</p>
+          <p>Monetize empty legs, reduce dead-mile loss, and earn from trips that would otherwise run empty.</p>
+        </article>
+        <article class="card kpi">
+          <p class="title">Platform Promise</p>
+          <p>Low entry friction, clear process flow, trust controls, and support-first operations.</p>
+        </article>
+      </section>
+
+      <section class="section card">
+        <h2>Pain points MaiRide solves</h2>
+        <div class="twocol">
+          <div>
+            <p><strong>For travelers:</strong></p>
+            <ul class="list">
+              <li>Hard to find reliable long-distance options at fair rates.</li>
+              <li>Last-minute uncertainty and poor pricing transparency.</li>
+              <li>No clear way to negotiate safely with verified context.</li>
+              <li>Difficulty planning future-day travel with confidence.</li>
+            </ul>
+          </div>
+          <div>
+            <p><strong>For drivers:</strong></p>
+            <ul class="list">
+              <li>Return trips with empty seats burn fuel without revenue.</li>
+              <li>No structured way to discover demand in advance.</li>
+              <li>Low visibility into true profitability per leg.</li>
+              <li>Fragmented communication and booking proof flow.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section card">
+        <h2>Maicoins, referrals, and tier value</h2>
+        <ul class="list">
+          <li><strong>Maicoins:</strong> Used to reduce platform fee (within configured limits) so repeat users spend less.</li>
+          <li><strong>Referral model:</strong> Users get referral codes and unlock rewards as referred users complete real ride activity.</li>
+          <li><strong>Tier progression:</strong> Engagement quality and repeat activity improve wallet value and long-term savings.</li>
+          <li><strong>Costing model:</strong> Service fee is intentionally small vs typical ride economics, making adoption easier for both sides.</li>
+        </ul>
+      </section>
+
+      <section class="section card">
+        <h2>Why MaiRide stands out vs alternatives</h2>
+        <ul class="list">
+          <li><strong>Empty-leg first:</strong> not just dispatching new rides, but optimizing rides already happening.</li>
+          <li><strong>User-centric negotiation:</strong> both sides can negotiate until accepted or rejected.</li>
+          <li><strong>Operational trust:</strong> onboarding, records, support tickets, and admin visibility are built in.</li>
+          <li><strong>Environmental upside:</strong> better seat utilization lowers avoidable fuel burn per completed rider-trip.</li>
+        </ul>
+        <div class="impact">✅ Better occupancy means lower wastage on existing journeys.</div>
+      </section>
+
+      <section class="section card">
+        <h2>Getting started is simple</h2>
+        <ul class="list">
+          <li>Sign up as traveler or driver.</li>
+          <li>Complete profile and verification where required.</li>
+          <li>Search rides or post/request rides in your sector.</li>
+          <li>Negotiate, confirm, pay platform fee, and complete the trip.</li>
+          <li>Submit post-ride review to strengthen trust for the community.</li>
+        </ul>
+        <div class="actions">
+          <a class="btn btn-main" href="/?mode=signup">Start Signup</a>
+          <a class="btn btn-soft" href="/tutorials/index.html" target="_blank" rel="noopener noreferrer">View Step-by-Step Tutorials</a>
+        </div>
+      </section>
+
+      <p class="footer">Release v3.0.1-beta | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.</p>
+    </main>
+
+    <div id="google_translate_element" class="hidden-translate-target"></div>
+    <script>
+      (function () {
+        var STORAGE_KEY = "mairide_ui_language";
+        var map = {
+          en: "en",
+          hi: "hi",
+          bn: "bn",
+          gu: "gu",
+          mr: "mr",
+          ta: "ta",
+          te: "te",
+          kn: "kn",
+          ml: "ml",
+          pa: "pa",
+          or: "or",
+          as: "as",
+          ne: "ne"
+        };
+
+        function setCookie(language) {
+          var code = map[language] || "en";
+          var target = "/en/" + code;
+          var maxAge = 60 * 60 * 24 * 365;
+          document.cookie = "googtrans=" + target + "; path=/; max-age=" + maxAge;
+          if (location.hostname.endsWith("mairide.in")) {
+            document.cookie = "googtrans=" + target + "; path=/; domain=.mairide.in; max-age=" + maxAge;
+          }
+        }
+
+        function apply(language) {
+          var combo = document.querySelector(".goog-te-combo");
+          var code = map[language] || "en";
+          if (!combo) return;
+          if (combo.value !== code) {
+            combo.value = code;
+            combo.dispatchEvent(new Event("change"));
+          }
+        }
+
+        function init() {
+          if (!window.google || !window.google.translate || !window.google.translate.TranslateElement) return;
+          new window.google.translate.TranslateElement(
+            { pageLanguage: "en", autoDisplay: false, includedLanguages: Object.values(map).join(",") },
+            "google_translate_element"
+          );
+          var current = localStorage.getItem(STORAGE_KEY) || "en";
+          setCookie(current);
+          setTimeout(function () { apply(current); }, 120);
+        }
+
+        window.googleTranslateElementInit = init;
+        var script = document.createElement("script");
+        script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+        script.async = true;
+        document.body.appendChild(script);
+
+        var select = document.getElementById("langSelect");
+        var initial = localStorage.getItem(STORAGE_KEY) || "en";
+        select.value = initial;
+        select.addEventListener("change", function (e) {
+          var next = e.target.value || "en";
+          localStorage.setItem(STORAGE_KEY, next);
+          setCookie(next);
+          setTimeout(function () { apply(next); }, 50);
+          setTimeout(function () { apply(next); }, 300);
+        });
+      })();
+    </script>
+  </body>
+  </html>

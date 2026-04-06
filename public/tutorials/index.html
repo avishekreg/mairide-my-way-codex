@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MaiRide Tutorials</title>
+    <style>
+      body { margin: 0; font-family: Inter, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; color: #1f3344; }
+      .wrap { max-width: 1080px; margin: 0 auto; padding: 26px 16px 42px; }
+      h1 { margin: 0 0 8px; font-size: clamp(1.8rem, 4vw, 2.7rem); }
+      p { color: #6c7f90; }
+      .top { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+      .btn { border: 1px solid #90a0af; border-radius: 14px; padding: 10px 14px; text-decoration: none; color: #1f3344; background: #fff; font-weight: 700; }
+      .grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 12px; }
+      .card { background: #fff; border: 1px solid #90a0af; border-radius: 20px; padding: 16px; }
+      .card h2 { margin: 0 0 8px; font-size: 1.1rem; }
+      .card a { color: #eb7a2c; font-weight: 800; text-decoration: none; }
+      @media (min-width: 840px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="top">
+        <a class="btn" href="/">Back to App</a>
+        <a class="btn" href="/?mode=signup">Sign Up Now</a>
+      </div>
+      <h1>MaiRide User Tutorials</h1>
+      <p>Step-by-step guides for every core action on the app. Open any tutorial below.</p>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Traveler Sign Up</h2>
+          <p>Create a traveler account and complete profile onboarding correctly.</p>
+          <a href="/tutorials/traveler-signup.html">Open tutorial →</a>
+        </article>
+        <article class="card">
+          <h2>Driver Sign Up & Verification</h2>
+          <p>Complete driver profile, upload documents, and move to pending verification.</p>
+          <a href="/tutorials/driver-signup.html">Open tutorial →</a>
+        </article>
+        <article class="card">
+          <h2>Create Offer / Request Ride</h2>
+          <p>How drivers post offers and travelers request rides using the 3-day window model.</p>
+          <a href="/tutorials/offers-and-requests.html">Open tutorial →</a>
+        </article>
+        <article class="card">
+          <h2>Negotiation, Payment, and Completion</h2>
+          <p>Counter offers, confirmation flow, platform fee payment, contact unlock, and ratings.</p>
+          <a href="/tutorials/negotiation-and-payment.html">Open tutorial →</a>
+        </article>
+      </section>
+    </main>
+  </body>
+  </html>
