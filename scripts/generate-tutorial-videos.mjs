@@ -5,6 +5,7 @@ import { chromium } from "playwright";
 const BASE_URL = "https://www.mairide.in";
 const VIDEO_DIR = path.resolve("public/tutorials/videos");
 const VIEWPORT = { width: 1365, height: 768 };
+const STEP_DELAY = 1500;
 
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
@@ -23,6 +24,66 @@ async function safeClick(page, candidates) {
     }
   }
   return false;
+}
+
+async function pause(ms = STEP_DELAY) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function clickIfVisible(page, selector, timeout = 1600) {
+  try {
+    const locator = page.locator(selector).first();
+    if (await locator.isVisible({ timeout })) {
+      await locator.click({ timeout: 2500 });
+      await pause();
+      return true;
+    }
+  } catch {
+    // noop
+  }
+  return false;
+}
+
+async function forceEnglishMode(page) {
+  // Open any possible language dropdown/button first.
+  await safeClick(page, [
+    "button:has-text('English')",
+    "button:has-text('LANGUAGE')",
+    "[aria-label*='language' i]",
+    "[title*='language' i]",
+    "text=/language/i",
+  ]);
+  await pause(500);
+
+  // Explicitly pick English from common modal/dropdown variants.
+  await safeClick(page, [
+    "button:has-text('English (English)')",
+    "button:has-text('English')",
+    "[role='option']:has-text('English')",
+    "li:has-text('English')",
+    "text=/\\bEnglish\\b/i",
+  ]);
+  await pause(600);
+
+  // Confirm/apply/continue if any CTA appears.
+  await safeClick(page, [
+    "button:has-text('Continue')",
+    "button:has-text('Apply')",
+    "button:has-text('Save')",
+    "button:has-text('Done')",
+    "button:has-text('Start')",
+    "button:has-text('Proceed')",
+    "button:has-text('OK')",
+  ]);
+
+  // Close language prompt if still visible.
+  await safeClick(page, [
+    "button[aria-label='Close']",
+    "[aria-label='close']",
+    "button:has-text('Close')",
+    "button:has-text('Skip')",
+    "button:has-text('Maybe later')",
+  ]);
 }
 
 async function fillVisibleInputs(page) {
@@ -44,7 +105,7 @@ async function fillVisibleInputs(page) {
       else if (hint.includes("fare") || hint.includes("price")) value = "2500";
 
       await field.fill(value, { timeout: 2000 });
-      await page.waitForTimeout(200);
+      await pause(450);
     } catch {
       // skip problematic field
     }
@@ -75,43 +136,64 @@ async function recordScenario(browser, name, scenario) {
 
 async function recordLandingFlow(page) {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await page.waitForTimeout(1500);
-  await page.mouse.wheel(0, 500);
-  await page.waitForTimeout(1000);
-  await page.mouse.wheel(0, -500);
-  await page.waitForTimeout(1000);
+  await pause(1600);
+  await forceEnglishMode(page);
+  await pause(1400);
+  await page.mouse.wheel(0, 420);
+  await pause(1700);
+  await page.mouse.wheel(0, 520);
+  await pause(1800);
+  await page.mouse.wheel(0, -520);
+  await pause(1800);
+  await page.mouse.wheel(0, -420);
+  await pause(5000);
 }
 
 async function recordTravelerSignupFlow(page) {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await page.waitForTimeout(1200);
+  await pause(1300);
+  await forceEnglishMode(page);
+  await pause(800);
 
   await safeClick(page, ["text=/traveler/i", "button:has-text('Traveler')", "[role='tab']:has-text('Traveler')"]);
-  await page.waitForTimeout(600);
+  await pause(900);
   await safeClick(page, ["text=/sign\\s*up/i", "button:has-text('Sign Up')", "[role='tab']:has-text('Sign Up')"]);
-  await page.waitForTimeout(800);
+  await pause(1000);
 
   await fillVisibleInputs(page);
-  await page.waitForTimeout(1000);
+  await pause(1400);
 
   await safeClick(page, ["button:has-text('Continue')", "button:has-text('Next')", "button:has-text('Sign Up')"]);
-  await page.waitForTimeout(1800);
+  await pause(3000);
+
+  // Extra slow scroll so viewers can follow next-step context.
+  await page.mouse.wheel(0, 380);
+  await pause(1500);
+  await page.mouse.wheel(0, -380);
+  await pause(9000);
 }
 
 async function recordDriverSignupFlow(page) {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await page.waitForTimeout(1200);
+  await pause(1300);
+  await forceEnglishMode(page);
+  await pause(800);
 
   await safeClick(page, ["text=/driver/i", "button:has-text('Driver')", "[role='tab']:has-text('Driver')"]);
-  await page.waitForTimeout(600);
+  await pause(900);
   await safeClick(page, ["text=/sign\\s*up/i", "button:has-text('Sign Up')", "[role='tab']:has-text('Sign Up')"]);
-  await page.waitForTimeout(800);
+  await pause(1000);
 
   await fillVisibleInputs(page);
-  await page.waitForTimeout(1000);
+  await pause(1400);
 
   await safeClick(page, ["button:has-text('Continue')", "button:has-text('Next')", "button:has-text('Create')"]);
-  await page.waitForTimeout(1800);
+  await pause(3000);
+
+  await page.mouse.wheel(0, 420);
+  await pause(1400);
+  await page.mouse.wheel(0, -420);
+  await pause(9000);
 }
 
 async function main() {
