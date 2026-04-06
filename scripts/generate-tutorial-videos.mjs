@@ -5,18 +5,21 @@ import { chromium } from "playwright";
 const BASE_URL = "https://www.mairide.in";
 const VIDEO_DIR = path.resolve("public/tutorials/videos");
 const VIEWPORT = { width: 1365, height: 768 };
-const STEP_DELAY = 1500;
 
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
 }
 
-async function safeClick(page, candidates) {
-  for (const selector of candidates) {
+async function pause(ms = 1200) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function safeClick(page, selectors, timeout = 2500) {
+  for (const selector of selectors) {
     try {
-      const locator = page.locator(selector).first();
-      if (await locator.isVisible({ timeout: 1500 })) {
-        await locator.click({ timeout: 2500 });
+      const el = page.locator(selector).first();
+      if (await el.isVisible({ timeout: 1200 })) {
+        await el.click({ timeout, force: true });
         return true;
       }
     } catch {
@@ -26,187 +29,262 @@ async function safeClick(page, candidates) {
   return false;
 }
 
-async function pause(ms = STEP_DELAY) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function randomEmail(prefix) {
+  return `${prefix}.${Date.now()}@example.com`;
 }
 
-async function clickIfVisible(page, selector, timeout = 1600) {
-  try {
-    const locator = page.locator(selector).first();
-    if (await locator.isVisible({ timeout })) {
-      await locator.click({ timeout: 2500 });
-      await pause();
-      return true;
-    }
-  } catch {
-    // noop
-  }
-  return false;
+function randomPhone() {
+  const seed = String(Date.now()).slice(-9);
+  return `9${seed}`;
 }
 
-async function forceEnglishMode(page) {
-  // Open any possible language dropdown/button first.
-  await safeClick(page, [
-    "button:has-text('English')",
-    "button:has-text('LANGUAGE')",
-    "[aria-label*='language' i]",
-    "[title*='language' i]",
-    "text=/language/i",
-  ]);
-  await pause(500);
-
-  // Explicitly pick English from common modal/dropdown variants.
-  await safeClick(page, [
-    "button:has-text('English (English)')",
-    "button:has-text('English')",
-    "[role='option']:has-text('English')",
-    "li:has-text('English')",
-    "text=/\\bEnglish\\b/i",
-  ]);
-  await pause(600);
-
-  // Confirm/apply/continue if any CTA appears.
-  await safeClick(page, [
-    "button:has-text('Continue')",
-    "button:has-text('Apply')",
-    "button:has-text('Save')",
-    "button:has-text('Done')",
-    "button:has-text('Start')",
-    "button:has-text('Proceed')",
-    "button:has-text('OK')",
-  ]);
-
-  // Close language prompt if still visible.
-  await safeClick(page, [
-    "button[aria-label='Close']",
-    "[aria-label='close']",
-    "button:has-text('Close')",
-    "button:has-text('Skip')",
-    "button:has-text('Maybe later')",
-  ]);
-}
-
-async function fillVisibleInputs(page) {
-  const fields = await page.locator("input:visible").all();
-  for (const field of fields) {
-    try {
-      const type = (await field.getAttribute("type"))?.toLowerCase() || "text";
-      const name = (await field.getAttribute("name"))?.toLowerCase() || "";
-      const placeholder = (await field.getAttribute("placeholder"))?.toLowerCase() || "";
-      const hint = `${name} ${placeholder}`;
-
-      let value = "Demo Value";
-      if (type === "email" || hint.includes("email")) value = "demo.user@mairide.in";
-      else if (type === "tel" || hint.includes("phone") || hint.includes("mobile")) value = "9876543210";
-      else if (type === "password" || hint.includes("password")) value = "Demo@1234";
-      else if (hint.includes("name")) value = "Demo User";
-      else if (hint.includes("from") || hint.includes("origin")) value = "Siliguri, West Bengal, India";
-      else if (hint.includes("to") || hint.includes("destination")) value = "Kolkata, West Bengal, India";
-      else if (hint.includes("fare") || hint.includes("price")) value = "2500";
-
-      await field.fill(value, { timeout: 2000 });
-      await pause(450);
-    } catch {
-      // skip problematic field
-    }
-  }
-}
-
-async function recordScenario(browser, name, scenario) {
+async function setupContext(browser) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
     recordVideo: { dir: VIDEO_DIR, size: VIEWPORT },
   });
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem("mairide_ui_language", "en");
+      localStorage.setItem("mairide_ui_language_prompt_seen", "1");
+      sessionStorage.setItem("mairide_ui_language_prompt_session", "1");
+      document.cookie = "googtrans=/en/en; path=/";
+    } catch {
+      // ignore storage errors
+    }
+  });
 
+  await context.route("**/*", async (route) => {
+    const url = route.request().url();
+    if (
+      url.includes("accounts.google.com") ||
+      url.includes("googleusercontent.com") ||
+      url.includes("oauth")
+    ) {
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+
+  return context;
+}
+
+async function forceEnglish(page) {
+  // Keep explicit English choice if prompt still appears unexpectedly.
+  await safeClick(page, [
+    "button:has-text('Continue in English')",
+    "button:has-text('English (English)')",
+  ]);
+  await pause(900);
+}
+
+async function openManualSignup(page, roleLabel) {
+  await forceEnglish(page);
+  const roleButtons = page.locator("button.flex-1.py-3.rounded-xl:visible");
+  const roleCount = await roleButtons.count();
+  if (roleCount >= 2) {
+    await roleButtons.nth(roleLabel === "Driver" ? 1 : 0).click({ timeout: 2500 });
+  } else {
+    await safeClick(page, [
+      `button:has-text('${roleLabel}')`,
+      `[role='tab']:has-text('${roleLabel}')`,
+    ]);
+  }
+  await pause(700);
+  const authTabs = page.locator("button.text-sm.font-bold.pb-1:visible");
+  const tabCount = await authTabs.count();
+  if (tabCount >= 2) {
+    await authTabs.nth(1).click({ timeout: 2500 }); // signup tab
+  } else {
+    await safeClick(page, [
+      "button:has-text('Sign Up')",
+      "[role='tab']:has-text('Sign Up')",
+    ]);
+  }
+  await pause(900);
+
+  // Retry once if the form is not yet visible.
+  const emailInput = page.locator("input[type='email']:visible").first();
+  if (!(await emailInput.isVisible({ timeout: 1500 }).catch(() => false))) {
+    await safeClick(page, [
+      "button:has-text('Sign Up')",
+      "[role='tab']:has-text('Sign Up')",
+      "text=/sign\\s*up/i",
+    ]);
+    await pause(900);
+  }
+}
+
+async function fillSignupForm(page, { name, email, phone, password }) {
+  await page.locator("input[placeholder='Full Name']").first().fill(name);
+  await pause(450);
+  await page.locator("input[type='email']:visible").first().fill(email);
+  await pause(450);
+  await page.locator("input[type='tel']:visible").first().fill(phone);
+  await pause(450);
+  await page.locator("input[type='password']:visible").first().fill(password);
+  await pause(450);
+
+  const checks = page.locator("input[type='checkbox']:visible");
+  const count = await checks.count();
+  for (let i = 0; i < count; i += 1) {
+    try {
+      await checks.nth(i).check({ force: true });
+      await pause(250);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function submitSignup(page) {
+  await safeClick(page, [
+    "button.w-full.bg-mairide-accent:has-text('Sign Up')",
+    "button[type='submit']:has-text('Sign Up')",
+    "button:has-text('Sign Up')",
+  ]);
+  await pause(2500);
+}
+
+async function loginWithCredentials(page, { email, password }) {
+  await forceEnglish(page);
+  const preLoginEmailField = page.locator("input[type='email']:visible").first();
+  if (!(await preLoginEmailField.isVisible({ timeout: 1200 }).catch(() => false))) {
+    // Already beyond auth wall (session continued), treat as dashboard-ready.
+    await pause(1200);
+    return;
+  }
+
+  const authTabs = page.locator("button.text-sm.font-bold.pb-1:visible");
+  const tabCount = await authTabs.count();
+  if (tabCount >= 1) {
+    await authTabs.nth(0).click({ timeout: 2500 }); // login tab
+  } else {
+    await safeClick(page, [
+      "button:has-text('Login')",
+      "[role='tab']:has-text('Login')",
+    ]);
+  }
+  await pause(700);
+
+  await page.locator("input[type='email']:visible").first().fill(email);
+  await pause(450);
+  await page.locator("input[type='password']:visible").first().fill(password);
+  await pause(450);
+
+  await safeClick(page, [
+    "button.w-full.bg-mairide-accent:has-text('Login')",
+    "button[type='submit']:has-text('Login')",
+    "button:has-text('Login')",
+  ]);
+  await pause(3500);
+}
+
+async function recordScenario(browser, fileName, fn) {
+  const context = await setupContext(browser);
   const page = await context.newPage();
   const video = page.video();
 
   try {
-    await scenario(page);
+    await fn(page);
   } finally {
     await context.close();
   }
 
   const source = await video.path();
-  const target = path.join(VIDEO_DIR, `${name}.webm`);
+  const target = path.join(VIDEO_DIR, `${fileName}.webm`);
   await fs.rm(target, { force: true });
   await fs.rename(source, target);
   return target;
 }
 
-async function recordLandingFlow(page) {
+async function recordLanding(page) {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await pause(1600);
-  await forceEnglishMode(page);
-  await pause(1400);
-  await page.mouse.wheel(0, 420);
+  await forceEnglish(page);
+  await pause(1200);
+  await page.mouse.wheel(0, 450);
+  await pause(1800);
+  await page.mouse.wheel(0, 550);
+  await pause(2000);
+  await page.mouse.wheel(0, -500);
   await pause(1700);
-  await page.mouse.wheel(0, 520);
-  await pause(1800);
-  await page.mouse.wheel(0, -520);
-  await pause(1800);
-  await page.mouse.wheel(0, -420);
-  await pause(5000);
+  await page.mouse.wheel(0, -500);
+  await pause(4000);
 }
 
-async function recordTravelerSignupFlow(page) {
+async function recordTravelerSignup(page) {
+  const traveler = {
+    name: "Tutorial Traveler",
+    email: randomEmail("tutorial.traveler"),
+    phone: randomPhone(),
+    password: "Demo@1234",
+  };
+
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await pause(1300);
-  await forceEnglishMode(page);
-  await pause(800);
+  await openManualSignup(page, "Traveler");
+  await fillSignupForm(page, traveler);
+  await submitSignup(page);
 
-  await safeClick(page, ["text=/traveler/i", "button:has-text('Traveler')", "[role='tab']:has-text('Traveler')"]);
-  await pause(900);
-  await safeClick(page, ["text=/sign\\s*up/i", "button:has-text('Sign Up')", "[role='tab']:has-text('Sign Up')"]);
-  await pause(1000);
+  // Tutorial requirement: skip OTP screen and continue to dashboard sequence.
+  await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await loginWithCredentials(page, traveler);
 
-  await fillVisibleInputs(page);
-  await pause(1400);
-
-  await safeClick(page, ["button:has-text('Continue')", "button:has-text('Next')", "button:has-text('Sign Up')"]);
-  await pause(3000);
-
-  // Extra slow scroll so viewers can follow next-step context.
-  await page.mouse.wheel(0, 380);
+  await page.mouse.wheel(0, 450);
   await pause(1500);
-  await page.mouse.wheel(0, -380);
-  await pause(9000);
+  await page.mouse.wheel(0, 500);
+  await pause(1800);
+  await page.mouse.wheel(0, -500);
+  await pause(3500);
 }
 
-async function recordDriverSignupFlow(page) {
+async function recordDriverSignup(page) {
+  const driver = {
+    name: "Tutorial Driver",
+    email: randomEmail("tutorial.driver"),
+    phone: randomPhone(),
+    password: "Demo@1234",
+  };
+
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await pause(1300);
-  await forceEnglishMode(page);
-  await pause(800);
+  await openManualSignup(page, "Driver");
+  await fillSignupForm(page, driver);
+  await submitSignup(page);
 
-  await safeClick(page, ["text=/driver/i", "button:has-text('Driver')", "[role='tab']:has-text('Driver')"]);
-  await pause(900);
-  await safeClick(page, ["text=/sign\\s*up/i", "button:has-text('Sign Up')", "[role='tab']:has-text('Sign Up')"]);
-  await pause(1000);
+  // Continue through setup-like flow with document sections in view.
+  await page.mouse.wheel(0, 450);
+  await pause(1800);
+  await page.mouse.wheel(0, 550);
+  await pause(1800);
+  await page.mouse.wheel(0, 700);
+  await pause(2200);
 
-  await fillVisibleInputs(page);
-  await pause(1400);
+  await safeClick(page, [
+    "button:has-text('Continue')",
+    "button:has-text('Next')",
+  ]);
+  await pause(1600);
 
-  await safeClick(page, ["button:has-text('Continue')", "button:has-text('Next')", "button:has-text('Create')"]);
-  await pause(3000);
+  await page.mouse.wheel(0, 900);
+  await pause(2200);
 
-  await page.mouse.wheel(0, 420);
-  await pause(1400);
-  await page.mouse.wheel(0, -420);
-  await pause(9000);
+  await safeClick(page, [
+    "button:has-text('Complete Setup')",
+    "button:has-text('Submit')",
+  ]);
+  await pause(3500);
 }
 
 async function main() {
   await ensureDir(VIDEO_DIR);
   const browser = await chromium.launch({ headless: true });
-
   try {
     const outputs = [];
-    outputs.push(await recordScenario(browser, "landing-overview", recordLandingFlow));
-    outputs.push(await recordScenario(browser, "traveler-signup-demo", recordTravelerSignupFlow));
-    outputs.push(await recordScenario(browser, "driver-signup-demo", recordDriverSignupFlow));
+    outputs.push(await recordScenario(browser, "landing-overview", recordLanding));
+    outputs.push(await recordScenario(browser, "traveler-signup-demo", recordTravelerSignup));
+    outputs.push(await recordScenario(browser, "driver-signup-demo", recordDriverSignup));
     console.log("Recorded tutorial videos:");
-    outputs.forEach((file) => console.log(`- ${file}`));
+    for (const o of outputs) console.log(`- ${o}`);
   } finally {
     await browser.close();
   }
