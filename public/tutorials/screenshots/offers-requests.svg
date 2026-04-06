@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" fill="none">
+  <rect width="960" height="560" rx="26" fill="#F4F6FA"/>
+  <rect x="46" y="34" width="868" height="492" rx="24" fill="#FFFFFF" stroke="#8EA0AF" stroke-width="2"/>
+  <rect x="84" y="78" width="350" height="40" rx="12" fill="#FFF4EA"/>
+  <text x="100" y="104" fill="#EB7A2C" font-size="20" font-family="Inter, Arial" font-weight="700">Offers & Requests</text>
+  <rect x="84" y="150" width="792" height="130" rx="18" fill="#FFFFFF" stroke="#8EA0AF" stroke-width="2"/>
+  <rect x="84" y="300" width="792" height="130" rx="18" fill="#FFFFFF" stroke="#8EA0AF" stroke-width="2"/>
+  <rect x="688" y="196" width="188" height="40" rx="12" fill="#EB7A2C"/>
+  <text x="728" y="221" fill="#fff" font-size="18" font-family="Inter, Arial" font-weight="800">Book</text>
+  <rect x="688" y="346" width="188" height="40" rx="12" fill="#1F3344"/>
+  <text x="710" y="371" fill="#fff" font-size="18" font-family="Inter, Arial" font-weight="800">Match</text>
+</svg>

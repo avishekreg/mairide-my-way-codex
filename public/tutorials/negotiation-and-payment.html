@@ -16,6 +16,8 @@
       .node h3 { margin: 0 0 4px; font-size: 1rem; }
       .node p { margin: 0; }
       .tip { margin-top: 14px; border-radius: 16px; padding: 12px; background: #fff4ea; color: #eb7a2c; font-weight: 700; }
+      .shot { margin-top: 14px; border: 1px solid #8ea0af; border-radius: 18px; overflow: hidden; background: #fff; }
+      .shot img, .shot video { width: 100%; display: block; }
     </style>
   </head>
   <body>
@@ -47,7 +49,10 @@
           <p>When ride is ended, post-ride rating flow is triggered for both traveler and driver.</p>
         </article>
       </section>
+      <section class="shot">
+        <video src="/tutorials/videos/landing-overview.webm" controls autoplay muted loop playsinline preload="metadata"></video>
+      </section>
       <div class="tip">Pro Tip: If a booking is under active negotiation, avoid canceling the ride to keep negotiation state consistent.</div>
     </main>
   </body>
-  </html>
+</html>

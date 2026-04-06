@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" fill="none">
+  <rect width="960" height="560" rx="26" fill="#F4F6FA"/>
+  <rect x="46" y="34" width="868" height="492" rx="24" fill="#FFFFFF" stroke="#8EA0AF" stroke-width="2"/>
+  <rect x="84" y="78" width="250" height="40" rx="12" fill="#EDF7FF"/>
+  <text x="100" y="104" fill="#1F3344" font-size="20" font-family="Inter, Arial" font-weight="700">Driver Onboarding</text>
+  <rect x="84" y="150" width="376" height="210" rx="16" fill="#F1F4F8" stroke="#90A0AF" stroke-dasharray="8 6"/>
+  <rect x="500" y="150" width="376" height="210" rx="16" fill="#F1F4F8" stroke="#90A0AF" stroke-dasharray="8 6"/>
+  <rect x="84" y="384" width="260" height="114" rx="16" fill="#F1F4F8"/>
+  <rect x="362" y="384" width="514" height="114" rx="16" fill="#F1F4F8"/>
+  <rect x="640" y="460" width="236" height="38" rx="12" fill="#EB7A2C"/>
+  <text x="702" y="485" fill="#fff" font-size="18" font-family="Inter, Arial" font-weight="800">Complete Setup</text>
+</svg>
