@@ -122,9 +122,13 @@ async function loginWithCredentials(page, { email, password, role }) {
   ]);
   await pause(500);
 
-  await page.locator("input[type='text']:visible").first().fill(email);
+  const usernameInput = page.locator("input[type='text']:visible, input[type='email']:visible").first();
+  await usernameInput.waitFor({ state: "visible", timeout: 15000 });
+  await usernameInput.fill(email);
   await pause(300);
-  await page.locator("input[type='password']:visible").first().fill(password);
+  const passwordInput = page.locator("input[type='password']:visible").first();
+  await passwordInput.waitFor({ state: "visible", timeout: 15000 });
+  await passwordInput.fill(password);
   await pause(300);
 
   await safeClick(page, [
@@ -292,6 +296,106 @@ async function recordDriverSignup(page) {
   await pause(2500);
 }
 
+async function recordOffersRequests(page) {
+  const traveler = await createDemoUser("consumer", "Tutorial R1 Traveler");
+
+  await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await loginWithCredentials(page, { ...traveler, role: "consumer" });
+  await forceEnglish(page);
+
+  await safeClick(page, ["button:has-text('Search')", "a:has-text('Home')"]);
+  await pause(1200);
+
+  await safeClick(page, ["button:has-text('Request a Ride')"]);
+  await pause(1200);
+
+  const modal = page.locator("text=Request New Ride").first();
+  if (await modal.isVisible().catch(() => false)) {
+    await page.locator("input[placeholder='Where should the ride start?']:visible").first().fill("Siliguri, West Bengal, India");
+    await pause(350);
+    await page.locator("input[placeholder='Where should the ride end?']:visible").first().fill("Kolkata, West Bengal, India");
+    await pause(350);
+    await page.locator("input[placeholder='e.g. 1800']:visible").first().fill("2500");
+    await pause(350);
+    const timeInput = page.locator("input[type='time']:visible").first();
+    if (await timeInput.isVisible().catch(() => false)) {
+      await timeInput.fill("11:30");
+    }
+    await pause(500);
+    await safeClick(page, ["button:has-text('Post Ride Request')"]);
+    await pause(1600);
+    await safeClick(page, [
+      "button:has(.lucide-x)",
+      "button:has-text('Close')",
+      "button:has-text('Got it')",
+    ]);
+  }
+
+  await page.mouse.wheel(0, 650);
+  await pause(1400);
+  await page.mouse.wheel(0, -420);
+  await pause(2400);
+}
+
+async function recordNegotiationPayment(page) {
+  const traveler = await createDemoUser("consumer", "Tutorial N1 Traveler");
+
+  await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await loginWithCredentials(page, { ...traveler, role: "consumer" });
+  await forceEnglish(page);
+
+  await safeClick(page, ["button:has-text('Search')", "a:has-text('Home')"]);
+  await pause(1100);
+
+  await page.locator("input[placeholder='From (Origin)']:visible").first().fill("Siliguri, West Bengal, India");
+  await pause(350);
+  await page.locator("input[placeholder='To (Destination)']:visible").first().fill("Kolkata, West Bengal, India");
+  await pause(450);
+  await safeClick(page, ["button:has-text('Search Rides')"]);
+  await pause(2200);
+
+  // Primary path: open booking modal from available ride.
+  const bookNow = page.locator("button:has-text('Book Now')").first();
+  if (await bookNow.isVisible().catch(() => false)) {
+    await bookNow.click({ force: true });
+    await pause(1400);
+
+    const counterInput = page.locator("input[placeholder='Enter counter offer']:visible, input[placeholder='Enter']:visible").first();
+    if (await counterInput.isVisible().catch(() => false)) {
+      await counterInput.fill("2300");
+      await pause(350);
+      await safeClick(page, ["button:has-text('Send Counter Offer')", "button:has-text('Send Booking Request')"]);
+      await pause(1600);
+    }
+
+    await safeClick(page, [
+      "button:has-text('Pay with Razorpay')",
+      "button:has-text('Pay Online')",
+      "button:has-text('Use MaiCoins + Pay Balance')",
+    ]);
+    await pause(1400);
+
+    await safeClick(page, [
+      "button:has(.lucide-x)",
+      "button:has-text('Close')",
+      "button:has-text('Got it')",
+    ]);
+  } else {
+    // Fallback: show active booking panel + wallet/payment area if available.
+    await safeClick(page, [
+      "button:has-text('History')",
+      "a:has-text('My Bookings')",
+    ]);
+    await pause(1500);
+    await page.mouse.wheel(0, 520);
+    await pause(1200);
+    await safeClick(page, ["button:has-text('Wallet')"]);
+    await pause(1400);
+  }
+
+  await pause(2200);
+}
+
 async function cleanupTransientFiles() {
   const files = await fs.readdir(VIDEO_DIR).catch(() => []);
   await Promise.all(
@@ -317,6 +421,8 @@ async function main() {
     outputs.push(await recordScenario(browser, "landing-overview", recordLanding));
     outputs.push(await recordScenario(browser, "traveler-signup-demo", recordTravelerSignup));
     outputs.push(await recordScenario(browser, "driver-signup-demo", recordDriverSignup));
+    outputs.push(await recordScenario(browser, "offers-requests-demo", recordOffersRequests));
+    outputs.push(await recordScenario(browser, "negotiation-payment-demo", recordNegotiationPayment));
 
     await cleanupTransientFiles();
 
