@@ -1194,19 +1194,29 @@ const LanguageSwitcher = ({
   onChange: (next: string) => void;
   compact?: boolean;
 }) => (
-  <div className={cn('flex items-center gap-2 rounded-xl border border-mairide-secondary bg-white', compact ? 'px-2 py-1' : 'px-3 py-2')}>
+  <div
+    className={cn(
+      'notranslate flex items-center gap-2 rounded-xl border border-mairide-secondary bg-white',
+      compact ? 'px-2 py-1' : 'px-3 py-2'
+    )}
+    translate="no"
+  >
     <Globe2 className={cn('text-mairide-secondary', compact ? 'w-4 h-4' : 'w-5 h-5')} />
+    <span className={cn('text-mairide-secondary', compact ? 'text-[11px] font-bold uppercase tracking-wide' : 'text-xs font-bold uppercase tracking-widest')}>
+      Language
+    </span>
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      translate="no"
       className={cn(
-        'bg-transparent text-mairide-primary outline-none',
+        'notranslate bg-transparent text-mairide-primary outline-none',
         compact ? 'text-xs font-semibold' : 'text-sm font-semibold'
       )}
     >
       {SUPPORTED_UI_LANGUAGES.map((option) => (
         <option key={option.value} value={option.value}>
-          {option.nativeLabel}
+          {option.label} ({option.nativeLabel})
         </option>
       ))}
     </select>
@@ -8909,12 +8919,21 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
       {activeTab === 'search' && (
         <>
-          <div className="flex flex-col md:flex-row md:items-center gap-6 mb-12">
-            <img src={LOGO_URL} className="w-24 h-24 object-contain" alt="MaiRide Logo" />
-            <div>
-              <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Where to?</h1>
-              <p className="text-mairide-secondary italic serif">Find discounted intercity rides on empty leg journeys.</p>
+          <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-6 md:flex-row md:items-center">
+              <img src={LOGO_URL} className="h-24 w-24 object-contain" alt="MaiRide Logo" />
+              <div>
+                <h1 className="mb-2 text-4xl font-bold uppercase tracking-tight text-mairide-primary">Where to?</h1>
+                <p className="italic serif text-mairide-secondary">Find discounted intercity rides on empty leg journeys.</p>
+              </div>
             </div>
+            <button
+              onClick={() => setShowRequestForm(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-mairide-accent px-6 py-4 text-sm font-bold text-white transition-all hover:bg-mairide-primary"
+            >
+              <Plus className="h-5 w-5" />
+              Request a Ride
+            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
@@ -9128,13 +9147,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
           <div className="mb-8 flex items-center justify-between gap-3">
             <h2 className="text-xl font-bold text-mairide-primary">Traveler Ride Requests</h2>
-            <button
-              onClick={() => setShowRequestForm(true)}
-              className="inline-flex items-center gap-2 rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white hover:bg-mairide-accent transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Request a Ride
-            </button>
           </div>
 
           {travelerRequests.filter((item) => item.status === 'open').length > 0 && (
@@ -16585,7 +16597,6 @@ const App = () => {
     safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, normalized);
     safeStorageSet('local', UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
     setShowLanguagePrompt(false);
-    if (normalized === 'en') return;
     void ensureGoogleTranslateScriptLoaded().then(() => {
       window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 40);
       window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 220);
