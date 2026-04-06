@@ -1202,9 +1202,6 @@ const LanguageSwitcher = ({
     translate="no"
   >
     <Globe2 className={cn('text-mairide-secondary', compact ? 'w-4 h-4' : 'w-5 h-5')} />
-    <span className={cn('text-mairide-secondary', compact ? 'text-[11px] font-bold uppercase tracking-wide' : 'text-xs font-bold uppercase tracking-widest')}>
-      Language
-    </span>
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
