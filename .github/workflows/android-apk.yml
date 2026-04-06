@@ -1,0 +1,93 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Install Capacitor toolchain
+        run: npm i -D @capacitor/cli @capacitor/core @capacitor/android
+
+      - name: Generate Capacitor config
+        run: |
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'in.mairide.app',
+            appName: 'MaiRide',
+            webDir: 'dist',
+            bundledWebRuntime: false,
+            server: {
+              androidScheme: 'https'
+            }
+          };
+
+          export default config;
+          EOF
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Android platform
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/mairide-android.apk
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mairide-android-apk
+          path: release/mairide-android.apk
+
+      - name: Publish APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-apk-latest
+          name: MaiRide Android APK (Latest)
+          body: |
+            Latest Android APK built from `main`.
+            File: `mairide-android.apk`
+          files: release/mairide-android.apk
+          overwrite_files: true
