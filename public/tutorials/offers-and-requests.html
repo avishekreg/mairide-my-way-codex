@@ -5,31 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tutorial | Offers and Requests</title>
     <style>
-      body { margin: 0; font-family: Inter, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; color: #1f3344; }
-      .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 40px; }
-      .btn { border: 1px solid #90a0af; border-radius: 14px; padding: 9px 14px; text-decoration: none; color: #1f3344; background: #fff; font-weight: 700; }
-      .card { background: #fff; border: 1px solid #90a0af; border-radius: 20px; padding: 16px; margin-top: 12px; }
-      h1 { margin: 10px 0 8px; }
-      p { color: #6c7f90; }
-      .shot { border: 2px dashed #90a0af; background: #eef2f5; border-radius: 16px; min-height: 180px; display: grid; place-items: center; color: #6c7f90; font-weight: 700; margin-top: 10px; }
-      ol { margin: 8px 0 0; padding-left: 20px; }
-      li { margin: 8px 0; }
+      body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6fa; color: #1f3344; }
+      .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 42px; }
+      .btn { border: 1px solid #8ea0af; border-radius: 14px; padding: 9px 14px; text-decoration: none; color: #1f3344; background: #fff; font-weight: 700; }
+      .hero { margin-top: 10px; border: 1px solid #8ea0af; border-radius: 24px; background: linear-gradient(130deg, #fff, #fff7f0); padding: 20px; }
+      h1 { margin: 0; }
+      p { color: #6f8192; }
+      .flow { margin-top: 12px; display: grid; gap: 10px; grid-template-columns: 1fr; }
+      .step { border: 1px solid #8ea0af; border-radius: 16px; padding: 12px; background: #fff; }
+      .badge { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #fff4ea; color: #eb7a2c; font-size: .78rem; font-weight: 800; margin-bottom: 6px; }
+      .tip { margin-top: 14px; border-radius: 16px; padding: 12px; background: #e9f7ef; color: #0f9d58; font-weight: 700; }
+      @media (min-width: 760px) { .flow { grid-template-columns: 1fr 1fr; } }
     </style>
   </head>
   <body>
     <main class="wrap">
       <a class="btn" href="/tutorials/index.html">← All Tutorials</a>
-      <h1>Create Offer / Request Ride Tutorial</h1>
-      <p>How both sides can post demand using the same 3-day planning logic.</p>
-      <section class="card">
-        <ol>
-          <li>Driver posts <strong>Offer a Ride</strong> with route, fare, seats, and departure window.</li>
-          <li>Traveler can <strong>Search Rides</strong> and also <strong>Request a Ride</strong> with own preferred fare.</li>
-          <li>Matching route cards appear for the opposite side to respond quickly.</li>
-          <li>Both cards show departure timing and route context clearly.</li>
-        </ol>
-        <div class="shot">Screenshot guide area (Offer + Request card placement)</div>
+      <section class="hero">
+        <h1>Offers and Requests: same logic, two entry points</h1>
+        <p>Drivers post supply. Travelers post demand. MaiRide aligns both with route + time intelligence.</p>
       </section>
+      <section class="flow">
+        <article class="step">
+          <span class="badge">Driver Flow</span>
+          <p>Use <strong>Offer a Ride</strong>, set origin, destination, fare, seat count, and departure day/time (3-day window).</p>
+        </article>
+        <article class="step">
+          <span class="badge">Traveler Flow</span>
+          <p>Use <strong>Request a Ride</strong> to post preferred route and fair offer for the same 3-day planning horizon.</p>
+        </article>
+        <article class="step">
+          <span class="badge">Matching</span>
+          <p>Both sides see matching opportunities and can move directly into negotiation without leaving the dashboard.</p>
+        </article>
+        <article class="step">
+          <span class="badge">Decision Ready</span>
+          <p>Departure date/time and route context stay visible so both parties can avoid booking confusion.</p>
+        </article>
+      </section>
+      <div class="tip">Pro Tip: Keeping route names clear and realistic significantly improves match quality.</div>
     </main>
   </body>
   </html>

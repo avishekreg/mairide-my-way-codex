@@ -3,35 +3,51 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tutorial | Negotiation, Payment, Completion</title>
+    <title>Tutorial | Negotiation, Payment & Completion</title>
     <style>
-      body { margin: 0; font-family: Inter, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; color: #1f3344; }
-      .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 40px; }
-      .btn { border: 1px solid #90a0af; border-radius: 14px; padding: 9px 14px; text-decoration: none; color: #1f3344; background: #fff; font-weight: 700; }
-      .card { background: #fff; border: 1px solid #90a0af; border-radius: 20px; padding: 16px; margin-top: 12px; }
-      h1 { margin: 10px 0 8px; }
-      p { color: #6c7f90; }
-      .shot { border: 2px dashed #90a0af; background: #eef2f5; border-radius: 16px; min-height: 180px; display: grid; place-items: center; color: #6c7f90; font-weight: 700; margin-top: 10px; }
-      ol { margin: 8px 0 0; padding-left: 20px; }
-      li { margin: 8px 0; }
+      body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6fa; color: #1f3344; }
+      .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 42px; }
+      .btn { border: 1px solid #8ea0af; border-radius: 14px; padding: 9px 14px; text-decoration: none; color: #1f3344; background: #fff; font-weight: 700; }
+      .hero { margin-top: 10px; border: 1px solid #8ea0af; border-radius: 24px; background: linear-gradient(130deg, #fff, #eef7ff); padding: 20px; }
+      h1 { margin: 0; }
+      p { color: #6f8192; }
+      .timeline { margin-top: 14px; border-left: 3px solid #eb7a2c; padding-left: 12px; display: grid; gap: 12px; }
+      .node { border: 1px solid #8ea0af; border-radius: 16px; background: #fff; padding: 12px; }
+      .node h3 { margin: 0 0 4px; font-size: 1rem; }
+      .node p { margin: 0; }
+      .tip { margin-top: 14px; border-radius: 16px; padding: 12px; background: #fff4ea; color: #eb7a2c; font-weight: 700; }
     </style>
   </head>
   <body>
     <main class="wrap">
       <a class="btn" href="/tutorials/index.html">← All Tutorials</a>
-      <h1>Negotiation, Payment, and Completion Tutorial</h1>
-      <p>End-to-end ride lifecycle from offer to post-ride review.</p>
-      <section class="card">
-        <ol>
-          <li>Traveler or driver sends a counter offer.</li>
-          <li>Negotiation remains live until one side accepts or rejects.</li>
-          <li>After acceptance, platform fee payment options appear.</li>
-          <li>Hybrid mode supports Maicoins usage up to configured cap.</li>
-          <li>Contact details unlock post successful platform fee confirmation.</li>
-          <li>After ride completion, rating/review flow is triggered.</li>
-        </ol>
-        <div class="shot">Screenshot guide area (Counter offer → payment → completion → ratings)</div>
+      <section class="hero">
+        <h1>From counter offer to completed ride</h1>
+        <p>This is the full trust-and-transaction flow you should expect in production usage.</p>
       </section>
+      <section class="timeline">
+        <article class="node">
+          <h3>1. Negotiation starts</h3>
+          <p>Either side can send a counter offer. Loop remains active until accepted or rejected.</p>
+        </article>
+        <article class="node">
+          <h3>2. Offer accepted</h3>
+          <p>Booking enters confirmed path and platform fee panel is activated.</p>
+        </article>
+        <article class="node">
+          <h3>3. Platform fee payment</h3>
+          <p>Pay online or hybrid with Maicoins (within limit). GST applies on net cash component.</p>
+        </article>
+        <article class="node">
+          <h3>4. Contact unlock</h3>
+          <p>Once payment is successful, contact details become available for coordination.</p>
+        </article>
+        <article class="node">
+          <h3>5. Ride completion + review</h3>
+          <p>When ride is ended, post-ride rating flow is triggered for both traveler and driver.</p>
+        </article>
+      </section>
+      <div class="tip">Pro Tip: If a booking is under active negotiation, avoid canceling the ride to keep negotiation state consistent.</div>
     </main>
   </body>
   </html>

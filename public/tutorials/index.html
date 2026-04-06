@@ -3,52 +3,158 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MaiRide Tutorials</title>
+    <title>MaiRide Academy | Tutorials</title>
     <style>
-      body { margin: 0; font-family: Inter, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; color: #1f3344; }
-      .wrap { max-width: 1080px; margin: 0 auto; padding: 26px 16px 42px; }
-      h1 { margin: 0 0 8px; font-size: clamp(1.8rem, 4vw, 2.7rem); }
-      p { color: #6c7f90; }
-      .top { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-      .btn { border: 1px solid #90a0af; border-radius: 14px; padding: 10px 14px; text-decoration: none; color: #1f3344; background: #fff; font-weight: 700; }
-      .grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 12px; }
-      .card { background: #fff; border: 1px solid #90a0af; border-radius: 20px; padding: 16px; }
-      .card h2 { margin: 0 0 8px; font-size: 1.1rem; }
-      .card a { color: #eb7a2c; font-weight: 800; text-decoration: none; }
-      @media (min-width: 840px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      :root {
+        --bg: #f4f6fa;
+        --ink: #1f3344;
+        --muted: #6f8192;
+        --line: #8ea0af;
+        --accent: #eb7a2c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background:
+          radial-gradient(900px 460px at 6% -10%, #ffe8d7 0%, transparent 55%),
+          radial-gradient(900px 460px at 95% -20%, #dce9ff 0%, transparent 55%),
+          var(--bg);
+        color: var(--ink);
+      }
+      .wrap { max-width: 1160px; margin: 0 auto; padding: 26px 16px 50px; }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .btn {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #fff;
+        color: var(--ink);
+        text-decoration: none;
+        padding: 10px 14px;
+        font-weight: 700;
+      }
+      .btn-main {
+        background: linear-gradient(130deg, #eb7a2c, #ffb16a);
+        color: #fff;
+        border-color: transparent;
+        box-shadow: 0 8px 20px rgba(235, 122, 44, .28);
+      }
+      .hero {
+        margin-top: 12px;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        background: linear-gradient(125deg, #fff, #fff7f0);
+        padding: 26px;
+      }
+      h1 { margin: 0; font-size: clamp(2rem, 4.8vw, 3.1rem); letter-spacing: -0.02em; }
+      .sub { margin-top: 10px; color: var(--muted); max-width: 820px; font-size: 1.06rem; }
+      .pill-row {
+        margin-top: 14px;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(1,minmax(0,1fr));
+      }
+      .pill {
+        border: 1px solid #d9e2ea;
+        border-radius: 12px;
+        padding: 8px 10px;
+        background: rgba(255,255,255,.88);
+        font-size: .9rem;
+        font-weight: 700;
+      }
+      .grid {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: repeat(1,minmax(0,1fr));
+        gap: 12px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: #fff;
+        padding: 18px;
+        transition: .2s ease;
+      }
+      .card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 24px rgba(31, 51, 68, 0.08);
+      }
+      .icon {
+        width: 42px; height: 42px; border-radius: 12px;
+        display: grid; place-items: center;
+        background: #fff4ea;
+        color: var(--accent);
+        font-weight: 900;
+      }
+      .card h2 { margin: 12px 0 8px; font-size: 1.15rem; }
+      .card p { margin: 0 0 10px; color: var(--muted); }
+      .open {
+        text-decoration: none;
+        color: var(--accent);
+        font-weight: 800;
+      }
+      .footer {
+        margin-top: 20px;
+        text-align: center;
+        color: var(--muted);
+        font-size: .9rem;
+      }
+      @media (min-width: 760px) {
+        .pill-row { grid-template-columns: repeat(3,minmax(0,1fr)); }
+        .grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      }
     </style>
   </head>
   <body>
     <main class="wrap">
       <div class="top">
         <a class="btn" href="/">Back to App</a>
-        <a class="btn" href="/?mode=signup">Sign Up Now</a>
+        <a class="btn btn-main" href="/?mode=signup">Sign Up Now</a>
       </div>
-      <h1>MaiRide User Tutorials</h1>
-      <p>Step-by-step guides for every core action on the app. Open any tutorial below.</p>
+
+      <section class="hero">
+        <h1>MaiRide Academy</h1>
+        <p class="sub">Interactive, simple tutorials for every feature. Learn faster, book better, earn smarter.</p>
+        <div class="pill-row">
+          <div class="pill">No screenshots, no clutter — pure guided flows</div>
+          <div class="pill">Works for both travelers and drivers</div>
+          <div class="pill">Designed for mobile-first usage</div>
+        </div>
+      </section>
 
       <section class="grid">
         <article class="card">
-          <h2>Traveler Sign Up</h2>
-          <p>Create a traveler account and complete profile onboarding correctly.</p>
-          <a href="/tutorials/traveler-signup.html">Open tutorial →</a>
+          <div class="icon">T1</div>
+          <h2>Traveler Signup</h2>
+          <p>From account creation to OTP verification and dashboard readiness.</p>
+          <a class="open" href="/tutorials/traveler-signup.html">Start tutorial →</a>
         </article>
         <article class="card">
-          <h2>Driver Sign Up & Verification</h2>
-          <p>Complete driver profile, upload documents, and move to pending verification.</p>
-          <a href="/tutorials/driver-signup.html">Open tutorial →</a>
+          <div class="icon">D1</div>
+          <h2>Driver Signup & Verification</h2>
+          <p>Complete onboarding, upload documents, and get approved faster.</p>
+          <a class="open" href="/tutorials/driver-signup.html">Start tutorial →</a>
         </article>
         <article class="card">
-          <h2>Create Offer / Request Ride</h2>
-          <p>How drivers post offers and travelers request rides using the 3-day window model.</p>
-          <a href="/tutorials/offers-and-requests.html">Open tutorial →</a>
+          <div class="icon">R1</div>
+          <h2>Create Offers & Requests</h2>
+          <p>Understand the 3-day trip window and route matching from both sides.</p>
+          <a class="open" href="/tutorials/offers-and-requests.html">Start tutorial →</a>
         </article>
         <article class="card">
-          <h2>Negotiation, Payment, and Completion</h2>
-          <p>Counter offers, confirmation flow, platform fee payment, contact unlock, and ratings.</p>
-          <a href="/tutorials/negotiation-and-payment.html">Open tutorial →</a>
+          <div class="icon">N1</div>
+          <h2>Negotiation, Payment, Completion</h2>
+          <p>Counter offers, platform fee payment, contact unlock, and ride closure.</p>
+          <a class="open" href="/tutorials/negotiation-and-payment.html">Start tutorial →</a>
         </article>
       </section>
+
+      <p class="footer">Release v3.0.1-beta | Copyright 2026 MaiRide. All rights reserved.</p>
     </main>
   </body>
   </html>
