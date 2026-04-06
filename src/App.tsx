@@ -1123,6 +1123,33 @@ const applyGoogleTranslateLanguage = (language: string) => {
   }
 };
 
+let googleTranslateScriptPromise: Promise<void> | null = null;
+const ensureGoogleTranslateScriptLoaded = (): Promise<void> => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return Promise.resolve();
+  if ((window as any).google?.translate?.TranslateElement) return Promise.resolve();
+  if (googleTranslateScriptPromise) return googleTranslateScriptPromise;
+
+  googleTranslateScriptPromise = new Promise<void>((resolve) => {
+    const existingScript = document.getElementById('google-translate-script') as HTMLScriptElement | null;
+    if (existingScript) {
+      const settle = () => resolve();
+      existingScript.addEventListener('load', settle, { once: true });
+      existingScript.addEventListener('error', settle, { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'google-translate-script';
+    script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => resolve();
+    document.body.appendChild(script);
+  });
+
+  return googleTranslateScriptPromise;
+};
+
 const detectBrowserPreferredLanguage = () => {
   const locale = (typeof navigator !== 'undefined' ? navigator.language : 'en').toLowerCase();
   const matched = SUPPORTED_UI_LANGUAGES.find((item) => locale.startsWith(item.value));
@@ -2867,7 +2894,7 @@ const AuthPage = ({
       body: JSON.stringify(payload),
     });
 
-    if (primaryResponse.status !== 404 || !fallbackPath) {
+    if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath) {
       return primaryResponse;
     }
 
@@ -11508,12 +11535,15 @@ const DriverRejected = ({ profile }: { profile: UserProfile }) => {
 
 const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: UserProfile[] }) => {
   const [timeframe, setTimeframe] = useState<'daily' | 'weekly' | 'monthly'>('daily');
-  const paymentEvents = getPlatformFeePaymentEvents(bookings as Booking[]);
+  const paymentEvents = useMemo(() => getPlatformFeePaymentEvents(bookings as Booking[]), [bookings]);
   
   // Calculate stats
-  const totalRevenue = paymentEvents.reduce((acc, event) => acc + event.revenue, 0);
-  const totalGST = paymentEvents.reduce((acc, event) => acc + event.gst, 0);
-  const totalMaiCoinsIssued = users.reduce((acc, u) => acc + (u.wallet?.balance || 0) + (u.wallet?.pendingBalance || 0), 0);
+  const totalRevenue = useMemo(() => paymentEvents.reduce((acc, event) => acc + event.revenue, 0), [paymentEvents]);
+  const totalGST = useMemo(() => paymentEvents.reduce((acc, event) => acc + event.gst, 0), [paymentEvents]);
+  const totalMaiCoinsIssued = useMemo(
+    () => users.reduce((acc, u) => acc + (u.wallet?.balance || 0) + (u.wallet?.pendingBalance || 0), 0),
+    [users]
+  );
   
   // Prepare chart data
   const getChartData = () => {
@@ -11572,7 +11602,7 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
     return data;
   };
 
-  const chartData = getChartData();
+  const chartData = useMemo(() => getChartData(), [timeframe, paymentEvents]);
   
   // High traction areas
   const getTractionAreas = () => {
@@ -11586,7 +11616,7 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
       .slice(0, 5);
   };
 
-  const tractionAreas = getTractionAreas();
+  const tractionAreas = useMemo(() => getTractionAreas(), [bookings]);
 
   // Cash flow alert
   const isNegativeCashFlow = totalMaiCoinsIssued > totalRevenue * 2; // Simple heuristic
@@ -13296,6 +13326,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   } | null>(null);
   const [forceCancellingRideId, setForceCancellingRideId] = useState<string | null>(null);
   const selectedDriverMarkers = buildVerificationMarkers(selectedDriver?.driverDetails);
+  const adminTransactionsCacheKey = `mairide_admin_transactions_cache_${profile.uid}`;
+  const isPageVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
 
   useEffect(() => {
     if (window.location.hostname !== 'localhost') {
@@ -13303,6 +13335,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       let intervalId: number | null = null;
 
       const loadAdminUsers = async () => {
+        if (!isPageVisible()) return;
         try {
           const headers = await getAdminRequestHeaders(profile.email);
           const response = await axios.get(adminUsersPath, { headers });
@@ -13318,7 +13351,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       void loadAdminUsers();
       intervalId = window.setInterval(() => {
         void loadAdminUsers();
-      }, 8000);
+      }, 20000);
 
       return () => {
         active = false;
@@ -13380,13 +13413,27 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     }
 
     let active = true;
+    const cachedTransactions = safeStorageGet('session', adminTransactionsCacheKey);
+    if (cachedTransactions) {
+      try {
+        const parsed = JSON.parse(cachedTransactions);
+        if (Array.isArray(parsed) && parsed.length) {
+          setTransactions(parsed as Transaction[]);
+        }
+      } catch {
+        // ignore cache parse failures
+      }
+    }
 
     const loadTransactions = async () => {
+      if (!isPageVisible()) return;
       try {
         const headers = await getAdminRequestHeaders(profile.email);
         const response = await axios.get(adminTransactionsPath, { headers });
+        const nextTransactions = (response.data?.transactions || []) as Transaction[];
         if (!active) return;
-        setTransactions((response.data?.transactions || []) as Transaction[]);
+        setTransactions(nextTransactions);
+        safeStorageSet('session', adminTransactionsCacheKey, JSON.stringify(nextTransactions.slice(0, 400)));
       } catch (error) {
         if (!active) return;
         console.error('Error loading admin transactions:', error);
@@ -13401,13 +13448,13 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     void loadTransactions();
     const intervalId = window.setInterval(() => {
       void loadTransactions();
-    }, 5000);
+    }, 12000);
 
     return () => {
       active = false;
       window.clearInterval(intervalId);
     };
-  }, [activeTab, profile.email]);
+  }, [activeTab, profile.email, adminTransactionsCacheKey]);
 
   const handleAdminForceCancelRide = async (booking: any) => {
     const rideId = booking.rideId || booking.ride_id;
@@ -15934,20 +15981,10 @@ const App = () => {
       }
     };
 
+    window.googleTranslateElementInit = initTranslateWidget;
     if ((window as any).google?.translate?.TranslateElement) {
       initTranslateWidget();
-      return;
     }
-
-    window.googleTranslateElementInit = initTranslateWidget;
-    const existingScript = document.getElementById('google-translate-script') as HTMLScriptElement | null;
-    if (existingScript) return;
-
-    const script = document.createElement('script');
-    script.id = 'google-translate-script';
-    script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
-    script.async = true;
-    document.body.appendChild(script);
   }, []);
 
   useEffect(() => {
@@ -16023,7 +16060,10 @@ const App = () => {
     safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, lang);
     document.documentElement.lang = lang;
     setGoogleTranslateCookie(lang);
-    if (translatorReady) {
+    if (lang !== 'en' && !translatorReady) {
+      void ensureGoogleTranslateScriptLoaded();
+    }
+    if (translatorReady && lang !== 'en') {
       window.setTimeout(() => applyGoogleTranslateLanguage(lang), 80);
     }
   }, [translatorReady, uiLanguage]);
@@ -16079,9 +16119,12 @@ const App = () => {
     safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, normalized);
     safeStorageSet('local', UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
     setShowLanguagePrompt(false);
-    window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 40);
-    window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 220);
-    window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 650);
+    if (normalized === 'en') return;
+    void ensureGoogleTranslateScriptLoaded().then(() => {
+      window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 40);
+      window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 220);
+      window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 650);
+    });
   };
 
   if (loading) return <ErrorBoundary><LoadingScreen /></ErrorBoundary>;

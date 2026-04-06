@@ -154,8 +154,9 @@ async function handleGetTransactions(req: any, res: any) {
 
   const { data, error } = await auth.supabaseAdmin
     .from("transactions")
-    .select("*")
-    .order("created_at", { ascending: false });
+    .select("id,user_id,type,status,created_at,updated_at,data")
+    .order("created_at", { ascending: false })
+    .limit(800);
 
   if (error) throw error;
 
@@ -169,6 +170,7 @@ async function handleGetTransactions(req: any, res: any) {
     updatedAt: row.updated_at ?? row.data?.updatedAt ?? null,
   }));
 
+  res.setHeader("Cache-Control", "private, max-age=10, stale-while-revalidate=30");
   return res.status(200).json({ transactions });
 }
 
@@ -180,7 +182,7 @@ async function handleGetUsers(req: any, res: any) {
 
   const { data, error } = await auth.supabaseAdmin
     .from("users")
-    .select("*")
+    .select("id,email,display_name,role,status,phone_number,onboarding_complete,admin_role,verification_status,rejection_reason,verified_by,force_password_change,driver_details,created_at,updated_at,data")
     .order("updated_at", { ascending: false });
 
   if (error) throw error;
@@ -213,6 +215,7 @@ async function handleGetUsers(req: any, res: any) {
     };
   });
 
+  res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=45");
   return res.status(200).json({ users });
 }
 
@@ -410,6 +413,7 @@ async function handleGenerateResetLink(req: any, res: any) {
 
   if (error) throw error;
 
+  res.setHeader("Cache-Control", "private, max-age=10, stale-while-revalidate=30");
   return res.status(200).json({
     message: "Reset link generated successfully",
     actionLink: data?.properties?.action_link || null,
