@@ -128,6 +128,11 @@ declare global {
   }
 }
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+};
+
 // --- Utils ---
 
 const deg2rad = (deg: number) => deg * (Math.PI / 180);
@@ -2311,10 +2316,82 @@ const AppFooter = () => {
   const { config } = useAppConfig();
   const configuredVersion = String(config?.appVersion || '').trim();
   const releaseVersion = configuredVersion || APP_VERSION;
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
+  const [installStatus, setInstallStatus] = useState('');
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPromptEvent(event as BeforeInstallPromptEvent);
+      setInstallStatus('Install available for this device.');
+    };
+
+    const handleAppInstalled = () => {
+      setInstallPromptEvent(null);
+      setInstallStatus('MaiRide installed successfully.');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const triggerInstall = async () => {
+    if (!installPromptEvent) {
+      setInstallStatus('Use your browser menu to Add to Home Screen on this device.');
+      return;
+    }
+    try {
+      await installPromptEvent.prompt();
+      const result = await installPromptEvent.userChoice;
+      setInstallStatus(result.outcome === 'accepted' ? 'Install request accepted.' : 'Install cancelled.');
+      setInstallPromptEvent(null);
+    } catch {
+      setInstallStatus('Install could not be started on this device.');
+    }
+  };
 
   return (
     <footer className="px-4 pb-6">
-      <div className="max-w-7xl mx-auto flex justify-center">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex flex-col items-center gap-3 mb-3">
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <a
+              href="/downloads/android.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+            >
+              Get it on Android
+            </a>
+            <a
+              href="/downloads/ios.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center rounded-xl bg-mairide-primary text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+            >
+              Get it on iOS
+            </a>
+            <button
+              type="button"
+              onClick={triggerInstall}
+              className="inline-flex items-center rounded-xl border border-mairide-primary/40 text-mairide-primary px-4 py-2 text-xs font-bold tracking-wide hover:bg-mairide-primary hover:text-white transition"
+            >
+              Install Web App
+            </button>
+          </div>
+          {installStatus ? <p className="text-[11px] text-mairide-secondary text-center">{installStatus}</p> : null}
+          <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-mairide-secondary">
+            <a href="/terms-and-conditions.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Terms &amp; Conditions</a>
+            <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Privacy Policy</a>
+            <a href="/business-model.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Business Model</a>
+            <a href="/tutorials/index.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Tutorials</a>
+          </div>
+        </div>
         <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
           Release {releaseVersion} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
         </p>
