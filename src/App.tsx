@@ -2293,25 +2293,30 @@ const submitSupportFeedback = async (payload: { ticketId: string; rating: number
   return response.data?.ticket as SupportTicket | undefined;
 };
 
-const LoadingScreen = () => (
-  <div className="fixed inset-0 bg-mairide-bg flex flex-col items-center justify-center z-50">
-    <motion.div
-      animate={{ scale: [1, 1.2, 1], rotate: [0, 360] }}
-      transition={{ duration: 2, repeat: Infinity }}
-      className="mb-4"
-    >
-      <div className="flex flex-col items-center">
-        <img src={LOGO_URL} className="w-48 h-48 object-contain" alt="MaiRide Logo" />
-        <h1 className="text-4xl font-black text-mairide-primary mt-4 tracking-tighter">
-          {BRAND_NAME}
-        </h1>
-        <p className="text-[10px] text-mairide-secondary mt-2 opacity-50">
-          {APP_VERSION} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
-        </p>
-      </div>
-    </motion.div>
-  </div>
-);
+const LoadingScreen = () => {
+  const { config } = useAppConfig();
+  const configuredVersion = String(config?.appVersion || '').trim();
+  const releaseVersion = configuredVersion || APP_VERSION;
+  return (
+    <div className="fixed inset-0 bg-mairide-bg flex flex-col items-center justify-center z-50">
+      <motion.div
+        animate={{ scale: [1, 1.2, 1], rotate: [0, 360] }}
+        transition={{ duration: 2, repeat: Infinity }}
+        className="mb-4"
+      >
+        <div className="flex flex-col items-center">
+          <img src={LOGO_URL} className="w-48 h-48 object-contain" alt="MaiRide Logo" />
+          <h1 className="text-4xl font-black text-mairide-primary mt-4 tracking-tighter">
+            {BRAND_NAME}
+          </h1>
+          <p className="text-[10px] text-mairide-secondary mt-2 opacity-50">
+            {releaseVersion} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
+          </p>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
 
 const AppFooter = () => {
   const { config } = useAppConfig();
@@ -2356,15 +2361,28 @@ const AppFooter = () => {
     }
   };
 
+  const handleAndroidDownload = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    try {
+      const response = await fetch('/downloads/mairide-android.apk', { method: 'HEAD' });
+      if (response.ok) {
+        window.location.href = '/downloads/mairide-android.apk';
+        return;
+      }
+    } catch {
+      // Ignore and fallback to guide page.
+    }
+    window.location.href = '/downloads/android.html';
+  };
+
   return (
     <footer className="px-4 pb-6">
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col items-center gap-3 mb-3">
           <div className="flex flex-wrap items-center justify-center gap-2">
             <a
-              href="/downloads/android.html"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/downloads/mairide-android.apk"
+              onClick={handleAndroidDownload}
               className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
             >
               Get it on Android
@@ -3003,6 +3021,9 @@ const AuthPage = ({
   const maskedOtpPhone = maskPhoneNumber(phoneNumber || username);
   const normalizedSignupPhone = toIndianPhoneStorage(phoneNumber);
   const normalizedSignupEmail = normalizeEmailValue(email);
+  const { config } = useAppConfig();
+  const configuredVersion = String(config?.appVersion || '').trim();
+  const releaseVersion = configuredVersion || APP_VERSION;
 
   const postAuthAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
     const primaryResponse = await fetch(`/api/auth?action=${action}`, {
@@ -3989,6 +4010,9 @@ const AuthPage = ({
           </a>
         </div>
       </motion.div>
+      <p className="mt-3 text-[11px] text-mairide-secondary/80 tracking-wide text-center px-2">
+        Release {releaseVersion} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
+      </p>
 
       <AnimatePresence>
         {showForgotPassword && (
@@ -10062,6 +10086,11 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   };
 
   const handlePostRide = async () => {
+    if (!isOnline) {
+      alert('Please go online before posting a ride offer.');
+      return;
+    }
+
     const origin = newRide.origin.trim();
     const destination = newRide.destination.trim();
     const priceValue = Number(newRide.price);
@@ -10729,13 +10758,23 @@ const finalizeDriverDashboardRazorpayPayment = async (
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <button 
                 onClick={() => {
+                  if (!isOnline) {
+                    alert('Please switch online first to offer a ride.');
+                    return;
+                  }
                   setLinkedTravelerRequestId(null);
                   setShowOfferForm(true);
                 }}
-                className="bg-mairide-accent text-white px-6 py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 hover:bg-mairide-primary transition-all"
+                className={cn(
+                  "px-6 py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 transition-all",
+                  isOnline
+                    ? "bg-mairide-accent text-white hover:bg-mairide-primary"
+                    : "bg-mairide-secondary text-mairide-primary cursor-not-allowed opacity-80"
+                )}
+                disabled={!isOnline}
               >
                 <Plus className="w-5 h-5" />
-                <span>Offer a Ride</span>
+                <span>{isOnline ? 'Offer a Ride' : 'Go Online to Offer'}</span>
               </button>
               <button 
                 onClick={toggleOnline}
