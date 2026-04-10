@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
 type CapacityMetricSeverity = "healthy" | "watch" | "warning" | "critical";
+const DRIVER_JOINING_BONUS = 500;
+const TRAVELER_JOINING_BONUS = 250;
 
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -83,6 +85,77 @@ async function generateUniqueReferralCode(supabaseAdmin: any) {
       .maybeSingle();
     if (error) throw error;
     if (!data) return code;
+  }
+}
+
+function getJoiningBonusByRole(role: string) {
+  return role === "driver" ? DRIVER_JOINING_BONUS : TRAVELER_JOINING_BONUS;
+}
+
+function parseWallet(raw: any) {
+  const balance = Number(raw?.balance);
+  const pendingBalance = Number(raw?.pendingBalance);
+  if (!Number.isFinite(balance) || !Number.isFinite(pendingBalance)) {
+    return null;
+  }
+  return { balance, pendingBalance };
+}
+
+async function backfillDriverJoiningBonuses(supabaseAdmin: any) {
+  const { data: driverRows, error } = await supabaseAdmin
+    .from("users")
+    .select("id,wallet,data,role")
+    .eq("role", "driver");
+
+  if (error) throw error;
+
+  for (const row of driverRows || []) {
+    const payload = (row?.data as Record<string, any>) || {};
+    const walletFromRow = parseWallet(row?.wallet);
+    const walletFromPayload = parseWallet(payload?.wallet);
+    const currentWallet = walletFromRow || walletFromPayload || { balance: 0, pendingBalance: 0 };
+
+    if (currentWallet.balance >= DRIVER_JOINING_BONUS) {
+      continue;
+    }
+
+    const nextWallet = {
+      balance: DRIVER_JOINING_BONUS,
+      pendingBalance: Number.isFinite(currentWallet.pendingBalance) ? currentWallet.pendingBalance : 0,
+    };
+
+    await supabaseAdmin
+      .from("users")
+      .update({
+        wallet: nextWallet,
+        data: {
+          ...payload,
+          wallet: nextWallet,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id);
+
+    const delta = Math.max(DRIVER_JOINING_BONUS - Number(currentWallet.balance || 0), 0);
+    const txId = `driver_bonus_backfill_${row.id}`;
+    await supabaseAdmin.from("transactions").upsert({
+      id: txId,
+      user_id: row.id,
+      type: "wallet_topup",
+      status: "completed",
+      data: {
+        id: txId,
+        userId: row.id,
+        type: "wallet_topup",
+        amount: delta,
+        currency: "MAICOIN",
+        status: "completed",
+        description: "Driver joining bonus backfill",
+        createdAt: new Date().toISOString(),
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
   }
 }
 
@@ -179,6 +252,9 @@ async function handleGetUsers(req: any, res: any) {
   if ("error" in auth) {
     return res.status(auth.error.status).json({ error: auth.error.message });
   }
+
+  // Keep historical admin-created drivers aligned with the latest joining bonus policy.
+  await backfillDriverJoiningBonuses(auth.supabaseAdmin);
 
   const { data, error } = await auth.supabaseAdmin
     .from("users")
@@ -316,6 +392,8 @@ async function handleCreateUser(req: any, res: any) {
   }
 
   const referralCode = await generateUniqueReferralCode(auth.supabaseAdmin);
+  const joiningBonus = getJoiningBonusByRole(role);
+  const wallet = { balance: joiningBonus, pendingBalance: 0 };
   const row = {
     id: authCreateData.user.id,
     email: normalizedEmail,
@@ -327,6 +405,7 @@ async function handleCreateUser(req: any, res: any) {
     onboarding_complete: role !== "driver",
     admin_role: role === "admin" ? adminRole || "support" : null,
     force_password_change: true,
+    wallet,
     data: {
       uid: authCreateData.user.id,
       email: normalizedEmail,
@@ -338,7 +417,7 @@ async function handleCreateUser(req: any, res: any) {
       onboardingComplete: role !== "driver",
       adminRole: role === "admin" ? adminRole || "support" : undefined,
       forcePasswordChange: true,
-      wallet: { balance: 25, pendingBalance: 0 },
+      wallet,
     },
   };
 
@@ -347,6 +426,26 @@ async function handleCreateUser(req: any, res: any) {
   });
 
   if (profileError) throw profileError;
+
+  const txId = `init_${authCreateData.user.id}`;
+  await auth.supabaseAdmin.from("transactions").upsert({
+    id: txId,
+    user_id: authCreateData.user.id,
+    type: "wallet_topup",
+    status: "completed",
+    data: {
+      id: txId,
+      userId: authCreateData.user.id,
+      type: "wallet_topup",
+      amount: joiningBonus,
+      currency: "MAICOIN",
+      status: "completed",
+      description: role === "driver" ? "Driver joining bonus" : "Traveler joining bonus",
+      createdAt: new Date().toISOString(),
+    },
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
 
   return res.status(201).json({
     message: "User created successfully",
