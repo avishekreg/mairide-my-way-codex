@@ -3586,12 +3586,12 @@ const AuthPage = ({
   };
 
   return (
-    <div className="min-h-screen bg-mairide-bg flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen min-h-[100svh] bg-mairide-bg flex flex-col items-center justify-start md:justify-center p-4 pt-6 pb-8 overflow-y-auto">
       <div id="recaptcha-container"></div>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-white rounded-[32px] p-8 shadow-xl border border-mairide-secondary"
+        className="w-full max-w-md bg-white rounded-[32px] p-8 shadow-xl border border-mairide-secondary my-2 md:my-0"
       >
         <div className="flex flex-col items-center mb-6">
           <img src={LOGO_URL} className="w-32 h-32 object-contain mb-2" alt="MaiRide Logo" />
