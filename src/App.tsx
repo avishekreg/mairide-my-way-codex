@@ -916,6 +916,7 @@ const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v2.0.1-beta';
 const APP_NAV_HOME_EVENT = 'mairide:navigate-home';
+const APP_NAV_TAB_EVENT = 'mairide:navigate-tab';
 const APP_DIALOG_EVENT = 'mairide:dialog';
 const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
 const CONSENT_VERSION = 'consent-v1';
@@ -2496,6 +2497,29 @@ const Navbar = ({
     navigate('/');
     setIsOpen(false);
   };
+  const navigateToRoleTab = (tab: string) => {
+    window.dispatchEvent(new CustomEvent(APP_NAV_TAB_EVENT, { detail: { role: profile?.role, tab } }));
+    navigate('/');
+    setIsOpen(false);
+  };
+
+  const roleTabs =
+    profile?.role === 'driver'
+      ? [
+          { id: 'dashboard', label: 'Dashboard' },
+          { id: 'requests', label: 'Requests' },
+          { id: 'history', label: 'History' },
+          { id: 'wallet', label: 'Wallet' },
+          { id: 'support', label: 'Support' },
+          { id: 'profile', label: 'Profile' },
+        ]
+      : [
+          { id: 'search', label: 'Request Ride' },
+          { id: 'history', label: 'History' },
+          { id: 'wallet', label: 'Wallet' },
+          { id: 'support', label: 'Support' },
+          { id: 'profile', label: 'Profile' },
+        ];
 
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
@@ -2571,7 +2595,16 @@ const Navbar = ({
               </div>
               <div className="px-4 py-4 space-y-2">
                 <button onClick={handleHomeNavigation} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Home</button>
-                <button onClick={() => { navigate('/support'); setIsOpen(false); }} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Support</button>
+                {roleTabs.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => navigateToRoleTab(item.id)}
+                    className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                <button onClick={() => { navigate('/support'); setIsOpen(false); }} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Support Page</button>
                 {profile?.role === 'admin' && (
                   <button onClick={() => { navigate('/admin'); setIsOpen(false); }} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Admin Panel</button>
                 )}
@@ -7963,8 +7996,20 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   useEffect(() => {
     const handleHomeNavigation = () => setActiveTab('search');
+    const handleTabNavigation = (event: Event) => {
+      const customEvent = event as CustomEvent<{ role?: string; tab?: string }>;
+      const targetTab = customEvent.detail?.tab;
+      if (!targetTab) return;
+      if (['search', 'history', 'wallet', 'support', 'profile'].includes(targetTab)) {
+        setActiveTab(targetTab as 'search' | 'history' | 'wallet' | 'support' | 'profile');
+      }
+    };
     window.addEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
-    return () => window.removeEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
+    window.addEventListener(APP_NAV_TAB_EVENT, handleTabNavigation as EventListener);
+    return () => {
+      window.removeEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
+      window.removeEventListener(APP_NAV_TAB_EVENT, handleTabNavigation as EventListener);
+    };
   }, []);
 
   useEffect(() => {
@@ -8371,6 +8416,11 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       handleFirestoreError(error, OperationType.UPDATE, `travelerRideRequests/${requestId}`);
     }
   };
+
+  useEffect(() => {
+    if (activeTab !== 'search') return;
+    void handleSearch();
+  }, [activeTab, userLocation, dashboardBookings.length, travelerRequests.length]);
 
   const handleSearch = async () => {
     setIsLoading(true);
@@ -8929,24 +8979,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
-      {activeTab === 'search' && (
-        <TravelerDashboardSummary
-          bookings={dashboardBookings}
-          tripSessions={tripSessions}
-          rideStatusById={rideStatusById}
-          ridesResolved={ridesResolved}
-          config={config}
-          onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
-          onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
-          counterFares={dashboardCounterFares}
-          setCounterFares={setDashboardCounterFares}
-          onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
-          onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
-          onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
-          onOpenBooking={() => setActiveTab('history')}
-        />
-      )}
-
       <div className="hidden md:flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
         <button
           onClick={() => setActiveTab('search')}
@@ -8956,7 +8988,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           )}
         >
           <Search className="w-4 h-4" />
-          <span>Search</span>
+          <span>Request Ride</span>
         </button>
         <button
           onClick={() => setActiveTab('history')}
@@ -9131,103 +9163,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </div>
           </div>
 
-          <div className="bg-white rounded-3xl shadow-xl p-6 mb-12 border border-mairide-secondary">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div className="relative">
-                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-mairide-secondary w-5 h-5 z-10" />
-                {isLoaded ? (
-                  <Autocomplete
-                    onLoad={autocomplete => setAutocompleteFrom(autocomplete)}
-                    onPlaceChanged={() => {
-                      if (autocompleteFrom) {
-                        const place = autocompleteFrom.getPlace();
-                        if (place.formatted_address) {
-                          setSearch(prev => ({ ...prev, from: place.formatted_address! }));
-                        }
-                        if (place.geometry?.location) {
-                          setSearchLocationFrom({
-                            lat: place.geometry.location.lat(),
-                            lng: place.geometry.location.lng()
-                          });
-                        }
-                      }
-                    }}
-                  >
-                    <input 
-                      type="text" 
-                      placeholder="From (Origin)"
-                      className="w-full pl-12 pr-4 py-4 bg-mairide-bg border border-mairide-secondary rounded-2xl focus:ring-2 focus:ring-mairide-accent outline-none text-mairide-primary"
-                      value={search.from}
-                      onChange={e => setSearch({ ...search, from: e.target.value })}
-                    />
-                  </Autocomplete>
-                ) : (
-                  <input 
-                    type="text" 
-                    placeholder="From (Origin)"
-                    className="w-full pl-12 pr-4 py-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none text-mairide-primary"
-                    value={search.from}
-                    onChange={e => setSearch({ ...search, from: e.target.value })}
-                  />
-                )}
-                <button 
-                  onClick={() => {
-                    if (userLocation) reverseGeocode(userLocation.lat, userLocation.lng);
-                  }}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-mairide-accent hover:text-mairide-primary z-10"
-                  title="Detect my location"
-                >
-                  <Navigation className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="relative">
-                <Navigation className="absolute left-4 top-1/2 -translate-y-1/2 text-mairide-secondary w-5 h-5 z-10" />
-                {isLoaded ? (
-                  <Autocomplete
-                    onLoad={autocomplete => setAutocompleteTo(autocomplete)}
-                    onPlaceChanged={() => {
-                      if (autocompleteTo) {
-                        const place = autocompleteTo.getPlace();
-                        if (place.formatted_address) {
-                          setSearch(prev => ({ ...prev, to: place.formatted_address! }));
-                        }
-                        if (place.geometry?.location) {
-                          setSearchLocationTo({
-                            lat: place.geometry.location.lat(),
-                            lng: place.geometry.location.lng()
-                          });
-                        }
-                      }
-                    }}
-                  >
-                    <input 
-                      type="text" 
-                      placeholder="To (Destination)"
-                      className="w-full pl-12 pr-4 py-4 bg-mairide-bg border border-mairide-secondary rounded-2xl focus:ring-2 focus:ring-mairide-accent outline-none text-mairide-primary"
-                      value={search.to}
-                      onChange={e => setSearch({ ...search, to: e.target.value })}
-                    />
-                  </Autocomplete>
-                ) : (
-                  <input 
-                    type="text" 
-                    placeholder="To (Destination)"
-                    className="w-full pl-12 pr-4 py-4 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none text-mairide-primary"
-                    value={search.to}
-                    onChange={e => setSearch({ ...search, to: e.target.value })}
-                  />
-                )}
-              </div>
-            </div>
-            <button 
-              onClick={handleSearch}
-              className="w-full bg-mairide-accent hover:bg-mairide-primary text-white py-4 rounded-2xl font-bold transition-all flex items-center justify-center space-x-2"
-            >
-              <Search className="w-5 h-5" />
-              <span>Search Rides</span>
-            </button>
-          </div>
-
           <div className="mb-8 flex items-center justify-between gap-3">
             <h2 className="text-xl font-bold text-mairide-primary">Traveler Ride Requests</h2>
           </div>
@@ -9258,6 +9193,22 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                 ))}
             </div>
           )}
+
+          <TravelerDashboardSummary
+            bookings={dashboardBookings}
+            tripSessions={tripSessions}
+            rideStatusById={rideStatusById}
+            ridesResolved={ridesResolved}
+            config={config}
+            onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
+            onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
+            counterFares={dashboardCounterFares}
+            setCounterFares={setDashboardCounterFares}
+            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
+            onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
+            onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
+            onOpenBooking={() => setActiveTab('history')}
+          />
 
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-mairide-primary flex items-center">
@@ -9330,7 +9281,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             ) : (
               <div className="text-center py-12 bg-mairide-bg rounded-3xl border border-dashed border-mairide-secondary">
                 <Search className="w-12 h-12 text-mairide-secondary mx-auto mb-4" />
-                <p className="text-mairide-secondary">Enter your destination to find available rides.</p>
+                <p className="text-mairide-secondary">No matching rides right now. Post a request and nearby drivers will respond.</p>
               </div>
             )}
           </div>
@@ -9725,8 +9676,20 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   useEffect(() => {
     const handleHomeNavigation = () => setActiveTab('dashboard');
+    const handleTabNavigation = (event: Event) => {
+      const customEvent = event as CustomEvent<{ role?: string; tab?: string }>;
+      const targetTab = customEvent.detail?.tab;
+      if (!targetTab) return;
+      if (['dashboard', 'requests', 'history', 'wallet', 'support', 'profile'].includes(targetTab)) {
+        setActiveTab(targetTab as 'dashboard' | 'requests' | 'history' | 'wallet' | 'support' | 'profile');
+      }
+    };
     window.addEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
-    return () => window.removeEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
+    window.addEventListener(APP_NAV_TAB_EVENT, handleTabNavigation as EventListener);
+    return () => {
+      window.removeEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
+      window.removeEventListener(APP_NAV_TAB_EVENT, handleTabNavigation as EventListener);
+    };
   }, []);
   const [isPostingRide, setIsPostingRide] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'requests' | 'history' | 'wallet' | 'support' | 'profile'>('dashboard');
@@ -15162,6 +15125,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
         {activeTab === 'revenue' && (
           <div className="space-y-6">
+            <AdminRevenueAnalysis bookings={bookings} users={users} />
             <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
@@ -15210,7 +15174,6 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                 )}
               </div>
             </div>
-            <AdminRevenueAnalysis bookings={bookings} users={users} />
           </div>
         )}
 
