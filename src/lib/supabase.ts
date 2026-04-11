@@ -10,6 +10,18 @@ const resolveSupabaseRuntimeTarget = () => {
 
   if (typeof window !== 'undefined') {
     const host = String(window.location.hostname || '').toLowerCase();
+    const protocol = String(window.location.protocol || '').toLowerCase();
+    const ua = String(window.navigator?.userAgent || '').toLowerCase();
+    const capacitorNative =
+      typeof (window as any).Capacitor?.isNativePlatform === 'function' &&
+      Boolean((window as any).Capacitor.isNativePlatform());
+    const isNativeLikeRuntime =
+      capacitorNative ||
+      protocol.startsWith('capacitor:') ||
+      protocol === 'file:' ||
+      ua.includes(' wv') ||
+      ua.includes('android webview');
+
     const isLocalLikeHost =
       host === 'localhost' ||
       host === '127.0.0.1' ||
@@ -34,6 +46,11 @@ const resolveSupabaseRuntimeTarget = () => {
       host.startsWith('172.29.') ||
       host.startsWith('172.30.') ||
       host.startsWith('172.31.');
+
+    // Installed app / webview runtimes must always target production DB.
+    if (isNativeLikeRuntime) {
+      return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
+    }
 
     // Canonical behavior:
     // - Local/dev hostnames -> use env target (staging/local testing)
