@@ -1,7 +1,29 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const PROD_SUPABASE_URL = 'https://jcgoccsdlrjnratpaeje.supabase.co';
+const PROD_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ29jY3NkbHJqbnJhdHBhZWplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTkwMTQsImV4cCI6MjA5MDUzNTAxNH0.iPIawKCThu7lYMoGrWAyRDVvQPf5YICP7Ap_XOwAOrw';
+
+const resolveSupabaseRuntimeTarget = () => {
+  const envUrl = import.meta.env.VITE_SUPABASE_URL;
+  const envAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  if (typeof window !== 'undefined') {
+    const host = String(window.location.hostname || '').toLowerCase();
+    const ua = String(window.navigator?.userAgent || '').toLowerCase();
+    const isAndroidRuntime = ua.includes('android');
+    const isProdHost = host === 'mairide.in' || host === 'www.mairide.in';
+
+    // Force production DB target on live domains and Android runtime builds.
+    if (isProdHost || (host === 'localhost' && isAndroidRuntime)) {
+      return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
+    }
+  }
+
+  return { url: envUrl, anonKey: envAnonKey };
+};
+
+const { url: supabaseUrl, anonKey: supabaseAnonKey } = resolveSupabaseRuntimeTarget();
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase environment variables are missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
