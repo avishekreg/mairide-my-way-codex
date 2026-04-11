@@ -62,7 +62,8 @@ jobs:
             webDir: 'dist',
             bundledWebRuntime: false,
             server: {
-              androidScheme: 'https'
+              url: 'https://www.mairide.in',
+              cleartext: false
             }
           };
 
