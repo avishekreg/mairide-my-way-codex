@@ -10,12 +10,19 @@ const resolveSupabaseRuntimeTarget = () => {
 
   if (typeof window !== 'undefined') {
     const host = String(window.location.hostname || '').toLowerCase();
+    const protocol = String(window.location.protocol || '').toLowerCase();
     const ua = String(window.navigator?.userAgent || '').toLowerCase();
-    const isAndroidRuntime = ua.includes('android');
+    const isAndroidRuntime = ua.includes('android') || protocol.startsWith('capacitor:');
     const isProdHost = host === 'mairide.in' || host === 'www.mairide.in';
+    const isEmbeddedAppHost =
+      host === '' ||
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0' ||
+      host === 'capacitor.localhost';
 
-    // Force production DB target on live domains and Android runtime builds.
-    if (isProdHost || (host === 'localhost' && isAndroidRuntime)) {
+    // Force production DB target on live domains and embedded Android runtime hosts.
+    if (isProdHost || (isAndroidRuntime && isEmbeddedAppHost)) {
       return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
     }
   }
