@@ -17,6 +17,9 @@ jobs:
       VITE_SUPABASE_URL: https://jcgoccsdlrjnratpaeje.supabase.co
       VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ29jY3NkbHJqbnJhdHBhZWplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTkwMTQsImV4cCI6MjA5MDUzNTAxNH0.iPIawKCThu7lYMoGrWAyRDVvQPf5YICP7Ap_XOwAOrw
       VITE_SUPABASE_STORAGE_BUCKET: mairide-assets
+      VITE_APP_VERSION: v3.0.1-beta
+      PROD_SUPABASE_REF: jcgoccsdlrjnratpaeje
+      STAGING_SUPABASE_REF: qnmetkbiuxwzmlwpxpuz
 
     steps:
       - name: Checkout
@@ -93,12 +96,32 @@ jobs:
           cd android
           ./gradlew assembleDebug
 
+      - name: Verify APK uses production Supabase
+        run: |
+          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK_PATH"
+          JS_ENTRY=$(unzip -Z1 "$APK_PATH" | grep '^assets/public/assets/index-.*\.js$' | head -n 1)
+          if [ -z "$JS_ENTRY" ]; then
+            echo "Could not locate bundled JS inside APK."
+            exit 1
+          fi
+          unzip -p "$APK_PATH" "$JS_ENTRY" > /tmp/apk-bundle.js
+          if grep -q "$STAGING_SUPABASE_REF" /tmp/apk-bundle.js; then
+            echo "Staging Supabase reference found in APK bundle."
+            exit 1
+          fi
+          if ! grep -q "$PROD_SUPABASE_REF" /tmp/apk-bundle.js; then
+            echo "Production Supabase reference not found in APK bundle."
+            exit 1
+          fi
+          echo "APK Supabase target verified for production."
+
       - name: Prepare artifact
         run: |
           mkdir -p release public/downloads
           cp android/app/build/outputs/apk/debug/app-debug.apk release/mairide-android.apk
           cp android/app/build/outputs/apk/debug/app-debug.apk public/downloads/mairide-android.apk
-          APP_VERSION=$(grep -m1 "const APP_VERSION" src/App.tsx | sed -E "s/.*\\|\\| '([^']+)'.*/\\1/")
+          APP_VERSION=${VITE_APP_VERSION}
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cat > public/downloads/android-update.json <<EOF
           {
