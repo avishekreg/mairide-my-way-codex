@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
 
 function getAction(req: any) {
   const fromQuery = req.query?.action;
@@ -9,8 +10,7 @@ function getAction(req: any) {
 }
 
 function getSupabaseAdmin() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig();
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw Object.assign(new Error("Missing Supabase admin environment variables."), { status: 500 });

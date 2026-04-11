@@ -1,12 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI } from "@google/genai";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
 
 const FALLBACK_GEMINI_PROJECT_ID = "";
 const FALLBACK_GEMINI_API_KEY = "";
 
 function getSupabaseAdmin() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig();
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Supabase admin environment is not configured.");

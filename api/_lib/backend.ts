@@ -1,5 +1,6 @@
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
+import { getRuntimeSupabaseConfig } from "./supabaseRuntime";
 
 export type ReqLike = {
   body?: any;
@@ -77,8 +78,7 @@ function isActiveBookingStatus(status: string | null | undefined) {
 function getSupabaseAdmin(): any {
   if (supabaseAdmin) return supabaseAdmin;
 
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey: supabaseServiceRoleKey } = getRuntimeSupabaseConfig();
 
   if (!supabaseUrl || !supabaseServiceRoleKey) {
     throw new Error(

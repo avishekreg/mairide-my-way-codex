@@ -1,8 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
 
-function getSupabaseAdmin() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function getSupabaseAdmin(req?: any) {
+  const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig(req);
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Supabase admin environment is not configured.");
@@ -13,9 +13,8 @@ function getSupabaseAdmin() {
   });
 }
 
-function getSupabasePublic() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
+function getSupabasePublic(req?: any) {
+  const { supabaseUrl, anonKey } = getRuntimeSupabaseConfig(req);
   if (!supabaseUrl || !anonKey) return null;
   return createClient(supabaseUrl, anonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -67,7 +66,7 @@ export default async function handler(req: any, res: any) {
     if (action === "app-version") {
       let configuredVersion = "";
       try {
-        const supabaseAdmin = getSupabaseAdmin();
+        const supabaseAdmin = getSupabaseAdmin(req);
         const { data, error } = await supabaseAdmin
           .from("app_config")
           .select("data")
@@ -76,7 +75,7 @@ export default async function handler(req: any, res: any) {
         if (error) throw error;
         configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
       } catch {
-        const supabasePublic = getSupabasePublic();
+        const supabasePublic = getSupabasePublic(req);
         if (supabasePublic) {
           const { data } = await supabasePublic
             .from("app_config")
@@ -99,7 +98,7 @@ export default async function handler(req: any, res: any) {
         return res.status(400).json({ error: "Missing or invalid phone number" });
       }
 
-      const supabaseAdmin = getSupabaseAdmin();
+      const supabaseAdmin = getSupabaseAdmin(req);
       const { data: userRows, error: usersError } = await supabaseAdmin
         .from("users")
         .select("*");
@@ -136,7 +135,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ status: "ok", backend: "supabase" });
     }
 
-    const supabaseAdmin = getSupabaseAdmin();
+    const supabaseAdmin = getSupabaseAdmin(req);
     const [{ data: rideRows, error: ridesError }, { data: driverRows, error: driversError }] =
       await Promise.all([
         supabaseAdmin

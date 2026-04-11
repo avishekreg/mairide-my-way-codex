@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getRuntimeSupabaseConfig } from "./supabaseRuntime";
 
 const DRIVER_JOINING_BONUS = 500;
 const TRAVELER_JOINING_BONUS = 250;
@@ -6,8 +7,7 @@ const TIER1_REWARD = 25;
 const TIER2_REWARD = 5;
 
 function getSupabaseAdmin() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey: supabaseServiceRoleKey } = getRuntimeSupabaseConfig();
 
   if (!supabaseUrl || !supabaseServiceRoleKey) {
     throw new Error("Supabase env vars are incomplete. Set VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");

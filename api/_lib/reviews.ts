@@ -1,8 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import { getRuntimeSupabaseConfig } from "./supabaseRuntime";
 
 function getSupabaseAdmin() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig();
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Missing Supabase admin environment variables.");

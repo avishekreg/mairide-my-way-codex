@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
 
 const DRIVER_JOINING_BONUS = 500;
 const TRAVELER_JOINING_BONUS = 250;
@@ -35,8 +36,7 @@ const inMemorySmsOtpSessions = new Map<string, {
 }>();
 
 function getSupabaseAdmin() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig();
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Supabase env vars are incomplete. Set VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");

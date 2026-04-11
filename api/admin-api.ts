@@ -1,12 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
 
 type CapacityMetricSeverity = "healthy" | "watch" | "warning" | "critical";
 const DRIVER_JOINING_BONUS = 500;
 const TRAVELER_JOINING_BONUS = 250;
 
 function getSupabaseAdmin() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig();
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Supabase admin environment is not configured.");
