@@ -2324,6 +2324,50 @@ const AppFooter = () => {
   const releaseVersion = configuredVersion || APP_VERSION;
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installStatus, setInstallStatus] = useState('');
+  const [isAndroidDevice, setIsAndroidDevice] = useState(false);
+  const [androidUpdateMessage, setAndroidUpdateMessage] = useState('');
+  const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    setIsAndroidDevice(/android/i.test(navigator.userAgent || ''));
+  }, []);
+
+  useEffect(() => {
+    if (!isAndroidDevice) return;
+    let active = true;
+
+    const checkAndroidUpdate = async () => {
+      try {
+        const response = await fetch(`/downloads/android-update.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const latestVersion = String(data?.appVersion || '').trim();
+        if (!latestVersion) return;
+        if (latestVersion !== releaseVersion) {
+          if (!active) return;
+          setIsAndroidUpdateAvailable(true);
+          setAndroidUpdateMessage(`New Android build ${latestVersion} is available.`);
+        } else {
+          if (!active) return;
+          setIsAndroidUpdateAvailable(false);
+          setAndroidUpdateMessage('Your Android app is up to date.');
+        }
+      } catch {
+        // Keep footer resilient; ignore update-check failures.
+      }
+    };
+
+    void checkAndroidUpdate();
+    const intervalId = window.setInterval(() => {
+      void checkAndroidUpdate();
+    }, 5 * 60 * 1000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [isAndroidDevice, releaseVersion]);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (event: Event) => {
@@ -2383,9 +2427,14 @@ const AppFooter = () => {
             <a
               href="/downloads/mairide-android.apk"
               onClick={handleAndroidDownload}
-              className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+              className={cn(
+                'inline-flex items-center rounded-xl px-4 py-2 text-xs font-bold tracking-wide transition',
+                isAndroidUpdateAvailable
+                  ? 'bg-mairide-accent text-white hover:opacity-90 shadow-lg shadow-mairide-accent/25'
+                  : 'bg-black text-white hover:opacity-90'
+              )}
             >
-              Get it on Android
+              {isAndroidUpdateAvailable ? 'Update Android App' : 'Get it on Android'}
             </a>
             <a
               href="/downloads/ios.html"
@@ -2403,6 +2452,11 @@ const AppFooter = () => {
               Install Web App
             </button>
           </div>
+          {isAndroidDevice && androidUpdateMessage ? (
+            <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
+              {androidUpdateMessage}
+            </p>
+          ) : null}
           {installStatus ? <p className="text-[11px] text-mairide-secondary text-center">{installStatus}</p> : null}
           <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-mairide-secondary">
             <a href="/terms-and-conditions.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Terms &amp; Conditions</a>
