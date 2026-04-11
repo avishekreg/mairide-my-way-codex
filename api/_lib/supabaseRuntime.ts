@@ -28,18 +28,11 @@ function isProductionRuntime(req?: ReqLike) {
 }
 
 export function getRuntimeSupabaseConfig(req?: ReqLike) {
-  if (isProductionRuntime(req)) {
-    return {
-      supabaseUrl: PROD_SUPABASE_URL,
-      anonKey: PROD_SUPABASE_ANON_KEY,
-      serviceRoleKey: PROD_SUPABASE_SERVICE_ROLE_KEY,
-    };
-  }
-
+  // Hard lock server runtime to main production Supabase for all environments.
+  // Staging project has been retired.
   return {
-    supabaseUrl: process.env.VITE_SUPABASE_URL || PROD_SUPABASE_URL,
-    anonKey: process.env.VITE_SUPABASE_ANON_KEY || PROD_SUPABASE_ANON_KEY,
-    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || PROD_SUPABASE_SERVICE_ROLE_KEY,
+    supabaseUrl: PROD_SUPABASE_URL,
+    anonKey: PROD_SUPABASE_ANON_KEY,
+    serviceRoleKey: PROD_SUPABASE_SERVICE_ROLE_KEY,
   };
 }
-
