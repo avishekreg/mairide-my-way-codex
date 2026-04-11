@@ -7,6 +7,13 @@ const PROD_SUPABASE_ANON_KEY =
 const resolveSupabaseRuntimeTarget = () => {
   const envUrl = import.meta.env.VITE_SUPABASE_URL;
   const envAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const isDevBuild = Boolean(import.meta.env.DEV);
+
+  // Fail-safe: every production build (web + installed app) must use the same
+  // production Supabase project for consistent auth/data behavior.
+  if (!isDevBuild) {
+    return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
+  }
 
   if (typeof window !== 'undefined') {
     const host = String(window.location.hostname || '').toLowerCase();
@@ -52,9 +59,9 @@ const resolveSupabaseRuntimeTarget = () => {
       return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
     }
 
-    // Canonical behavior:
+    // Dev behavior:
     // - Local/dev hostnames -> use env target (staging/local testing)
-    // - Everything else (mairide.in, vercel domains, installed app runtimes) -> force production target
+    // - Non-local hosts -> use production target
     if (!isLocalLikeHost) return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
   }
 
