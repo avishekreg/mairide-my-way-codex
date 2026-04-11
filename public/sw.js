@@ -1,4 +1,4 @@
-const CACHE_NAME = "mairide-shell-v2";
+const CACHE_NAME = "mairide-shell-v3";
 const SHELL_FILES = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
 
 self.addEventListener("install", (event) => {
@@ -33,6 +33,12 @@ self.addEventListener("fetch", (event) => {
   const requestUrl = new URL(event.request.url);
   const isSameOrigin = requestUrl.origin === self.location.origin;
   const isNavigationRequest = event.request.mode === "navigate";
+  const pathname = requestUrl.pathname || "";
+
+  // Never cache API responses to avoid stale auth/login states.
+  if (isSameOrigin && pathname.startsWith("/api/")) {
+    return;
+  }
 
   if (isNavigationRequest) {
     event.respondWith(
@@ -52,6 +58,12 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (!isSameOrigin) {
+    return;
+  }
+
+  // Cache only static assets; avoid caching dynamic document/data endpoints.
+  const isStaticAsset = /\.(js|css|svg|png|jpg|jpeg|webp|gif|ico|woff|woff2|ttf|json)$/i.test(pathname);
+  if (!isStaticAsset) {
     return;
   }
 
