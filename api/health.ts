@@ -55,6 +55,21 @@ function buildPhoneVariants(phoneNumber: unknown) {
 export default async function handler(req: any, res: any) {
   try {
     const action = Array.isArray(req.query?.action) ? req.query.action[0] : req.query?.action;
+    if (action === "app-version") {
+      const supabaseAdmin = getSupabaseAdmin();
+      const { data, error } = await supabaseAdmin
+        .from("app_config")
+        .select("data")
+        .eq("id", "global")
+        .maybeSingle();
+      if (error) throw error;
+      const configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+      const fallbackVersion = String(process.env.VITE_APP_VERSION || "v2.0.1-beta").trim();
+      return res.status(200).json({
+        appVersion: configuredVersion || fallbackVersion,
+      });
+    }
+
     if (action === "resolve-phone-login") {
       const phoneNumber = req.body?.phoneNumber || req.query?.phoneNumber;
       const variants = buildPhoneVariants(phoneNumber);

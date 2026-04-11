@@ -957,6 +957,13 @@ const adminTransactionsPath = adminApiPath("transactions");
 const adminUsersPath = adminApiPath("users");
 const adminVerifyDriverPath = adminApiPath("verify-driver");
 const adminCapacityPath = adminApiPath("capacity");
+const resolveReleaseVersion = (configVersion?: unknown, remoteVersion?: unknown) => {
+  const configured = String(configVersion || "").trim();
+  if (configured) return configured;
+  const remote = String(remoteVersion || "").trim();
+  if (remote) return remote;
+  return APP_VERSION;
+};
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
@@ -2294,10 +2301,8 @@ const submitSupportFeedback = async (payload: { ticketId: string; rating: number
   return response.data?.ticket as SupportTicket | undefined;
 };
 
-const LoadingScreen = () => {
-  const { config } = useAppConfig();
-  const configuredVersion = String(config?.appVersion || '').trim();
-  const releaseVersion = configuredVersion || APP_VERSION;
+const LoadingScreen = ({ releaseVersion: releaseVersionProp }: { releaseVersion?: string }) => {
+  const releaseVersion = String(releaseVersionProp || '').trim() || APP_VERSION;
   return (
     <div className="fixed inset-0 bg-mairide-bg flex flex-col items-center justify-center z-50">
       <motion.div
@@ -2319,10 +2324,7 @@ const LoadingScreen = () => {
   );
 };
 
-const AppFooter = () => {
-  const { config } = useAppConfig();
-  const configuredVersion = String(config?.appVersion || '').trim();
-  const releaseVersion = configuredVersion || APP_VERSION;
+const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installStatus, setInstallStatus] = useState('');
   const [isAndroidDevice, setIsAndroidDevice] = useState(false);
@@ -2831,6 +2833,7 @@ interface AuthPageProps {
   setRole: (role: 'consumer' | 'driver') => void;
   referralCodeInput: string;
   setReferralCodeInput: (val: string) => void;
+  releaseVersion: string;
 }
 
 const normalizePhoneForAuth = (value: string) => String(value || '').replace(/[^\d]/g, '');
@@ -3072,7 +3075,8 @@ const AuthPage = ({
   role, 
   setRole,
   referralCodeInput,
-  setReferralCodeInput
+  setReferralCodeInput,
+  releaseVersion,
 }: AuthPageProps) => {
   const [isRedirectedFromLogin, setIsRedirectedFromLogin] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -3100,9 +3104,6 @@ const AuthPage = ({
   const maskedOtpPhone = maskPhoneNumber(phoneNumber || username);
   const normalizedSignupPhone = toIndianPhoneStorage(phoneNumber);
   const normalizedSignupEmail = normalizeEmailValue(email);
-  const { config } = useAppConfig();
-  const configuredVersion = String(config?.appVersion || '').trim();
-  const releaseVersion = configuredVersion || APP_VERSION;
 
   const postAuthAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
     const primaryResponse = await fetch(`/api/auth?action=${action}`, {
@@ -4089,10 +4090,6 @@ const AuthPage = ({
           </a>
         </div>
       </motion.div>
-      <p className="mt-3 text-[11px] text-mairide-secondary/80 tracking-wide text-center px-2">
-        Release {releaseVersion} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
-      </p>
-
       <AnimatePresence>
         {showForgotPassword && (
           <motion.div
@@ -4206,7 +4203,7 @@ const AuthPage = ({
             <span>Real-time Tracking</span>
           </div>
         </div>
-        <AppFooter />
+        <AppFooter releaseVersion={releaseVersion} />
       </div>
     </div>
   );
@@ -16383,6 +16380,7 @@ const useAppConfig = () => {
 
 const App = () => {
   console.log("🚀 App component initialization started");
+  const appConfigState = useAppConfig();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -16412,6 +16410,27 @@ const App = () => {
     apkUrl: '/downloads/mairide-android.apk',
   });
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
+  const [remoteAppVersion, setRemoteAppVersion] = useState('');
+  const releaseVersion = resolveReleaseVersion(appConfigState.config?.appVersion, remoteAppVersion);
+
+  useEffect(() => {
+    let active = true;
+    const loadRemoteVersion = async () => {
+      try {
+        const response = await fetch('/api/health?action=app-version', { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!active) return;
+        setRemoteAppVersion(String(data?.appVersion || '').trim());
+      } catch {
+        // Keep fallback version behavior.
+      }
+    };
+    void loadRemoteVersion();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -16793,7 +16812,7 @@ const App = () => {
         const latestVersion = String(data?.appVersion || '').trim();
         const apkUrl = String(data?.apkUrl || '/downloads/mairide-android.apk').trim() || '/downloads/mairide-android.apk';
         if (!latestVersion) return;
-        const needsUpdate = latestVersion !== APP_VERSION;
+        const needsUpdate = latestVersion !== releaseVersion;
         if (!active) return;
         setAndroidUpdateState({
           available: needsUpdate,
@@ -16820,7 +16839,7 @@ const App = () => {
       active = false;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [releaseVersion]);
 
   const commitUiLanguage = (nextLanguage: string) => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
@@ -16897,6 +16916,7 @@ const App = () => {
           setRole={setRole}
           referralCodeInput={referralCodeInput}
           setReferralCodeInput={setReferralCodeInput}
+          releaseVersion={releaseVersion}
         />
         <div className="fixed right-4 top-4 z-[70]">
           <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact />
@@ -16974,7 +16994,7 @@ const App = () => {
           <div className="flex-1">
             <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} />
           </div>
-          <AppFooter />
+          <AppFooter releaseVersion={releaseVersion} />
           <AppDialogHost />
           {androidUpdatePrompt}
         </div>
@@ -16999,7 +17019,7 @@ const App = () => {
               <Route path="/" element={
                 profile?.role === 'admin' ? <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> :
                 profile?.role === 'driver' ? <DriverApp profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : 
-                profile ? <ConsumerApp profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : <LoadingScreen />
+                profile ? <ConsumerApp profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : <LoadingScreen releaseVersion={releaseVersion} />
               } />
               <Route path="/admin" element={profile?.role === 'admin' ? <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : <Navigate to="/" />} />
               <Route path="/support" element={profile ? <SupportSystem profile={profile} /> : <Navigate to="/" />} />
@@ -17008,7 +17028,7 @@ const App = () => {
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>
-          <AppFooter />
+          <AppFooter releaseVersion={releaseVersion} />
           <Chatbot userRole={profile?.role} userId={profile?.uid} />
           <AppDialogHost />
           {androidUpdatePrompt}
