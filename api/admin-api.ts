@@ -704,7 +704,43 @@ function transactionGstFromRow(row: any) {
 async function handleCapacity(req: any, res: any) {
   const auth = await getAuthenticatedAdmin(req, false);
   if ("error" in auth) {
-    return res.status(auth.error.status).json({ error: auth.error.message });
+    const nowIso = new Date().toISOString();
+    return res.status(200).json({
+      generatedAt: nowIso,
+      limits: {},
+      metrics: [],
+      summary: {
+        liveSessionsNow: 0,
+        staleSessionsNow: 0,
+        offlineLinksNow: 0,
+        antiSpoofAlertsNow: 0,
+        realtimeSignalsLast24h: 0,
+        monthlySignalsEstimate: 0,
+        mauLast30: 0,
+        ridesToday: 0,
+        bookingsToday: 0,
+        completedBookingsToday: 0,
+        revenueToday: 0,
+        gstToday: 0,
+        totalUsersTracked90d: 0,
+        totalRidesTracked90d: 0,
+        totalBookingsTracked90d: 0,
+        totalTransactionsTracked90d: 0,
+        totalTicketsTracked90d: 0,
+      },
+      daily: [],
+      alerts: [],
+      snapshots: [],
+      alertHistory: [],
+      storageStatus: {
+        snapshotsPersisted: false,
+        alertsPersisted: false,
+        notes: [
+          `Capacity endpoint fallback: ${auth.error.message || "Unauthorized"}.`,
+          "Refresh the session and reopen Capacity to load full metrics.",
+        ],
+      },
+    });
   }
 
   const nowIso = new Date().toISOString();
