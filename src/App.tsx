@@ -117,7 +117,8 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   Wallet,
-  Globe2
+  Globe2,
+  Download
 } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
 
@@ -16377,6 +16378,16 @@ const App = () => {
   const [showLanguagePrompt, setShowLanguagePrompt] = useState(false);
   const [suggestedLanguage, setSuggestedLanguage] = useState<string>('en');
   const [languagePromptOptions, setLanguagePromptOptions] = useState<string[]>(['en', 'hi']);
+  const [androidUpdateState, setAndroidUpdateState] = useState<{
+    available: boolean;
+    latestVersion: string;
+    apkUrl: string;
+  }>({
+    available: false,
+    latestVersion: '',
+    apkUrl: '/downloads/mairide-android.apk',
+  });
+  const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -16744,6 +16755,49 @@ const App = () => {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
+    const isAndroidDevice = /android/i.test(navigator.userAgent || '');
+    if (!isAndroidDevice) return;
+
+    let active = true;
+    const checkForAndroidUpdate = async () => {
+      try {
+        const response = await fetch(`/downloads/android-update.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const latestVersion = String(data?.appVersion || '').trim();
+        const apkUrl = String(data?.apkUrl || '/downloads/mairide-android.apk').trim() || '/downloads/mairide-android.apk';
+        if (!latestVersion) return;
+        const needsUpdate = latestVersion !== APP_VERSION;
+        if (!active) return;
+        setAndroidUpdateState({
+          available: needsUpdate,
+          latestVersion,
+          apkUrl,
+        });
+        if (needsUpdate) {
+          const dismissedForVersion = safeStorageGet('session', 'mairide_android_update_dismissed_version');
+          setShowAndroidUpdatePrompt(dismissedForVersion !== latestVersion);
+        } else {
+          setShowAndroidUpdatePrompt(false);
+        }
+      } catch {
+        // Keep runtime stable if update check fails.
+      }
+    };
+
+    void checkForAndroidUpdate();
+    const interval = window.setInterval(() => {
+      void checkForAndroidUpdate();
+    }, 2 * 60 * 1000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   const commitUiLanguage = (nextLanguage: string) => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
     setUiLanguage(normalized);
@@ -16756,6 +16810,51 @@ const App = () => {
       window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 650);
     });
   };
+
+  const handleDismissAndroidUpdatePrompt = () => {
+    if (androidUpdateState.latestVersion) {
+      safeStorageSet('session', 'mairide_android_update_dismissed_version', androidUpdateState.latestVersion);
+    }
+    setShowAndroidUpdatePrompt(false);
+  };
+
+  const handleApplyAndroidUpdate = () => {
+    window.location.href = androidUpdateState.apkUrl || '/downloads/mairide-android.apk';
+  };
+
+  const androidUpdatePrompt = showAndroidUpdatePrompt && androidUpdateState.available ? (
+    <div className="fixed inset-x-4 bottom-4 z-[96] md:inset-x-auto md:right-6 md:w-[420px]">
+      <div className="rounded-[26px] border border-mairide-accent/40 bg-white p-4 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 rounded-xl bg-mairide-accent/10 p-2 text-mairide-accent">
+            <Download className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Android update available</p>
+            <p className="mt-1 text-sm text-mairide-primary">
+              New build <span className="font-bold">{androidUpdateState.latestVersion}</span> is ready. Update now to stay in sync with the latest web release.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={handleDismissAndroidUpdatePrompt}
+            className="flex-1 rounded-xl border border-mairide-secondary px-3 py-2 text-sm font-semibold text-mairide-secondary hover:bg-mairide-bg transition"
+          >
+            Later
+          </button>
+          <button
+            type="button"
+            onClick={handleApplyAndroidUpdate}
+            className="flex-1 rounded-xl bg-mairide-accent px-3 py-2 text-sm font-bold text-white hover:opacity-90 transition"
+          >
+            Update now
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   if (loading) return <ErrorBoundary><LoadingScreen /></ErrorBoundary>;
 
@@ -16780,6 +16879,7 @@ const App = () => {
         </div>
         <div id="google_translate_element" className="hidden" />
         <AppDialogHost />
+        {androidUpdatePrompt}
         <AnimatePresence>
           {showLanguagePrompt && (
             <motion.div
@@ -16852,6 +16952,7 @@ const App = () => {
           </div>
           <AppFooter />
           <AppDialogHost />
+          {androidUpdatePrompt}
         </div>
       </ErrorBoundary>
     );
@@ -16886,6 +16987,7 @@ const App = () => {
           <AppFooter />
           <Chatbot userRole={profile?.role} userId={profile?.uid} />
           <AppDialogHost />
+          {androidUpdatePrompt}
           <AnimatePresence>
             {showLanguagePrompt && (
               <motion.div
