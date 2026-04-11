@@ -3385,7 +3385,7 @@ const AuthPage = ({
         if (!user && authMode === 'signup' && email && password && displayName) {
           await completeEmailPasswordSignUp();
         } else if (authMode === 'login') {
-          let existingProfile: { uid: string; role: string; email: string; phoneNumber: string };
+          let existingProfile: { uid: string; role: string; email: string; phoneNumber: string } | null = null;
           try {
             const resolveResponse = await fetch('/api/health?action=resolve-phone-login', {
               method: 'POST',
@@ -3394,11 +3394,11 @@ const AuthPage = ({
             });
             existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
           } catch (error: any) {
-            if (/HTTP (404|405)/.test(error?.message || '') || /NOT_REGISTERED/.test(error?.message || '')) {
-              existingProfile = await resolvePhoneLoginClientSide(phoneNumber || username);
-            } else {
-              throw error;
-            }
+            console.warn('Server-side phone login resolve failed; trying client-side fallback.', error);
+          }
+
+          if (!existingProfile) {
+            existingProfile = await resolvePhoneLoginClientSide(phoneNumber || username);
           }
 
           safeStorageSet('session', PHONE_LOGIN_PROFILE_KEY, existingProfile.uid);
