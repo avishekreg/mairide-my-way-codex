@@ -10,21 +10,35 @@ const resolveSupabaseRuntimeTarget = () => {
 
   if (typeof window !== 'undefined') {
     const host = String(window.location.hostname || '').toLowerCase();
-    const protocol = String(window.location.protocol || '').toLowerCase();
-    const ua = String(window.navigator?.userAgent || '').toLowerCase();
-    const isAndroidRuntime = ua.includes('android') || protocol.startsWith('capacitor:');
-    const isProdHost = host === 'mairide.in' || host === 'www.mairide.in';
-    const isEmbeddedAppHost =
-      host === '' ||
+    const isLocalLikeHost =
       host === 'localhost' ||
       host === '127.0.0.1' ||
       host === '0.0.0.0' ||
-      host === 'capacitor.localhost';
+      host === 'capacitor.localhost' ||
+      host.endsWith('.local') ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      host.startsWith('172.16.') ||
+      host.startsWith('172.17.') ||
+      host.startsWith('172.18.') ||
+      host.startsWith('172.19.') ||
+      host.startsWith('172.20.') ||
+      host.startsWith('172.21.') ||
+      host.startsWith('172.22.') ||
+      host.startsWith('172.23.') ||
+      host.startsWith('172.24.') ||
+      host.startsWith('172.25.') ||
+      host.startsWith('172.26.') ||
+      host.startsWith('172.27.') ||
+      host.startsWith('172.28.') ||
+      host.startsWith('172.29.') ||
+      host.startsWith('172.30.') ||
+      host.startsWith('172.31.');
 
-    // Force production DB target on live domains and embedded Android runtime hosts.
-    if (isProdHost || (isAndroidRuntime && isEmbeddedAppHost)) {
-      return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
-    }
+    // Canonical behavior:
+    // - Local/dev hostnames -> use env target (staging/local testing)
+    // - Everything else (mairide.in, vercel domains, installed app runtimes) -> force production target
+    if (!isLocalLikeHost) return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
   }
 
   return { url: envUrl, anonKey: envAnonKey };
