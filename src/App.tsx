@@ -4216,7 +4216,6 @@ const AuthPage = ({
             <span>Real-time Tracking</span>
           </div>
         </div>
-        <AppFooter releaseVersion={releaseVersion} />
       </div>
     </div>
   );
@@ -16918,19 +16917,22 @@ const App = () => {
 
   if (!user) return (
     <ErrorBoundary>
-      <>
-        <AuthPage 
-          user={user}
-          authMode={authMode} 
-          setAuthMode={setAuthMode} 
-          notRegisteredError={notRegisteredError} 
-          setNotRegisteredError={setNotRegisteredError}
-          role={role}
-          setRole={setRole}
-          referralCodeInput={referralCodeInput}
-          setReferralCodeInput={setReferralCodeInput}
-          releaseVersion={releaseVersion}
-        />
+      <div className="min-h-screen flex flex-col bg-mairide-bg">
+        <div className="flex-1">
+          <AuthPage 
+            user={user}
+            authMode={authMode} 
+            setAuthMode={setAuthMode} 
+            notRegisteredError={notRegisteredError} 
+            setNotRegisteredError={setNotRegisteredError}
+            role={role}
+            setRole={setRole}
+            referralCodeInput={referralCodeInput}
+            setReferralCodeInput={setReferralCodeInput}
+            releaseVersion={releaseVersion}
+          />
+        </div>
+        <AppFooter releaseVersion={releaseVersion} />
         <div className="fixed right-4 top-4 z-[70]">
           <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
         </div>
@@ -16979,7 +16981,7 @@ const App = () => {
             </motion.div>
           )}
         </AnimatePresence>
-      </>
+      </div>
     </ErrorBoundary>
   );
 

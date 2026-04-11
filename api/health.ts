@@ -13,6 +13,15 @@ function getSupabaseAdmin() {
   });
 }
 
+function getSupabasePublic() {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !anonKey) return null;
+  return createClient(supabaseUrl, anonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
 function isApprovedDriver(row: any) {
   const data = (row?.data as Record<string, any>) || {};
   const role = row?.role || data.role;
@@ -56,14 +65,27 @@ export default async function handler(req: any, res: any) {
   try {
     const action = Array.isArray(req.query?.action) ? req.query.action[0] : req.query?.action;
     if (action === "app-version") {
-      const supabaseAdmin = getSupabaseAdmin();
-      const { data, error } = await supabaseAdmin
-        .from("app_config")
-        .select("data")
-        .eq("id", "global")
-        .maybeSingle();
-      if (error) throw error;
-      const configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+      let configuredVersion = "";
+      try {
+        const supabaseAdmin = getSupabaseAdmin();
+        const { data, error } = await supabaseAdmin
+          .from("app_config")
+          .select("data")
+          .eq("id", "global")
+          .maybeSingle();
+        if (error) throw error;
+        configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+      } catch {
+        const supabasePublic = getSupabasePublic();
+        if (supabasePublic) {
+          const { data } = await supabasePublic
+            .from("app_config")
+            .select("data")
+            .eq("id", "global")
+            .maybeSingle();
+          configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+        }
+      }
       const fallbackVersion = String(process.env.VITE_APP_VERSION || "v2.0.1-beta").trim();
       return res.status(200).json({
         appVersion: configuredVersion || fallbackVersion,
