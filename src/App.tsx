@@ -1203,25 +1203,36 @@ const LanguageSwitcher = ({
   value,
   onChange,
   compact = false,
+  variant = 'default',
 }: {
   value: string;
   onChange: (next: string) => void;
   compact?: boolean;
+  variant?: 'default' | 'auth';
 }) => (
   <div
     className={cn(
-      'notranslate flex items-center gap-2 rounded-xl border border-mairide-secondary bg-white',
-      compact ? 'px-2 py-1' : 'px-3 py-2'
+      'notranslate flex items-center gap-2 rounded-xl',
+      variant === 'auth'
+        ? 'border border-white/30 bg-mairide-primary/75 px-3 py-1.5 shadow-lg backdrop-blur-md'
+        : 'border border-mairide-secondary bg-white',
+      compact && variant !== 'auth' ? 'px-2 py-1' : compact ? 'px-3 py-1.5' : 'px-3 py-2'
     )}
     translate="no"
   >
-    <Globe2 className={cn('text-mairide-secondary', compact ? 'w-4 h-4' : 'w-5 h-5')} />
+    <Globe2
+      className={cn(
+        variant === 'auth' ? 'text-white/90' : 'text-mairide-secondary',
+        compact ? 'w-4 h-4' : 'w-5 h-5'
+      )}
+    />
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
       translate="no"
       className={cn(
-        'notranslate bg-transparent text-mairide-primary outline-none',
+        'notranslate bg-transparent outline-none appearance-none pr-5',
+        variant === 'auth' ? 'text-white' : 'text-mairide-primary',
         compact ? 'text-xs font-semibold' : 'text-sm font-semibold'
       )}
     >
@@ -1231,6 +1242,7 @@ const LanguageSwitcher = ({
         </option>
       ))}
     </select>
+    <ChevronDown className={cn(variant === 'auth' ? 'text-white/90' : 'text-mairide-secondary', 'w-4 h-4')} />
   </div>
 );
 
@@ -16919,7 +16931,7 @@ const App = () => {
           releaseVersion={releaseVersion}
         />
         <div className="fixed right-4 top-4 z-[70]">
-          <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact />
+          <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
         </div>
         <div id="google_translate_element" className="hidden" />
         <AppDialogHost />
