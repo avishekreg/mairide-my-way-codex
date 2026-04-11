@@ -33,6 +33,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install SVG conversion tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin
+
       - name: Install dependencies
         run: npm ci
 
@@ -65,6 +70,18 @@ jobs:
 
       - name: Sync Android platform
         run: npx cap sync android
+
+      - name: Apply MaiRide launcher icon
+        run: |
+          for spec in "mdpi 48 108" "hdpi 72 162" "xhdpi 96 216" "xxhdpi 144 324" "xxxhdpi 192 432"; do
+            set -- $spec
+            density=$1
+            iconSize=$2
+            fgSize=$3
+            rsvg-convert -w "$iconSize" -h "$iconSize" public/icons/icon-512.svg -o "android/app/src/main/res/mipmap-${density}/ic_launcher.png"
+            rsvg-convert -w "$iconSize" -h "$iconSize" public/icons/icon-512.svg -o "android/app/src/main/res/mipmap-${density}/ic_launcher_round.png"
+            rsvg-convert -w "$fgSize" -h "$fgSize" public/icons/icon-512.svg -o "android/app/src/main/res/mipmap-${density}/ic_launcher_foreground.png"
+          done
 
       - name: Build debug APK
         run: |
