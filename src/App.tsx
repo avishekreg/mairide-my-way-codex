@@ -1209,13 +1209,15 @@ const LanguageSwitcher = ({
   value: string;
   onChange: (next: string) => void;
   compact?: boolean;
-  variant?: 'default' | 'auth';
+  variant?: 'default' | 'auth' | 'nav';
 }) => (
   <div
     className={cn(
       'notranslate flex items-center gap-2 rounded-xl',
       variant === 'auth'
         ? 'border border-white/30 bg-mairide-primary/75 px-3 py-1.5 shadow-lg backdrop-blur-md'
+        : variant === 'nav'
+          ? 'border border-mairide-secondary bg-white px-2.5 py-1.5'
         : 'border border-mairide-secondary bg-white',
       compact && variant !== 'auth' ? 'px-2 py-1' : compact ? 'px-3 py-1.5' : 'px-3 py-2'
     )}
@@ -1234,7 +1236,8 @@ const LanguageSwitcher = ({
       className={cn(
         'notranslate bg-transparent outline-none appearance-none pr-5',
         variant === 'auth' ? 'text-white' : 'text-mairide-primary',
-        compact ? 'text-xs font-semibold' : 'text-sm font-semibold'
+        compact ? 'text-xs font-semibold' : 'text-sm font-semibold',
+        variant === 'nav' ? 'w-[150px] truncate' : compact ? 'w-[170px] truncate' : 'w-[210px]'
       )}
     >
       {SUPPORTED_UI_LANGUAGES.map((option) => (
@@ -2644,7 +2647,7 @@ const Navbar = ({
             </span>
           </div>
           
-          <div className="hidden md:flex items-center space-x-6">
+          <div className="hidden md:flex items-center space-x-4">
             <button onClick={handleHomeNavigation} className="text-mairide-primary hover:text-mairide-accent font-medium">Home</button>
             <button onClick={() => navigate('/support')} className="text-mairide-primary hover:text-mairide-accent font-medium">Support</button>
             {profile?.role === 'admin' && (
@@ -2655,8 +2658,8 @@ const Navbar = ({
             ) : (
               <button onClick={() => navigate('/consumer/bookings')} className="text-mairide-primary hover:text-mairide-accent font-medium">My Bookings</button>
             )}
-            <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact />
-            <div className="flex items-center space-x-3 pl-4 border-l border-mairide-secondary">
+            <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact variant="nav" />
+            <div className="flex items-center space-x-3 pl-3 border-l border-mairide-secondary">
               <div className="text-right">
                 <p className="text-sm font-semibold text-mairide-primary">{profile?.displayName}</p>
                 <p className="text-xs text-mairide-secondary capitalize">{profile?.role}</p>
