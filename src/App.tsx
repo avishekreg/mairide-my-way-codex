@@ -2483,32 +2483,31 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
                     : 'Check for App Update'}
               </button>
             </div>
-          ) : (
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <a
-                href="/downloads/mairide-android.apk"
-                onClick={handleAndroidDownload}
-                className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
-              >
-                Get it on Android
-              </a>
-              <a
-                href="/downloads/ios.html"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center rounded-xl bg-mairide-primary text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
-              >
-                Get it on iOS
-              </a>
-              <button
-                type="button"
-                onClick={triggerInstall}
-                className="inline-flex items-center rounded-xl border border-mairide-primary/40 text-mairide-primary px-4 py-2 text-xs font-bold tracking-wide hover:bg-mairide-primary hover:text-white transition"
-              >
-                Install Web App
-              </button>
-            </div>
-          )}
+          ) : null}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <a
+              href="/downloads/mairide-android.apk"
+              onClick={handleAndroidDownload}
+              className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+            >
+              Get it on Android
+            </a>
+            <a
+              href="/downloads/ios.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center rounded-xl bg-mairide-primary text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+            >
+              Get it on iOS
+            </a>
+            <button
+              type="button"
+              onClick={triggerInstall}
+              className="inline-flex items-center rounded-xl border border-mairide-primary/40 text-mairide-primary px-4 py-2 text-xs font-bold tracking-wide hover:bg-mairide-primary hover:text-white transition"
+            >
+              Install Web App
+            </button>
+          </div>
           {isAndroidDevice && androidUpdateMessage ? (
             <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
               {androidUpdateMessage}
