@@ -2430,40 +2430,6 @@ const AppFooter = () => {
     <footer className="px-4 pb-6">
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col items-center gap-3 mb-3">
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <a
-              href="/downloads/mairide-android.apk"
-              onClick={handleAndroidDownload}
-              className={cn(
-                'inline-flex items-center rounded-xl px-4 py-2 text-xs font-bold tracking-wide transition',
-                isAndroidUpdateAvailable
-                  ? 'bg-mairide-accent text-white hover:opacity-90 shadow-lg shadow-mairide-accent/25'
-                  : 'bg-black text-white hover:opacity-90'
-              )}
-            >
-              {isAndroidUpdateAvailable ? 'Update Android App' : 'Get it on Android'}
-            </a>
-            <a
-              href="/downloads/ios.html"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center rounded-xl bg-mairide-primary text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
-            >
-              Get it on iOS
-            </a>
-            <button
-              type="button"
-              onClick={triggerInstall}
-              className="inline-flex items-center rounded-xl border border-mairide-primary/40 text-mairide-primary px-4 py-2 text-xs font-bold tracking-wide hover:bg-mairide-primary hover:text-white transition"
-            >
-              Install Web App
-            </button>
-          </div>
-          {isAndroidDevice && androidUpdateMessage ? (
-            <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
-              {androidUpdateMessage}
-            </p>
-          ) : null}
           {isAndroidDevice ? (
             <div className="w-full max-w-md">
               <button
@@ -2474,7 +2440,7 @@ const AppFooter = () => {
                 className={cn(
                   'w-full rounded-2xl px-4 py-3 text-sm font-bold transition',
                   isAndroidUpdateAvailable
-                    ? 'bg-mairide-accent text-white hover:opacity-90'
+                    ? 'bg-mairide-accent text-white hover:opacity-90 shadow-lg shadow-mairide-accent/25 animate-pulse'
                     : 'bg-mairide-primary text-white hover:bg-mairide-accent'
                 )}
               >
@@ -2485,6 +2451,36 @@ const AppFooter = () => {
                     : 'Check for App Update'}
               </button>
             </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <a
+                href="/downloads/mairide-android.apk"
+                onClick={handleAndroidDownload}
+                className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+              >
+                Get it on Android
+              </a>
+              <a
+                href="/downloads/ios.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center rounded-xl bg-mairide-primary text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+              >
+                Get it on iOS
+              </a>
+              <button
+                type="button"
+                onClick={triggerInstall}
+                className="inline-flex items-center rounded-xl border border-mairide-primary/40 text-mairide-primary px-4 py-2 text-xs font-bold tracking-wide hover:bg-mairide-primary hover:text-white transition"
+              >
+                Install Web App
+              </button>
+            </div>
+          )}
+          {isAndroidDevice && androidUpdateMessage ? (
+            <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
+              {androidUpdateMessage}
+            </p>
           ) : null}
           {installStatus ? <p className="text-[11px] text-mairide-secondary text-center">{installStatus}</p> : null}
           <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-mairide-secondary">

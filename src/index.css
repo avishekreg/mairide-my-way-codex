@@ -15,3 +15,41 @@
     font-size: 16px;
   }
 }
+
+/* Narrow fold/compact devices: keep layout responsive without horizontal squeeze */
+@media (max-width: 360px) {
+  html,
+  body,
+  #root {
+    overflow-x: hidden;
+  }
+
+  .max-w-7xl {
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+  }
+
+  .rounded-\[40px\] {
+    border-radius: 24px !important;
+  }
+
+  .text-6xl {
+    font-size: 2.2rem !important;
+    line-height: 1.1 !important;
+  }
+
+  .text-5xl {
+    font-size: 1.9rem !important;
+    line-height: 1.15 !important;
+  }
+
+  .text-4xl {
+    font-size: 1.65rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .min-w-\[280px\],
+  .lg\:min-w-\[520px\] {
+    min-width: 0 !important;
+  }
+}
