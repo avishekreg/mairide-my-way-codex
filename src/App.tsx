@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, Component } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, Component } from 'react';
 import { 
   BrowserRouter as Router, 
   Routes, 
@@ -2328,47 +2328,53 @@ const AppFooter = () => {
   const [isAndroidDevice, setIsAndroidDevice] = useState(false);
   const [androidUpdateMessage, setAndroidUpdateMessage] = useState('');
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
+  const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
 
   useEffect(() => {
     if (typeof navigator === 'undefined') return;
     setIsAndroidDevice(/android/i.test(navigator.userAgent || ''));
   }, []);
 
+  const checkAndroidUpdate = useCallback(async () => {
+    if (!isAndroidDevice) return;
+    setIsCheckingAndroidUpdate(true);
+    try {
+      const response = await fetch(`/downloads/android-update.json?t=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) {
+        setAndroidUpdateMessage('Could not check update right now. Please try again.');
+        return;
+      }
+      const data = await response.json();
+      const latestVersion = String(data?.appVersion || '').trim();
+      if (!latestVersion) {
+        setAndroidUpdateMessage('Update metadata unavailable. Please try again.');
+        return;
+      }
+      if (latestVersion !== releaseVersion) {
+        setIsAndroidUpdateAvailable(true);
+        setAndroidUpdateMessage(`New Android build ${latestVersion} is available.`);
+      } else {
+        setIsAndroidUpdateAvailable(false);
+        setAndroidUpdateMessage('Your Android app is up to date.');
+      }
+    } catch {
+      setAndroidUpdateMessage('Could not check update right now. Please try again.');
+    } finally {
+      setIsCheckingAndroidUpdate(false);
+    }
+  }, [isAndroidDevice, releaseVersion]);
+
   useEffect(() => {
     if (!isAndroidDevice) return;
-    let active = true;
-
-    const checkAndroidUpdate = async () => {
-      try {
-        const response = await fetch(`/downloads/android-update.json?t=${Date.now()}`, { cache: 'no-store' });
-        if (!response.ok) return;
-        const data = await response.json();
-        const latestVersion = String(data?.appVersion || '').trim();
-        if (!latestVersion) return;
-        if (latestVersion !== releaseVersion) {
-          if (!active) return;
-          setIsAndroidUpdateAvailable(true);
-          setAndroidUpdateMessage(`New Android build ${latestVersion} is available.`);
-        } else {
-          if (!active) return;
-          setIsAndroidUpdateAvailable(false);
-          setAndroidUpdateMessage('Your Android app is up to date.');
-        }
-      } catch {
-        // Keep footer resilient; ignore update-check failures.
-      }
-    };
-
     void checkAndroidUpdate();
     const intervalId = window.setInterval(() => {
       void checkAndroidUpdate();
     }, 5 * 60 * 1000);
 
     return () => {
-      active = false;
       window.clearInterval(intervalId);
     };
-  }, [isAndroidDevice, releaseVersion]);
+  }, [isAndroidDevice, checkAndroidUpdate]);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (event: Event) => {
@@ -2409,9 +2415,9 @@ const AppFooter = () => {
   const handleAndroidDownload = async (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     try {
-      const response = await fetch('/downloads/mairide-android.apk', { method: 'HEAD' });
+      const response = await fetch(`/downloads/mairide-android.apk?t=${Date.now()}`, { method: 'HEAD', cache: 'no-store' });
       if (response.ok) {
-        window.location.href = '/downloads/mairide-android.apk';
+        window.location.href = `/downloads/mairide-android.apk?t=${Date.now()}`;
         return;
       }
     } catch {
@@ -2457,6 +2463,28 @@ const AppFooter = () => {
             <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
               {androidUpdateMessage}
             </p>
+          ) : null}
+          {isAndroidDevice ? (
+            <div className="w-full max-w-md">
+              <button
+                type="button"
+                onClick={isAndroidUpdateAvailable ? () => {
+                  window.location.href = `/downloads/mairide-android.apk?t=${Date.now()}`;
+                } : () => void checkAndroidUpdate()}
+                className={cn(
+                  'w-full rounded-2xl px-4 py-3 text-sm font-bold transition',
+                  isAndroidUpdateAvailable
+                    ? 'bg-mairide-accent text-white hover:opacity-90'
+                    : 'bg-mairide-primary text-white hover:bg-mairide-accent'
+                )}
+              >
+                {isCheckingAndroidUpdate
+                  ? 'Checking updates...'
+                  : isAndroidUpdateAvailable
+                    ? 'Update App Now'
+                    : 'Check for App Update'}
+              </button>
+            </div>
           ) : null}
           {installStatus ? <p className="text-[11px] text-mairide-secondary text-center">{installStatus}</p> : null}
           <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-mairide-secondary">

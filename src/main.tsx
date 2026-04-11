@@ -13,9 +13,10 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     const ua = navigator.userAgent.toLowerCase();
     const isSafari = ua.includes('safari') && !ua.includes('chrome') && !ua.includes('crios') && !ua.includes('android');
+    const isAndroidWebView = ua.includes('android') && (ua.includes(' wv') || ua.includes('; wv'));
 
-    // Safari users have repeatedly hit stale SW cache issues; keep runtime stable by avoiding SW there.
-    if (isSafari) {
+    // Safari + Android WebView users have repeatedly hit stale SW cache issues; keep runtime stable by avoiding SW there.
+    if (isSafari || isAndroidWebView) {
       navigator.serviceWorker.getRegistrations().then((registrations) => {
         registrations.forEach((registration) => {
           void registration.unregister();
