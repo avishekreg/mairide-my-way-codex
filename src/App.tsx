@@ -95,6 +95,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  ChevronDown,
   Navigation,
   MessageSquare,
   Send,
