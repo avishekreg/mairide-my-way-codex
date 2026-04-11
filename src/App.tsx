@@ -1188,6 +1188,16 @@ const detectLanguageFromGeolocation = async (): Promise<string | null> => {
   const siliguriLat = 26.7271;
   const siliguriLng = 88.3953;
   const nearSiliguri = getDistance(lat, lon, siliguriLat, siliguriLng) <= 100;
+  const nearSikkimBounding =
+    lat >= 27.05 &&
+    lat <= 28.25 &&
+    lon >= 87.05 &&
+    lon <= 88.95;
+
+  // GPS-first handling for Siliguri + Sikkim belt so Android webviews don't
+  // silently fall back to en/hi when reverse-geocode APIs fail.
+  if (nearSiliguri || nearSikkimBounding) return 'ne';
+
   const response = await fetch(
     `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
   ).catch(() => null);
@@ -1237,7 +1247,11 @@ const LanguageSwitcher = ({
         'notranslate bg-transparent outline-none appearance-none pr-5',
         variant === 'auth' ? 'text-white' : 'text-mairide-primary',
         compact ? 'text-xs font-semibold' : 'text-sm font-semibold',
-        variant === 'nav' ? 'w-[150px] truncate' : compact ? 'w-[170px] truncate' : 'w-[210px]'
+        variant === 'nav'
+          ? 'w-[132px] md:w-[158px] truncate'
+          : compact
+            ? 'w-[148px] md:w-[170px] truncate'
+            : 'w-[210px]'
       )}
     >
       {SUPPORTED_UI_LANGUAGES.map((option) => (
@@ -16796,7 +16810,7 @@ const App = () => {
       }
       if (!cancelled) {
         const normalizedSuggested = getSupportedUiLanguage(detected).value;
-        const options = new Set<string>([normalizedSuggested, 'hi', 'en']);
+        const options = new Set<string>([normalizedSuggested, 'hi', 'en', 'bn', 'ne']);
         if (nearNepaliRegion) {
           options.add('bn');
           options.add('ne');
