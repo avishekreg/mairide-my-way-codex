@@ -41,7 +41,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -103,10 +103,26 @@ jobs:
           done
 
       - name: Build debug APK
+        id: build_apk
+        continue-on-error: true
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --info
+          ./gradlew assembleDebug --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
+
+      - name: Print Gradle failure context
+        if: always()
+        run: |
+          if [ "${{ steps.build_apk.outcome }}" = "failure" ]; then
+            echo "Gradle build failed. Showing last 220 lines:"
+            tail -n 220 /tmp/gradle-build.log || true
+          else
+            echo "Gradle build succeeded."
+          fi
+
+      - name: Fail job when APK build fails
+        if: steps.build_apk.outcome == 'failure'
+        run: exit 1
 
       - name: Verify APK uses production Supabase
         run: |
