@@ -2444,18 +2444,10 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
     }
   };
 
-  const handleAndroidDownload = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+  const handleAndroidDownload = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
-    try {
-      const response = await fetch(`/downloads/mairide-android.apk?t=${Date.now()}`, { method: 'HEAD', cache: 'no-store' });
-      if (response.ok) {
-        window.location.href = `/downloads/mairide-android.apk?t=${Date.now()}`;
-        return;
-      }
-    } catch {
-      // Ignore and fallback to guide page.
-    }
-    window.location.href = '/downloads/android.html';
+    const ts = Date.now();
+    window.location.assign(`/downloads/mairide-android.apk?t=${ts}`);
   };
 
   return (

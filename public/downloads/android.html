@@ -39,28 +39,8 @@
         <li>Run the downloaded APK and follow prompts.</li>
       </ol>
       <p style="margin-top:16px"><a href="/">← Back to MaiRide</a></p>
-      <p id="apk-status" style="font-size:12px;color:#6f8090">Preparing Android package updates…</p>
+      <p id="apk-status" style="font-size:12px;color:#6f8090">Android installer is ready.</p>
     </section>
   </main>
-  <script>
-    (async function() {
-      const downloadBtn = document.getElementById('apk-download');
-      const status = document.getElementById('apk-status');
-      try {
-        const response = await fetch('/downloads/mairide-android.apk', { method: 'HEAD' });
-        if (response.ok) {
-          status.textContent = 'Android installer ready.';
-          return;
-        }
-      } catch (_) {}
-
-      downloadBtn.classList.remove('btn-secondary');
-      downloadBtn.classList.add('btn-disabled');
-      downloadBtn.removeAttribute('href');
-      downloadBtn.removeAttribute('download');
-      downloadBtn.setAttribute('aria-disabled', 'true');
-      status.textContent = 'Android installer is being generated. Please check back shortly.';
-    })();
-  </script>
 </body>
 </html>
