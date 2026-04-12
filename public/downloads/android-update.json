@@ -1,6 +1,6 @@
 {
-  "appVersion": "v3.0.1-beta+build.85",
+  "appVersion": "v3.0.1-beta+build.86",
   "apkUrl": "https://github.com/avishekreg/mairide-my-way-codex/releases/download/android-latest/mairide-android.apk",
-  "buildSha": "8f0419aa1c4560278ea5b8c497cacc85c65c318b",
-  "builtAt": "2026-04-12T19:42:39Z"
+  "buildSha": "9c916ed6d131358fc6b0646c78b3ec21479a51c2",
+  "builtAt": "2026-04-12T19:58:45Z"
 }
