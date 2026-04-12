@@ -153,7 +153,12 @@ const resolveApiBaseUrl = () => {
 
   // Capacitor WebView commonly runs as https://localhost (no port) on device.
   // In that case force API traffic to production web origin.
-  if (!isWebViewLocalhost && (protocol === 'http:' || protocol === 'https:')) return '';
+  if (!isWebViewLocalhost && (protocol === 'http:' || protocol === 'https:')) {
+    // Root domain frequently redirects to www. Force canonical host in app/client calls
+    // to avoid cross-origin redirect edge-cases during OTP/login fetches.
+    if (hostname === 'mairide.in') return WEB_API_ORIGIN_FALLBACK;
+    return '';
+  }
   return WEB_API_ORIGIN_FALLBACK;
 };
 
@@ -3157,10 +3162,13 @@ const AuthPage = ({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     };
+    const isLocalhostDev =
+      typeof window !== 'undefined'
+        && ['localhost', '127.0.0.1'].includes(String(window.location.hostname || '').toLowerCase());
 
     try {
       const primaryResponse = await fetch(apiPath(`/api/auth?action=${action}`), requestInit);
-      if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath) {
+      if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath || !isLocalhostDev) {
         return primaryResponse;
       }
     } catch {
@@ -3178,10 +3186,13 @@ const AuthPage = ({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     };
+    const isLocalhostDev =
+      typeof window !== 'undefined'
+        && ['localhost', '127.0.0.1'].includes(String(window.location.hostname || '').toLowerCase());
 
     try {
       const primaryResponse = await fetch(apiPath(`/api/health?action=${action}`), requestInit);
-      if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath) {
+      if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath || !isLocalhostDev) {
         return primaryResponse;
       }
     } catch {
