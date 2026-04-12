@@ -40,6 +40,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Android SDK build dependencies
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
       - name: Install SVG conversion tooling
         run: |
           sudo apt-get update
@@ -94,6 +99,7 @@ jobs:
       - name: Build debug APK
         run: |
           cd android
+          chmod +x gradlew
           ./gradlew assembleDebug
 
       - name: Verify APK uses production Supabase
