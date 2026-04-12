@@ -2361,21 +2361,8 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
   const [androidUpdateMessage, setAndroidUpdateMessage] = useState('');
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
   const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
-  const getAndroidApkUrl = () => `https://www.mairide.in/downloads/mairide-android-download.apk?t=${Date.now()}`;
-
   const openAndroidDownload = () => {
-    const apkUrl = getAndroidApkUrl();
-    const inStandalone =
-      typeof window !== 'undefined' &&
-      (window.matchMedia?.('(display-mode: standalone)')?.matches ||
-        (window.navigator as any)?.standalone === true);
-
-    if (inStandalone) {
-      window.open(apkUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
-    window.location.assign(apkUrl);
+    window.location.assign(`/downloads/android.html?autostart=1&t=${Date.now()}`);
   };
 
   useEffect(() => {

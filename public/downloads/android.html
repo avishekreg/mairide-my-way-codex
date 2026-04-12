@@ -24,13 +24,11 @@
       <h1>Get MaiRide on Android</h1>
       <p>Install as a web app instantly, or download the Android installer directly from mairide.in.</p>
       <a class="btn btn-primary" href="/">Install Web App (PWA)</a>
-      <a
-        id="apk-download"
-        class="btn btn-secondary"
-        href="/downloads/mairide-android-download.apk"
-        download
-      >
+      <a id="apk-download" class="btn btn-secondary" href="/downloads/mairide-android-download.apk" download>
         Download APK
+      </a>
+      <a id="apk-chrome" class="btn btn-primary" style="margin-left:10px" href="#">
+        Open in Chrome
       </a>
       <h2 style="margin-top:24px">If APK install is blocked</h2>
       <ol>
@@ -42,5 +40,34 @@
       <p id="apk-status" style="font-size:12px;color:#6f8090">Android installer is ready.</p>
     </section>
   </main>
+  <script>
+    (function () {
+      var apkPath = '/downloads/mairide-android-download.apk?t=' + Date.now();
+      var apkDownload = document.getElementById('apk-download');
+      var apkChrome = document.getElementById('apk-chrome');
+      var status = document.getElementById('apk-status');
+
+      if (apkDownload) {
+        apkDownload.setAttribute('href', apkPath);
+      }
+
+      if (apkChrome) {
+        var intentUrl =
+          'intent://www.mairide.in/downloads/mairide-android-download.apk#Intent;scheme=https;package=com.android.chrome;end';
+        apkChrome.setAttribute('href', intentUrl);
+      }
+
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('autostart') === '1') {
+        setTimeout(function () {
+          if (apkDownload) apkDownload.click();
+          if (status) {
+            status.textContent =
+              'If download did not start, tap "Open in Chrome" and then "Download APK".';
+          }
+        }, 250);
+      }
+    })();
+  </script>
 </body>
 </html>
