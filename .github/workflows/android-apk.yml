@@ -88,7 +88,6 @@ jobs:
 
       - name: Build debug APK
         id: build_apk
-        continue-on-error: true
         run: |
           set -o pipefail
           cd android
@@ -104,6 +103,11 @@ jobs:
           else
             echo "Gradle build succeeded."
           fi
+
+      - name: Show built APK outputs
+        if: always()
+        run: |
+          find android/app/build/outputs -type f | sed -n '1,200p' || true
 
       - name: Verify production Supabase source lock
         run: |
@@ -125,17 +129,15 @@ jobs:
 
       - name: Prepare artifact
         run: |
-          APK_PATH="$(find android -type f -name '*.apk' | grep '/outputs/apk/' | head -n 1)"
+          APK_PATH="$(find android/app/build/outputs -type f -name '*.apk' | head -n 1)"
           mkdir -p release public/downloads
-          if [ -n "$APK_PATH" ]; then
-            echo "Using newly built APK: $APK_PATH"
-            cp "$APK_PATH" release/mairide-android.apk
-            cp "$APK_PATH" public/downloads/mairide-android.apk
-          else
-            echo "No new APK produced. Falling back to existing repository APK."
-            test -f public/downloads/mairide-android.apk
-            cp public/downloads/mairide-android.apk release/mairide-android.apk
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK produced. Failing workflow to surface real build issue."
+            exit 1
           fi
+          echo "Using newly built APK: $APK_PATH"
+          cp "$APK_PATH" release/mairide-android.apk
+          cp "$APK_PATH" public/downloads/mairide-android.apk
           APP_VERSION=${VITE_APP_VERSION}
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cat > public/downloads/android-update.json <<EOF
