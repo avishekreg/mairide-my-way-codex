@@ -2447,7 +2447,7 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
   const handleAndroidDownload = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     const ts = Date.now();
-    window.location.assign(`/downloads/mairide-android.apk?t=${ts}`);
+    window.location.assign(`/downloads/mairide-android-download.apk?t=${ts}`);
   };
 
   return (
@@ -2459,7 +2459,7 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
               <button
                 type="button"
                 onClick={isAndroidUpdateAvailable ? () => {
-                  window.location.href = `/downloads/mairide-android.apk?t=${Date.now()}`;
+                  window.location.href = `/downloads/mairide-android-download.apk?t=${Date.now()}`;
                 } : () => void checkAndroidUpdate()}
                 className={cn(
                   'w-full rounded-2xl px-4 py-3 text-sm font-bold transition',
@@ -2478,7 +2478,7 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
             <a
-              href="/downloads/mairide-android.apk"
+              href="/downloads/mairide-android-download.apk"
               onClick={handleAndroidDownload}
               className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
             >
@@ -16474,7 +16474,7 @@ const App = () => {
   }>({
     available: false,
     latestVersion: '',
-    apkUrl: '/downloads/mairide-android.apk',
+    apkUrl: '/downloads/mairide-android-download.apk',
   });
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
   const [remoteAppVersion, setRemoteAppVersion] = useState('');
@@ -16877,7 +16877,7 @@ const App = () => {
         if (!response.ok) return;
         const data = await response.json();
         const latestVersion = String(data?.appVersion || '').trim();
-        const apkUrl = String(data?.apkUrl || '/downloads/mairide-android.apk').trim() || '/downloads/mairide-android.apk';
+        const apkUrl = String(data?.apkUrl || '/downloads/mairide-android-download.apk').trim() || '/downloads/mairide-android-download.apk';
         if (!latestVersion) return;
         const needsUpdate = latestVersion !== releaseVersion;
         if (!active) return;
@@ -16929,7 +16929,7 @@ const App = () => {
   };
 
   const handleApplyAndroidUpdate = () => {
-    window.location.href = androidUpdateState.apkUrl || '/downloads/mairide-android.apk';
+    window.location.href = androidUpdateState.apkUrl || '/downloads/mairide-android-download.apk';
   };
 
   const androidUpdatePrompt = showAndroidUpdatePrompt && androidUpdateState.available ? (
