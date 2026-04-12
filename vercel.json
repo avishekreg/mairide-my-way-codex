@@ -68,7 +68,7 @@
       "src": "/downloads/mairide-android-download.apk",
       "headers": {
         "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Type": "application/octet-stream",
         "Content-Disposition": "attachment; filename=\"mairide-android.apk\""
       },
       "dest": "/downloads/mairide-android.apk"

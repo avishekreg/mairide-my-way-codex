@@ -2444,19 +2444,6 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
     }
   };
 
-  const triggerAndroidDownload = () => {
-    const ts = Date.now();
-    const apkUrl = `/downloads/mairide-android-download.apk?t=${ts}`;
-    const anchor = document.createElement('a');
-    anchor.href = apkUrl;
-    anchor.target = '_blank';
-    anchor.rel = 'noopener noreferrer';
-    anchor.download = 'mairide-android.apk';
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-  };
-
   return (
     <footer className="px-4 pb-6">
       <div className="max-w-7xl mx-auto">
@@ -2465,7 +2452,9 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
             <div className="w-full max-w-md">
               <button
                 type="button"
-                onClick={isAndroidUpdateAvailable ? triggerAndroidDownload : () => void checkAndroidUpdate()}
+                onClick={isAndroidUpdateAvailable ? () => {
+                  window.location.assign(`/downloads/mairide-android-download.apk?t=${Date.now()}`);
+                } : () => void checkAndroidUpdate()}
                 className={cn(
                   'w-full rounded-2xl px-4 py-3 text-sm font-bold transition',
                   isAndroidUpdateAvailable
@@ -2482,13 +2471,13 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
             </div>
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={triggerAndroidDownload}
+            <a
+              href="/downloads/mairide-android-download.apk"
+              download="mairide-android.apk"
               className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
             >
               Get it on Android
-            </button>
+            </a>
             <a
               href="/downloads/ios.html"
               target="_blank"
