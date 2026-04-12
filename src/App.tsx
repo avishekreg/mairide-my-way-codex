@@ -158,15 +158,19 @@ const resolveApiBaseUrl = () => {
   if (typeof window === 'undefined') return '';
   const protocol = String(window.location.protocol || '').toLowerCase();
   const hostname = String(window.location.hostname || '').toLowerCase();
-  const port = String(window.location.port || '').trim();
-  const isWebViewLocalhost =
-    (protocol === 'http:' || protocol === 'https:') &&
-    (hostname === 'localhost' || hostname === '127.0.0.1') &&
-    !port;
+  const isHttpLike = protocol === 'http:' || protocol === 'https:';
+  const isLocalRuntimeHost = hostname === 'localhost' || hostname === '127.0.0.1';
 
-  // Capacitor WebView commonly runs as https://localhost (no port) on device.
-  // In that case force API traffic to production web origin.
-  if (!isWebViewLocalhost && (protocol === 'http:' || protocol === 'https:')) {
+  // App runtimes can use:
+  // - https://localhost
+  // - http://localhost:<port> (often :8080)
+  // - custom schemes (capacitor://, ionic://)
+  // In all these cases we must call production API origin directly.
+  if ((isHttpLike && isLocalRuntimeHost) || protocol === 'capacitor:' || protocol === 'ionic:') {
+    return WEB_API_ORIGIN_FALLBACK;
+  }
+
+  if (isHttpLike) {
     // Root domain frequently redirects to www. Force canonical host in app/client calls
     // to avoid cross-origin redirect edge-cases during OTP/login fetches.
     if (hostname === 'mairide.in') return WEB_API_ORIGIN_FALLBACK;
