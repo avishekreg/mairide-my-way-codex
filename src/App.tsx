@@ -180,20 +180,35 @@ const resolveApiBaseUrl = () => {
 
 const apiPath = (path: string) => `${resolveApiBaseUrl()}${path}`;
 
+const isAndroidWebViewLikeRuntime = () => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const ua = String(navigator.userAgent || '').toLowerCase();
+  const protocol = String(window.location.protocol || '').toLowerCase();
+  return /android/.test(ua) && (/ wv|; wv|version\/\d+\.\d+ mobile/.test(ua) || protocol === 'capacitor:' || protocol === 'ionic:');
+};
+
 const buildOriginCandidates = () => {
   if (typeof window === 'undefined') {
     return [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
   }
   const primary = resolveApiBaseUrl();
   const currentOrigin = String(window.location.origin || '');
+  const appPreferred = isAndroidWebViewLikeRuntime()
+    ? [WEB_API_ORIGIN_FAILOVER, WEB_API_ORIGIN_FALLBACK, currentOrigin, primary]
+    : [currentOrigin, primary, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
   return Array.from(
-    new Set([currentOrigin, primary, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER].filter(Boolean))
+    new Set(appPreferred.filter(Boolean))
   );
+};
+
+const looksLikeHtmlText = (value: string) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized.startsWith('<!doctype') || normalized.startsWith('<html') || normalized.includes('<head') || normalized.includes('<body');
 };
 
 const isHtmlResponse = (response: Response) => {
   const contentType = String(response.headers.get('content-type') || '').toLowerCase();
-  return contentType.includes('text/html');
+  return contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
 };
 
 const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) => {
@@ -205,7 +220,20 @@ const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) =
     const targetUrl = `${normalizedOrigin}${path}`;
     try {
       const response = await fetch(targetUrl, requestInit);
-      if (isHtmlResponse(response) && requestInit.method?.toUpperCase() === 'POST') {
+      if (requestInit.method?.toUpperCase() === 'POST') {
+        if (isHtmlResponse(response)) {
+          continue;
+        }
+        try {
+          const textProbe = (await response.clone().text()).slice(0, 500);
+          if (looksLikeHtmlText(textProbe)) {
+            continue;
+          }
+        } catch {
+          // Ignore probe failures and continue with raw response handling.
+        }
+      }
+      if (requestInit.method?.toUpperCase() === 'POST' && isHtmlResponse(response)) {
         // Some mobile runtimes can receive an HTML fallback page for one origin.
         // Skip and continue with the next API origin candidate.
         continue;
@@ -3210,10 +3238,7 @@ const findUserProfileByPhone = async (value: string) => {
   const maskedOtpPhone = maskPhoneNumber(phoneNumber || username);
   const normalizedSignupPhone = toIndianPhoneStorage(phoneNumber);
   const normalizedSignupEmail = normalizeEmailValue(email);
-  const isAndroidWebViewRuntime =
-    typeof navigator !== 'undefined'
-    && /android/i.test(String(navigator.userAgent || ''))
-    && (/ wv|; wv|version\/\d+\.\d+ mobile/i.test(String(navigator.userAgent || '')) || String(window?.location?.protocol || '').toLowerCase() === 'capacitor:');
+  const isAndroidWebViewRuntime = isAndroidWebViewLikeRuntime();
 
   const postAuthAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
     const requestInit: RequestInit = {
@@ -4392,19 +4417,6 @@ const findUserProfileByPhone = async (value: string) => {
         )}
       </AnimatePresence>
       
-      <div className="mt-8 flex flex-col items-center space-y-4">
-        <div className="flex items-center space-x-4 text-mairide-secondary text-xs">
-          <div className="flex items-center space-x-1">
-            <ShieldCheck className="w-4 h-4" />
-            <span>Verified Drivers</span>
-          </div>
-          <div className="w-1 h-1 bg-mairide-secondary rounded-full" />
-          <div className="flex items-center space-x-1">
-            <Clock className="w-4 h-4" />
-            <span>Real-time Tracking</span>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
