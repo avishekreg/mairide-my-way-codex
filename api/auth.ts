@@ -1043,6 +1043,61 @@ async function handleCompleteSignup(req: any, res: any) {
   }
 }
 
+async function handlePasswordLogin(req: any, res: any) {
+  if (String(req?.method || "").toUpperCase() !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const password = String(req.body?.password || "");
+
+    if (!email || !isValidEmail(email)) {
+      return res.status(400).json({ error: "A valid email is required." });
+    }
+
+    if (!password) {
+      return res.status(400).json({ error: "Password is required." });
+    }
+
+    const { supabaseUrl, anonKey } = getRuntimeSupabaseConfig();
+    if (!supabaseUrl || !anonKey) {
+      return res.status(500).json({ error: "Supabase runtime config is incomplete." });
+    }
+
+    const loginResponse = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify({ email, password }),
+    });
+
+    const payload = await loginResponse.json().catch(() => ({}));
+    if (!loginResponse.ok) {
+      const msg =
+        payload?.error_description ||
+        payload?.msg ||
+        payload?.error ||
+        "Invalid login credentials";
+      return res.status(loginResponse.status || 400).json({ error: String(msg) });
+    }
+
+    return res.status(200).json({
+      session: {
+        access_token: payload?.access_token || "",
+        refresh_token: payload?.refresh_token || "",
+      },
+      user: payload?.user || null,
+    });
+  } catch (error: any) {
+    console.error("Password login fallback failed:", error);
+    return res.status(500).json({ error: error.message || "Failed to login" });
+  }
+}
+
 function getAction(req: any) {
   const fromQuery = req.query?.action;
   if (Array.isArray(fromQuery)) return fromQuery[0];
@@ -1052,6 +1107,7 @@ function getAction(req: any) {
 
 const handlers: Record<string, (req: any, res: any) => Promise<any> | any> = {
   "complete-signup": handleCompleteSignup,
+  "password-login": handlePasswordLogin,
   "resolve-phone-login": handleResolvePhoneLogin,
   "send-password-reset-otp": handleSendPasswordResetOtp,
   "verify-password-reset-otp": handleVerifyPasswordResetOtp,

@@ -3622,8 +3622,42 @@ const AuthPage = ({
         }
       } else {
         // Email/Password Login
-        const result = await signInWithEmailAndPassword(auth, normalizeEmailValue(normalizedUsername), password);
-        await handleProfileSetup(result.user, undefined, undefined, false);
+        try {
+          const result = await signInWithEmailAndPassword(auth, normalizeEmailValue(normalizedUsername), password);
+          await handleProfileSetup(result.user, undefined, undefined, false);
+        } catch (loginError: any) {
+          const loginMessage = String(loginError?.message || "").toLowerCase();
+          const canUseServerFallback = loginMessage.includes("failed to fetch") || loginMessage.includes("network");
+
+          if (!canUseServerFallback) {
+            throw loginError;
+          }
+
+          const fallbackResponse = await postAuthAction(
+            'password-login',
+            { email: normalizeEmailValue(normalizedUsername), password },
+            '/api/auth/password-login'
+          );
+          const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
+          const accessToken = String(fallbackData?.session?.access_token || '');
+          const refreshToken = String(fallbackData?.session?.refresh_token || '');
+
+          if (!accessToken || !refreshToken) {
+            throw new Error('Login session could not be established.');
+          }
+
+          const { error: setSessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (setSessionError) {
+            throw new Error(setSessionError.message || 'Failed to set login session.');
+          }
+
+          window.location.reload();
+          return;
+        }
       }
     } catch (error: any) {
       console.error("Login Error:", error);
