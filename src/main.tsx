@@ -34,29 +34,10 @@ if ('serviceWorker' in navigator) {
     }
 
     navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        if (registration.waiting) {
-          registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-        }
-
-        registration.addEventListener('updatefound', () => {
-          const installingWorker = registration.installing;
-          if (!installingWorker) return;
-
-          installingWorker.addEventListener('statechange', () => {
-            if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              installingWorker.postMessage({ type: 'SKIP_WAITING' });
-            }
-          });
-        });
-
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          window.location.reload();
-        });
-
-        window.setInterval(() => {
-          void registration.update();
-        }, 60 * 1000);
+      .then(() => {
+        // Keep service worker registration passive.
+        // Do not force page reloads while users are in critical flows
+        // like location permissions, OTP, or payments.
       })
       .catch(() => {
         // Ignore SW registration failures to avoid runtime disruption.
