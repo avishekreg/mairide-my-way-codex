@@ -2490,7 +2490,7 @@ const LoadingScreen = ({ releaseVersion: releaseVersionProp }: { releaseVersion?
         className="mb-4"
       >
         <div className="flex flex-col items-center">
-          <img src={LOGO_URL} className="w-48 h-48 object-contain" alt="MaiRide Logo" />
+          <img src={LOGO_URL} className="w-48 h-48 object-contain rounded-[22%]" alt="MaiRide Logo" />
           <h1 className="text-4xl font-black text-mairide-primary mt-4 tracking-tighter">
             {BRAND_NAME}
           </h1>
@@ -2790,7 +2790,7 @@ const Navbar = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           <div className="flex items-center cursor-pointer" onClick={handleHomeNavigation}>
-            <img src={LOGO_URL} className="w-12 h-12 object-contain mr-2" alt="MaiRide Logo" />
+            <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="MaiRide Logo" />
             <span className="text-xl font-black tracking-tighter text-mairide-primary">
               {BRAND_NAME}
             </span>
@@ -3982,7 +3982,7 @@ const findUserProfileByPhone = async (value: string) => {
         className="w-full max-w-md bg-white rounded-[32px] p-8 shadow-xl border border-mairide-secondary my-2 md:my-0"
       >
         <div className="flex flex-col items-center mb-6">
-          <img src={LOGO_URL} className="w-32 h-32 object-contain mb-2" alt="MaiRide Logo" />
+          <img src={LOGO_URL} className="w-32 h-32 object-contain rounded-[22%] mb-2" alt="MaiRide Logo" />
           <h1 className="text-2xl font-black tracking-tighter text-mairide-primary uppercase">
             {BRAND_NAME}
           </h1>
@@ -5119,7 +5119,7 @@ const DriverOnboarding = ({
       >
         <div className="flex flex-col items-center mb-8">
           <div className="flex items-center mb-4">
-            <img src={LOGO_URL} className="w-12 h-12 object-contain mr-2" alt="MaiRide Logo" />
+            <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="MaiRide Logo" />
             <span className="text-xl font-black tracking-tighter text-mairide-primary">
               {BRAND_NAME}
             </span>
@@ -9409,7 +9409,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
         <>
           <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-col gap-6 md:flex-row md:items-center">
-              <img src={LOGO_URL} className="h-24 w-24 object-contain" alt="MaiRide Logo" />
+              <img src={LOGO_URL} className="h-24 w-24 object-contain rounded-[22%]" alt="MaiRide Logo" />
               <div>
                 <h1 className="mb-2 text-4xl font-bold uppercase tracking-tight text-mairide-primary">Where to?</h1>
                 <p className="italic serif text-mairide-secondary">Find discounted intercity rides on empty leg journeys.</p>
@@ -11098,7 +11098,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
         <>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
             <div className="flex items-center space-x-6">
-              <img src={LOGO_URL} className="w-24 h-24 object-contain" alt="MaiRide Logo" />
+              <img src={LOGO_URL} className="w-24 h-24 object-contain rounded-[22%]" alt="MaiRide Logo" />
               <div>
                 <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Driver Dashboard</h1>
                 <p className="text-mairide-secondary italic serif">Manage your empty leg journeys and earnings.</p>
@@ -14901,7 +14901,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       )}>
         <div className="p-6 flex items-center justify-between border-b border-mairide-bg">
           <div className={cn("flex items-center overflow-hidden transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
-            <img src={LOGO_URL} className="w-8 h-8 object-contain mr-2" alt="Logo" />
+            <img src={LOGO_URL} className="w-8 h-8 object-contain rounded-[22%] mr-2" alt="Logo" />
             <h1 className="text-lg font-black tracking-tighter text-mairide-primary whitespace-nowrap">
               {BRAND_NAME}
             </h1>
@@ -14979,7 +14979,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         {/* Mobile Header */}
         <header className="lg:hidden bg-white border-b border-mairide-secondary p-4 flex justify-between items-center">
           <div className="flex items-center">
-            <img src={LOGO_URL} className="w-8 h-8 object-contain mr-2" alt="Logo" />
+            <img src={LOGO_URL} className="w-8 h-8 object-contain rounded-[22%] mr-2" alt="Logo" />
             <h1 className="text-lg font-black tracking-tighter text-mairide-primary leading-none">
               {BRAND_NAME}
             </h1>
