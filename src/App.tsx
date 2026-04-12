@@ -256,6 +256,31 @@ const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) =
   throw lastError || new Error('Failed to reach authentication service.');
 };
 
+const forceDirectAuthFetch = async (path: string, requestInit: RequestInit) => {
+  const directOrigins = [WEB_API_ORIGIN_FAILOVER, WEB_API_ORIGIN_FALLBACK];
+  let lastError: any = null;
+  for (const origin of directOrigins) {
+    const url = `${origin}${path}`;
+    try {
+      const response = await fetch(url, {
+        ...requestInit,
+        cache: 'no-store',
+      });
+      if (isHtmlResponse(response)) continue;
+      try {
+        const probe = (await response.clone().text()).slice(0, 500);
+        if (looksLikeHtmlText(probe)) continue;
+      } catch {
+        // Ignore probing errors and allow parser to handle.
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('Auth service is unreachable.');
+};
+
 if (typeof window !== 'undefined') {
   const runtimeApiBase = resolveApiBaseUrl();
   if (runtimeApiBase) {
@@ -2469,9 +2494,6 @@ const LoadingScreen = ({ releaseVersion: releaseVersionProp }: { releaseVersion?
           <h1 className="text-4xl font-black text-mairide-primary mt-4 tracking-tighter">
             {BRAND_NAME}
           </h1>
-          <p className="text-[10px] text-mairide-secondary mt-2 opacity-50">
-            {releaseVersion} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
-          </p>
         </div>
       </motion.div>
     </div>
@@ -3261,6 +3283,17 @@ const findUserProfileByPhone = async (value: string) => {
 
     try {
       const primaryResponse = await fetchWithOriginFailover(`/api/auth?action=${action}`, requestInit);
+      if (isHtmlResponse(primaryResponse)) {
+        return forceDirectAuthFetch(`/api/auth?action=${action}`, requestInit);
+      }
+      try {
+        const probe = (await primaryResponse.clone().text()).slice(0, 500);
+        if (looksLikeHtmlText(probe)) {
+          return forceDirectAuthFetch(`/api/auth?action=${action}`, requestInit);
+        }
+      } catch {
+        // Ignore probe errors here.
+      }
       if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath || !isLocalhostDev) {
         return primaryResponse;
       }
@@ -3270,7 +3303,11 @@ const findUserProfileByPhone = async (value: string) => {
       }
     }
 
-    return fetchWithOriginFailover(fallbackPath, requestInit);
+    const fallbackResponse = await fetchWithOriginFailover(fallbackPath, requestInit);
+    if (isHtmlResponse(fallbackResponse)) {
+      return forceDirectAuthFetch(`/api/auth?action=${action}`, requestInit);
+    }
+    return fallbackResponse;
   };
 
   const postAuthResolveAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
@@ -3285,6 +3322,17 @@ const findUserProfileByPhone = async (value: string) => {
 
     try {
       const primaryResponse = await fetchWithOriginFailover(`/api/auth?action=${action}`, requestInit);
+      if (isHtmlResponse(primaryResponse)) {
+        return forceDirectAuthFetch(`/api/auth?action=${action}`, requestInit);
+      }
+      try {
+        const probe = (await primaryResponse.clone().text()).slice(0, 500);
+        if (looksLikeHtmlText(probe)) {
+          return forceDirectAuthFetch(`/api/auth?action=${action}`, requestInit);
+        }
+      } catch {
+        // Ignore probe errors here.
+      }
       if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath || !isLocalhostDev) {
         return primaryResponse;
       }
@@ -3294,7 +3342,11 @@ const findUserProfileByPhone = async (value: string) => {
       }
     }
 
-    return fetchWithOriginFailover(fallbackPath, requestInit);
+    const fallbackResponse = await fetchWithOriginFailover(fallbackPath, requestInit);
+    if (isHtmlResponse(fallbackResponse)) {
+      return forceDirectAuthFetch(`/api/auth?action=${action}`, requestInit);
+    }
+    return fallbackResponse;
   };
 
   const resolvePhoneLoginClientSide = async (value: string) => {
