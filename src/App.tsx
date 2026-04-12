@@ -187,12 +187,21 @@ const isAndroidWebViewLikeRuntime = () => {
   return /android/.test(ua) && (/ wv|; wv|version\/\d+\.\d+ mobile/.test(ua) || protocol === 'capacitor:' || protocol === 'ionic:');
 };
 
-const buildOriginCandidates = () => {
+const buildOriginCandidates = (path?: string) => {
   if (typeof window === 'undefined') {
     return [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
   }
   const primary = resolveApiBaseUrl();
   const currentOrigin = String(window.location.origin || '');
+  const normalizedPath = String(path || '').toLowerCase();
+  const isAuthPath = normalizedPath.startsWith('/api/auth');
+
+  if (isAndroidWebViewLikeRuntime() && isAuthPath) {
+    // Android WebView auth is sensitive to host-level HTML fallbacks/challenges.
+    // Pin to API-capable public origins first.
+    return Array.from(new Set([WEB_API_ORIGIN_FAILOVER, WEB_API_ORIGIN_FALLBACK].filter(Boolean)));
+  }
+
   const appPreferred = isAndroidWebViewLikeRuntime()
     ? [WEB_API_ORIGIN_FAILOVER, WEB_API_ORIGIN_FALLBACK, currentOrigin, primary]
     : [currentOrigin, primary, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
@@ -212,7 +221,7 @@ const isHtmlResponse = (response: Response) => {
 };
 
 const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) => {
-  const origins = buildOriginCandidates();
+  const origins = buildOriginCandidates(path);
   let lastError: any = null;
 
   for (const origin of origins) {
