@@ -3204,7 +3204,7 @@ const AuthPage = ({
         && ['localhost', '127.0.0.1'].includes(String(window.location.hostname || '').toLowerCase());
 
     try {
-      const primaryResponse = await fetch(apiPath(`/api/health?action=${action}`), requestInit);
+      const primaryResponse = await fetch(apiPath(`/api/auth?action=${action}`), requestInit);
       if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath || !isLocalhostDev) {
         return primaryResponse;
       }
