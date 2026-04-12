@@ -2361,6 +2361,22 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
   const [androidUpdateMessage, setAndroidUpdateMessage] = useState('');
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
   const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
+  const getAndroidApkUrl = () => `https://www.mairide.in/downloads/mairide-android-download.apk?t=${Date.now()}`;
+
+  const openAndroidDownload = () => {
+    const apkUrl = getAndroidApkUrl();
+    const inStandalone =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(display-mode: standalone)')?.matches ||
+        (window.navigator as any)?.standalone === true);
+
+    if (inStandalone) {
+      window.open(apkUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    window.location.assign(apkUrl);
+  };
 
   useEffect(() => {
     if (typeof navigator === 'undefined') return;
@@ -2453,7 +2469,7 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
               <button
                 type="button"
                 onClick={isAndroidUpdateAvailable ? () => {
-                  window.location.assign(`/downloads/mairide-android-download.apk?t=${Date.now()}`);
+                  openAndroidDownload();
                 } : () => void checkAndroidUpdate()}
                 className={cn(
                   'w-full rounded-2xl px-4 py-3 text-sm font-bold transition',
@@ -2471,13 +2487,13 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
             </div>
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <a
-              href="/downloads/mairide-android-download.apk"
-              download="mairide-android.apk"
+            <button
+              type="button"
+              onClick={openAndroidDownload}
               className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
             >
               Get it on Android
-            </a>
+            </button>
             <a
               href="/downloads/ios.html"
               target="_blank"
