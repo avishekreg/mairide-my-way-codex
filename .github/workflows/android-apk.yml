@@ -176,14 +176,14 @@ jobs:
           fi
           echo "Using newly built APK: $APK_PATH"
           cp "$APK_PATH" release/mairide-android.apk
-          cp "$APK_PATH" public/downloads/mairide-android.apk
           APP_VERSION_BASE="${VITE_APP_VERSION}"
           APP_VERSION="${APP_VERSION_BASE}+build.${GITHUB_RUN_NUMBER}"
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          APK_PUBLIC_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/android-latest/mairide-android.apk"
           cat > public/downloads/android-update.json <<EOF
           {
             "appVersion": "${APP_VERSION}",
-            "apkUrl": "/downloads/mairide-android.apk",
+            "apkUrl": "${APK_PUBLIC_URL}",
             "buildSha": "${GITHUB_SHA}",
             "builtAt": "${NOW_UTC}"
           }
@@ -195,16 +195,28 @@ jobs:
           name: mairide-android-apk
           path: release/mairide-android.apk
 
+      - name: Publish APK to GitHub Release (android-latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: MaiRide Android Latest
+          body: |
+            Auto-published APK from CI run #${{ github.run_number }}.
+          prerelease: true
+          make_latest: false
+          files: release/mairide-android.apk
+          overwrite_files: true
+
       - name: Commit APK into repository
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/downloads/mairide-android.apk public/downloads/android-update.json
+          git add public/downloads/android-update.json
           if git diff --staged --quiet; then
-            echo "No APK changes to commit."
+            echo "No update metadata changes to commit."
             exit 0
           fi
-          git commit -m "chore: update android apk [skip ci]"
+          git commit -m "chore: update android release metadata [skip ci]"
           git push
 
       - name: Strict CI failure alert

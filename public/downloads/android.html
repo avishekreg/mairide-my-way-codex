@@ -46,17 +46,34 @@
       var apkDownload = document.getElementById('apk-download');
       var apkChrome = document.getElementById('apk-chrome');
       var status = document.getElementById('apk-status');
+      var SITE_ORIGIN = window.location.origin || 'https://www.mairide.in';
 
-      if (apkDownload) {
-        apkDownload.setAttribute('href', apkPath);
+      function applyApkUrl(url) {
+        if (!url) return;
+        apkPath = url;
+        if (apkDownload) {
+          apkDownload.setAttribute('href', apkPath);
+        }
+        if (apkChrome) {
+          var fallbackUrl = encodeURIComponent(apkPath);
+          var hostPath = apkPath.replace(/^https?:\/\//, '');
+          var intentUrl =
+            'intent://' + hostPath + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + fallbackUrl + ';end';
+          apkChrome.setAttribute('href', intentUrl);
+        }
       }
+      applyApkUrl(apkPath);
 
-      if (apkChrome) {
-        var fallbackUrl = encodeURIComponent('https://www.mairide.in/downloads/mairide-android.apk?t=' + Date.now());
-        var intentUrl =
-          'intent://www.mairide.in/downloads/mairide-android.apk#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + fallbackUrl + ';end';
-        apkChrome.setAttribute('href', intentUrl);
-      }
+      fetch(SITE_ORIGIN + '/downloads/android-update.json?t=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data || !data.apkUrl) return;
+          var rawUrl = String(data.apkUrl).trim();
+          if (!rawUrl) return;
+          var resolved = rawUrl.startsWith('http') ? rawUrl : (SITE_ORIGIN + rawUrl);
+          applyApkUrl(resolved);
+        })
+        .catch(function () { /* keep fallback */ });
 
       var params = new URLSearchParams(window.location.search);
       if (params.get('autostart') === '1') {
