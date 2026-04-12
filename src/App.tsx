@@ -2362,7 +2362,7 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
   const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
   const openAndroidDownload = () => {
-    window.location.assign(`/downloads/android.html?autostart=1&t=${Date.now()}`);
+    window.open(`https://www.mairide.in/downloads/android.html?autostart=1&t=${Date.now()}`, '_blank', 'noopener,noreferrer');
   };
 
   useEffect(() => {
@@ -2474,13 +2474,14 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
             </div>
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={openAndroidDownload}
+            <a
+              href="https://www.mairide.in/downloads/mairide-android-download.apk"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
             >
               Get it on Android
-            </button>
+            </a>
             <a
               href="/downloads/ios.html"
               target="_blank"
