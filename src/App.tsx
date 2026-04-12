@@ -140,6 +140,19 @@ type BeforeInstallPromptEvent = Event & {
 const deg2rad = (deg: number) => deg * (Math.PI / 180);
 
 const WEB_API_ORIGIN_FALLBACK = 'https://www.mairide.in';
+const UI_LANGUAGE_PROMPT_APP_SEEN_KEY = 'mairide_ui_language_prompt_seen_app';
+
+const isAppWebViewRuntime = () => {
+  if (typeof window === 'undefined') return false;
+  const protocol = String(window.location.protocol || '').toLowerCase();
+  const hostname = String(window.location.hostname || '').toLowerCase();
+  const port = String(window.location.port || '').trim();
+  return (
+    (protocol === 'http:' || protocol === 'https:')
+    && (hostname === 'localhost' || hostname === '127.0.0.1')
+    && !port
+  );
+};
 
 const resolveApiBaseUrl = () => {
   if (typeof window === 'undefined') return '';
@@ -1280,15 +1293,15 @@ const LanguageSwitcher = ({
         variant === 'auth' ? 'text-white' : 'text-mairide-primary',
         compact ? 'text-xs font-semibold' : 'text-sm font-semibold',
         variant === 'nav'
-          ? 'w-[132px] md:w-[158px] truncate'
+          ? 'w-[106px] md:w-[132px] truncate'
           : compact
-            ? 'w-[148px] md:w-[170px] truncate'
-            : 'w-[210px]'
+            ? 'w-[128px] md:w-[152px] truncate'
+            : 'w-[172px]'
       )}
     >
       {SUPPORTED_UI_LANGUAGES.map((option) => (
         <option key={option.value} value={option.value}>
-          {option.label} ({option.nativeLabel})
+          {option.nativeLabel}
         </option>
       ))}
     </select>
@@ -2507,10 +2520,10 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
             <a
-              href="https://www.mairide.in/downloads/mairide-android.apk"
+              href="/downloads/android.html?autostart=1"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+              className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition shadow-sm"
             >
               Get it on Android
             </a>
@@ -16860,7 +16873,9 @@ const App = () => {
     if (typeof window === 'undefined' || user) return;
     const languageSaved = Boolean(safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY));
     const promptSeen = safeStorageGet('local', UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
-    if (languageSaved && promptSeen) {
+    const appPromptSeen = safeStorageGet('local', UI_LANGUAGE_PROMPT_APP_SEEN_KEY) === '1';
+    const shouldForcePromptForApp = isAppWebViewRuntime() && !appPromptSeen;
+    if (languageSaved && promptSeen && !shouldForcePromptForApp) {
       setShowLanguagePrompt(false);
       return;
     }
@@ -16949,6 +16964,9 @@ const App = () => {
     setUiLanguage(normalized);
     safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, normalized);
     safeStorageSet('local', UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
+    if (isAppWebViewRuntime()) {
+      safeStorageSet('local', UI_LANGUAGE_PROMPT_APP_SEEN_KEY, '1');
+    }
     setShowLanguagePrompt(false);
     void ensureGoogleTranslateScriptLoaded().then(() => {
       window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 40);
@@ -17024,7 +17042,7 @@ const App = () => {
           />
         </div>
         <AppFooter releaseVersion={releaseVersion} />
-        <div className="fixed right-4 top-4 z-[70]">
+        <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
           <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
         </div>
         <div id="google_translate_element" className="hidden" />
@@ -17093,7 +17111,7 @@ const App = () => {
       <ErrorBoundary>
         {profile.forcePasswordChange && <ForcePasswordChangeModal profile={profile} />}
         <div className="min-h-screen bg-mairide-bg flex flex-col">
-          <div className="fixed right-4 top-4 z-[70]">
+          <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
             <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact />
           </div>
           <div id="google_translate_element" className="hidden" />

@@ -25,6 +25,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Clean previous Android wrapper and APK artifacts
+        run: |
+          rm -rf android
+          rm -f public/downloads/mairide-android.apk
+          rm -rf release
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -100,7 +106,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --stacktrace --info
 
       - name: Verify APK uses production Supabase
         run: |
