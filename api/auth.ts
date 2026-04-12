@@ -812,15 +812,28 @@ export async function handleResolvePhoneLogin(req: any, res: any) {
   try {
     const { data, error } = await supabaseAdmin
       .from("users")
-      .select("*")
-      .in("phone_number", variants)
-      .limit(1);
+      .select("id,role,email,phone_number,data")
+      .limit(5000);
 
     if (error) {
       throw error;
     }
 
-    const profile = data?.[0];
+    const normalizedVariants = new Set(variants.map((value) => normalizePhone(value)));
+    const profile = (data || []).find((row: any) => {
+      const rowData = (row?.data as Record<string, any>) || {};
+      const storedDigits = normalizePhone(row?.phone_number || rowData.phoneNumber || "");
+      if (!storedDigits) return false;
+      const tail = storedDigits.slice(-10);
+      return (
+        normalizedVariants.has(storedDigits) ||
+        normalizedVariants.has(tail) ||
+        Array.from(normalizedVariants).some(
+          (candidate) => storedDigits.endsWith(candidate) || candidate.endsWith(storedDigits)
+        )
+      );
+    });
+
     if (!profile) {
       return res.status(404).json({ error: "NOT_REGISTERED" });
     }
