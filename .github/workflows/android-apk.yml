@@ -107,6 +107,7 @@ jobs:
         id: build_apk
         continue-on-error: true
         run: |
+          set -o pipefail
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
