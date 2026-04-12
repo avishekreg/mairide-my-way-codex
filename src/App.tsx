@@ -1951,7 +1951,7 @@ const sendBrowserNotification = async (
     new Notification(title, {
       body,
       tag: options?.tag,
-      icon: '/icons/icon-192.svg',
+      icon: '/icons/icon-192.png',
     });
     return true;
   } catch {

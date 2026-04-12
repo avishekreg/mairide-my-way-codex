@@ -89,6 +89,22 @@ jobs:
       - name: Sync Android platform
         run: npx cap sync android
 
+      - name: Apply MaiRide launcher icon
+        run: |
+          ICON_SRC="public/icons/icon-512.png"
+          if [ ! -f "$ICON_SRC" ]; then
+            echo "Missing launcher icon source: $ICON_SRC"
+            exit 1
+          fi
+          # Prefer bitmap launcher icon to avoid adaptive-icon defaults.
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p "android/app/src/main/res/mipmap-$d"
+            cp "$ICON_SRC" "android/app/src/main/res/mipmap-$d/ic_launcher.png"
+            cp "$ICON_SRC" "android/app/src/main/res/mipmap-$d/ic_launcher_round.png"
+          done
+
       - name: Patch Gradle Kotlin dependency conflicts
         run: |
           cat >> android/build.gradle <<'EOF'
