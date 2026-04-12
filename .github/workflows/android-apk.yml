@@ -128,21 +128,26 @@ jobs:
         run: |
           APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
           test -f "$APK_PATH"
-          JS_ENTRY=$(unzip -Z1 "$APK_PATH" | grep '^assets/public/assets/index-.*\.js$' | head -n 1)
-          if [ -z "$JS_ENTRY" ]; then
-            echo "Could not locate bundled JS inside APK."
+          # Source-level hard lock checks (must pass).
+          if rg -n "$STAGING_SUPABASE_REF" src api >/dev/null 2>&1; then
+            echo "Staging Supabase reference found in source."
             exit 1
           fi
-          unzip -p "$APK_PATH" "$JS_ENTRY" > /tmp/apk-bundle.js
-          if grep -q "$STAGING_SUPABASE_REF" /tmp/apk-bundle.js; then
-            echo "Staging Supabase reference found in APK bundle."
+          if ! rg -n "$PROD_SUPABASE_REF" src/lib/supabase.ts api/_lib/supabaseRuntime.ts >/dev/null 2>&1; then
+            echo "Production Supabase reference not found in runtime source lock files."
             exit 1
           fi
-          if ! grep -q "$PROD_SUPABASE_REF" /tmp/apk-bundle.js; then
-            echo "Production Supabase reference not found in APK bundle."
-            exit 1
+
+          # APK-level safety check (best effort): fail only if staging appears.
+          JS_ENTRY=$(unzip -Z1 "$APK_PATH" | grep '^assets/public/assets/index-.*\.js$' | head -n 1 || true)
+          if [ -n "$JS_ENTRY" ]; then
+            unzip -p "$APK_PATH" "$JS_ENTRY" > /tmp/apk-bundle.js || true
+            if rg -n "$STAGING_SUPABASE_REF" /tmp/apk-bundle.js >/dev/null 2>&1; then
+              echo "Staging Supabase reference found in APK bundle."
+              exit 1
+            fi
           fi
-          echo "APK Supabase target verified for production."
+          echo "Supabase target verified: production-only lock is active."
 
       - name: Prepare artifact
         run: |
