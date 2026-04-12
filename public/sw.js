@@ -1,4 +1,4 @@
-const CACHE_NAME = "mairide-shell-v3";
+const CACHE_NAME = "mairide-shell-v4";
 const SHELL_FILES = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.svg", "/icons/icon-512.svg"];
 
 self.addEventListener("install", (event) => {
