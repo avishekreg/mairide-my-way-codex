@@ -144,7 +144,16 @@ const WEB_API_ORIGIN_FALLBACK = 'https://www.mairide.in';
 const resolveApiBaseUrl = () => {
   if (typeof window === 'undefined') return '';
   const protocol = String(window.location.protocol || '').toLowerCase();
-  if (protocol === 'http:' || protocol === 'https:') return '';
+  const hostname = String(window.location.hostname || '').toLowerCase();
+  const port = String(window.location.port || '').trim();
+  const isWebViewLocalhost =
+    (protocol === 'http:' || protocol === 'https:') &&
+    (hostname === 'localhost' || hostname === '127.0.0.1') &&
+    !port;
+
+  // Capacitor WebView commonly runs as https://localhost (no port) on device.
+  // In that case force API traffic to production web origin.
+  if (!isWebViewLocalhost && (protocol === 'http:' || protocol === 'https:')) return '';
   return WEB_API_ORIGIN_FALLBACK;
 };
 
@@ -934,7 +943,7 @@ const BRAND_NAME = "MaiRide my way";
 const BRAND_TAGLINE = "";
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v2.0.1-beta';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v3.0.1-beta';
 const APP_NAV_HOME_EVENT = 'mairide:navigate-home';
 const APP_NAV_TAB_EVENT = 'mairide:navigate-tab';
 const APP_DIALOG_EVENT = 'mairide:dialog';
@@ -2493,7 +2502,7 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
             <a
-              href="https://www.mairide.in/downloads/mairide-android-download.apk"
+              href="https://www.mairide.in/downloads/mairide-android.apk"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
@@ -16490,7 +16499,7 @@ const App = () => {
   }>({
     available: false,
     latestVersion: '',
-    apkUrl: '/downloads/mairide-android-download.apk',
+    apkUrl: '/downloads/mairide-android.apk',
   });
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
   const [remoteAppVersion, setRemoteAppVersion] = useState('');
@@ -16893,7 +16902,7 @@ const App = () => {
         if (!response.ok) return;
         const data = await response.json();
         const latestVersion = String(data?.appVersion || '').trim();
-        const apkUrl = String(data?.apkUrl || '/downloads/mairide-android-download.apk').trim() || '/downloads/mairide-android-download.apk';
+        const apkUrl = String(data?.apkUrl || '/downloads/mairide-android.apk').trim() || '/downloads/mairide-android.apk';
         if (!latestVersion) return;
         const needsUpdate = latestVersion !== releaseVersion;
         if (!active) return;
@@ -16945,7 +16954,7 @@ const App = () => {
   };
 
   const handleApplyAndroidUpdate = () => {
-    window.location.href = androidUpdateState.apkUrl || '/downloads/mairide-android-download.apk';
+    window.location.href = androidUpdateState.apkUrl || '/downloads/mairide-android.apk';
   };
 
   const androidUpdatePrompt = showAndroidUpdatePrompt && androidUpdateState.available ? (
