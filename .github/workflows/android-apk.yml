@@ -127,8 +127,13 @@ jobs:
 
       - name: Verify production Supabase source lock
         run: |
-          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK_PATH"
+          APK_PATH="$(find android/app/build/outputs/apk -type f -name '*.apk' | head -n 1)"
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK produced by Gradle."
+            find android/app/build/outputs -maxdepth 5 -type f || true
+            exit 1
+          fi
+          echo "Detected APK path: $APK_PATH"
 
           # Hard fail if staging reference appears in runtime source.
           if grep -R "$STAGING_SUPABASE_REF" src api >/dev/null 2>&1; then
@@ -148,9 +153,14 @@ jobs:
 
       - name: Prepare artifact
         run: |
+          APK_PATH="$(find android/app/build/outputs/apk -type f -name '*.apk' | head -n 1)"
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK file found for artifact packaging."
+            exit 1
+          fi
           mkdir -p release public/downloads
-          cp android/app/build/outputs/apk/debug/app-debug.apk release/mairide-android.apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk public/downloads/mairide-android.apk
+          cp "$APK_PATH" release/mairide-android.apk
+          cp "$APK_PATH" public/downloads/mairide-android.apk
           APP_VERSION=${VITE_APP_VERSION}
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cat > public/downloads/android-update.json <<EOF
