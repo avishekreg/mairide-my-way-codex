@@ -28,7 +28,6 @@ jobs:
       - name: Clean previous Android wrapper and APK artifacts
         run: |
           rm -rf android
-          rm -f public/downloads/mairide-android.apk
           rm -rf release
 
       - name: Setup Node
@@ -126,7 +125,7 @@ jobs:
 
       - name: Prepare artifact
         run: |
-          APK_PATH="$(find android/app/build/outputs/apk -type f -name '*.apk' | head -n 1)"
+          APK_PATH="$(find android -type f -path '*/outputs/apk/*.apk' | head -n 1)"
           mkdir -p release public/downloads
           if [ -n "$APK_PATH" ]; then
             echo "Using newly built APK: $APK_PATH"
