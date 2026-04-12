@@ -1,6 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
+function applyCorsHeaders(req: any, res: any) {
+  const requestOrigin = String(req?.headers?.origin || "").trim();
+  const allowOrigin = requestOrigin || "*";
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Max-Age", "86400");
+}
+
 function getSupabaseAdmin(req?: any) {
   const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig(req);
 
@@ -61,6 +71,12 @@ function buildPhoneVariants(phoneNumber: unknown) {
 }
 
 export default async function handler(req: any, res: any) {
+  applyCorsHeaders(req, res);
+
+  if (String(req?.method || "").toUpperCase() === "OPTIONS") {
+    return res.status(204).end();
+  }
+
   try {
     const action = Array.isArray(req.query?.action) ? req.query.action[0] : req.query?.action;
     if (action === "app-version") {

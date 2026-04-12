@@ -139,6 +139,24 @@ type BeforeInstallPromptEvent = Event & {
 
 const deg2rad = (deg: number) => deg * (Math.PI / 180);
 
+const WEB_API_ORIGIN_FALLBACK = 'https://www.mairide.in';
+
+const resolveApiBaseUrl = () => {
+  if (typeof window === 'undefined') return '';
+  const protocol = String(window.location.protocol || '').toLowerCase();
+  if (protocol === 'http:' || protocol === 'https:') return '';
+  return WEB_API_ORIGIN_FALLBACK;
+};
+
+const apiPath = (path: string) => `${resolveApiBaseUrl()}${path}`;
+
+if (typeof window !== 'undefined') {
+  const runtimeApiBase = resolveApiBaseUrl();
+  if (runtimeApiBase) {
+    axios.defaults.baseURL = runtimeApiBase;
+  }
+}
+
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371; // Radius of the earth in km
   const dLat = deg2rad(lat2 - lat1);
@@ -2374,7 +2392,7 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
     if (!isAndroidDevice) return;
     setIsCheckingAndroidUpdate(true);
     try {
-      const response = await fetch(`/downloads/android-update.json?t=${Date.now()}`, { cache: 'no-store' });
+      const response = await fetch(apiPath(`/downloads/android-update.json?t=${Date.now()}`), { cache: 'no-store' });
       if (!response.ok) {
         setAndroidUpdateMessage('Could not check update right now. Please try again.');
         return;
@@ -3132,7 +3150,7 @@ const AuthPage = ({
     };
 
     try {
-      const primaryResponse = await fetch(`/api/auth?action=${action}`, requestInit);
+      const primaryResponse = await fetch(apiPath(`/api/auth?action=${action}`), requestInit);
       if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath) {
         return primaryResponse;
       }
@@ -3142,7 +3160,7 @@ const AuthPage = ({
       }
     }
 
-    return fetch(fallbackPath, requestInit);
+    return fetch(apiPath(fallbackPath), requestInit);
   };
 
   const postAuthResolveAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
@@ -3153,7 +3171,7 @@ const AuthPage = ({
     };
 
     try {
-      const primaryResponse = await fetch(`/api/health?action=${action}`, requestInit);
+      const primaryResponse = await fetch(apiPath(`/api/health?action=${action}`), requestInit);
       if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath) {
         return primaryResponse;
       }
@@ -3163,7 +3181,7 @@ const AuthPage = ({
       }
     }
 
-    return fetch(fallbackPath, requestInit);
+    return fetch(apiPath(fallbackPath), requestInit);
   };
 
   const resolvePhoneLoginClientSide = async (value: string) => {
@@ -16482,7 +16500,7 @@ const App = () => {
     let active = true;
     const loadRemoteVersion = async () => {
       try {
-        const response = await fetch('/api/health?action=app-version', { cache: 'no-store' });
+        const response = await fetch(apiPath('/api/health?action=app-version'), { cache: 'no-store' });
         if (!response.ok) return;
         const data = await response.json();
         if (!active) return;
@@ -16871,7 +16889,7 @@ const App = () => {
     let active = true;
     const checkForAndroidUpdate = async () => {
       try {
-        const response = await fetch(`/downloads/android-update.json?t=${Date.now()}`, { cache: 'no-store' });
+        const response = await fetch(apiPath(`/downloads/android-update.json?t=${Date.now()}`), { cache: 'no-store' });
         if (!response.ok) return;
         const data = await response.json();
         const latestVersion = String(data?.appVersion || '').trim();

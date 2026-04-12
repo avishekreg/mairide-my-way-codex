@@ -35,6 +35,16 @@ const inMemorySmsOtpSessions = new Map<string, {
   purpose: "login" | "password_reset";
 }>();
 
+function applyCorsHeaders(req: any, res: any) {
+  const requestOrigin = String(req?.headers?.origin || "").trim();
+  const allowOrigin = requestOrigin || "*";
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Max-Age", "86400");
+}
+
 function getSupabaseAdmin() {
   const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig();
 
@@ -1052,6 +1062,12 @@ const handlers: Record<string, (req: any, res: any) => Promise<any> | any> = {
 };
 
 export default async function handler(req: any, res: any) {
+  applyCorsHeaders(req, res);
+
+  if (String(req?.method || "").toUpperCase() === "OPTIONS") {
+    return res.status(204).end();
+  }
+
   const action = getAction(req);
   const routeHandler = handlers[action];
 
