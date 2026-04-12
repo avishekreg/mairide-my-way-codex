@@ -140,6 +140,7 @@ type BeforeInstallPromptEvent = Event & {
 const deg2rad = (deg: number) => deg * (Math.PI / 180);
 
 const WEB_API_ORIGIN_FALLBACK = 'https://www.mairide.in';
+const WEB_API_ORIGIN_FAILOVER = 'https://mairide-my-way-codex.vercel.app';
 const UI_LANGUAGE_PROMPT_APP_SEEN_KEY = 'mairide_ui_language_prompt_seen_app';
 
 const isAppWebViewRuntime = () => {
@@ -180,6 +181,34 @@ const resolveApiBaseUrl = () => {
 };
 
 const apiPath = (path: string) => `${resolveApiBaseUrl()}${path}`;
+
+const buildOriginCandidates = () => {
+  if (typeof window === 'undefined') {
+    return [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
+  }
+  const primary = resolveApiBaseUrl();
+  const currentOrigin = String(window.location.origin || '');
+  return Array.from(
+    new Set([primary, currentOrigin, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER].filter(Boolean))
+  );
+};
+
+const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) => {
+  const origins = buildOriginCandidates();
+  let lastError: any = null;
+
+  for (const origin of origins) {
+    const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+    const targetUrl = `${normalizedOrigin}${path}`;
+    try {
+      return await fetch(targetUrl, requestInit);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Failed to reach authentication service.');
+};
 
 if (typeof window !== 'undefined') {
   const runtimeApiBase = resolveApiBaseUrl();
@@ -3184,7 +3213,7 @@ const AuthPage = ({
         && ['localhost', '127.0.0.1'].includes(String(window.location.hostname || '').toLowerCase());
 
     try {
-      const primaryResponse = await fetch(apiPath(`/api/auth?action=${action}`), requestInit);
+      const primaryResponse = await fetchWithOriginFailover(`/api/auth?action=${action}`, requestInit);
       if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath || !isLocalhostDev) {
         return primaryResponse;
       }
@@ -3194,7 +3223,7 @@ const AuthPage = ({
       }
     }
 
-    return fetch(apiPath(fallbackPath), requestInit);
+    return fetchWithOriginFailover(fallbackPath, requestInit);
   };
 
   const postAuthResolveAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
@@ -3208,7 +3237,7 @@ const AuthPage = ({
         && ['localhost', '127.0.0.1'].includes(String(window.location.hostname || '').toLowerCase());
 
     try {
-      const primaryResponse = await fetch(apiPath(`/api/auth?action=${action}`), requestInit);
+      const primaryResponse = await fetchWithOriginFailover(`/api/auth?action=${action}`, requestInit);
       if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath || !isLocalhostDev) {
         return primaryResponse;
       }
@@ -3218,7 +3247,7 @@ const AuthPage = ({
       }
     }
 
-    return fetch(apiPath(fallbackPath), requestInit);
+    return fetchWithOriginFailover(fallbackPath, requestInit);
   };
 
   const resolvePhoneLoginClientSide = async (value: string) => {
