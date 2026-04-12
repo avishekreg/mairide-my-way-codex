@@ -172,9 +172,7 @@ const resolveApiBaseUrl = () => {
   }
 
   if (isHttpLike) {
-    // Root domain frequently redirects to www. Force canonical host in app/client calls
-    // to avoid cross-origin redirect edge-cases during OTP/login fetches.
-    if (hostname === 'mairide.in') return WEB_API_ORIGIN_FALLBACK;
+    // Use same-origin for live web/app runtime to avoid CORS and redirect edge-cases.
     return '';
   }
   return WEB_API_ORIGIN_FALLBACK;
@@ -189,8 +187,13 @@ const buildOriginCandidates = () => {
   const primary = resolveApiBaseUrl();
   const currentOrigin = String(window.location.origin || '');
   return Array.from(
-    new Set([primary, currentOrigin, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER].filter(Boolean))
+    new Set([currentOrigin, primary, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER].filter(Boolean))
   );
+};
+
+const isHtmlResponse = (response: Response) => {
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  return contentType.includes('text/html');
 };
 
 const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) => {
@@ -201,7 +204,13 @@ const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) =
     const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
     const targetUrl = `${normalizedOrigin}${path}`;
     try {
-      return await fetch(targetUrl, requestInit);
+      const response = await fetch(targetUrl, requestInit);
+      if (isHtmlResponse(response) && requestInit.method?.toUpperCase() === 'POST') {
+        // Some mobile runtimes can receive an HTML fallback page for one origin.
+        // Skip and continue with the next API origin candidate.
+        continue;
+      }
+      return response;
     } catch (error) {
       lastError = error;
     }
@@ -3163,7 +3172,7 @@ const findUserProfileByPhone = async (value: string) => {
   } as UserProfile;
 };
 
-const AuthPage = ({ 
+  const AuthPage = ({ 
   user, 
   authMode, 
   setAuthMode, 
@@ -3201,6 +3210,10 @@ const AuthPage = ({
   const maskedOtpPhone = maskPhoneNumber(phoneNumber || username);
   const normalizedSignupPhone = toIndianPhoneStorage(phoneNumber);
   const normalizedSignupEmail = normalizeEmailValue(email);
+  const isAndroidWebViewRuntime =
+    typeof navigator !== 'undefined'
+    && /android/i.test(String(navigator.userAgent || ''))
+    && (/ wv|; wv|version\/\d+\.\d+ mobile/i.test(String(navigator.userAgent || '')) || String(window?.location?.protocol || '').toLowerCase() === 'capacitor:');
 
   const postAuthAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
     const requestInit: RequestInit = {
@@ -3651,6 +3664,33 @@ const AuthPage = ({
         }
       } else {
         // Email/Password Login
+        if (isAndroidWebViewRuntime) {
+          const fallbackResponse = await postAuthAction(
+            'password-login',
+            { email: normalizeEmailValue(normalizedUsername), password },
+            '/api/auth/password-login'
+          );
+          const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
+          const accessToken = String(fallbackData?.session?.access_token || '');
+          const refreshToken = String(fallbackData?.session?.refresh_token || '');
+
+          if (!accessToken || !refreshToken) {
+            throw new Error('Login session could not be established.');
+          }
+
+          const { error: setSessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (setSessionError) {
+            throw new Error(setSessionError.message || 'Failed to set login session.');
+          }
+
+          window.location.reload();
+          return;
+        }
+
         try {
           const result = await signInWithEmailAndPassword(auth, normalizeEmailValue(normalizedUsername), password);
           await handleProfileSetup(result.user, undefined, undefined, false);
