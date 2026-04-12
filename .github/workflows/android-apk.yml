@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   build-apk:
@@ -35,7 +36,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Setup Java
@@ -176,7 +177,8 @@ jobs:
           echo "Using newly built APK: $APK_PATH"
           cp "$APK_PATH" release/mairide-android.apk
           cp "$APK_PATH" public/downloads/mairide-android.apk
-          APP_VERSION=${VITE_APP_VERSION}
+          APP_VERSION_BASE="${VITE_APP_VERSION}"
+          APP_VERSION="${APP_VERSION_BASE}+build.${GITHUB_RUN_NUMBER}"
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cat > public/downloads/android-update.json <<EOF
           {
@@ -204,3 +206,48 @@ jobs:
           fi
           git commit -m "chore: update android apk [skip ci]"
           git push
+
+      - name: Strict CI failure alert
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = "[CI ALERT] Android APK build failed";
+            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              "Android APK build failed on main.",
+              "",
+              `- Branch: \`${context.ref}\``,
+              `- Commit: \`${context.sha}\``,
+              `- Run: ${runUrl}`,
+              "",
+              "Please investigate immediately before release."
+            ].join("\n");
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              labels: "ci-alert",
+              per_page: 50
+            });
+
+            const existing = issues.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: ["ci-alert"]
+              });
+            }
