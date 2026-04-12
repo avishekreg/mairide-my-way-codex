@@ -125,7 +125,7 @@ jobs:
 
       - name: Prepare artifact
         run: |
-          APK_PATH="$(find android -type f -path '*/outputs/apk/*.apk' | head -n 1)"
+          APK_PATH="$(find android -type f -name '*.apk' | grep '/outputs/apk/' | head -n 1)"
           mkdir -p release public/downloads
           if [ -n "$APK_PATH" ]; then
             echo "Using newly built APK: $APK_PATH"
