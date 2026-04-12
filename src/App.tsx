@@ -3135,21 +3135,45 @@ const AuthPage = ({
   const normalizedSignupEmail = normalizeEmailValue(email);
 
   const postAuthAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
-    const primaryResponse = await fetch(`/api/auth?action=${action}`, {
+    const requestInit: RequestInit = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    });
+    };
 
-    if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath) {
-      return primaryResponse;
+    try {
+      const primaryResponse = await fetch(`/api/auth?action=${action}`, requestInit);
+      if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath) {
+        return primaryResponse;
+      }
+    } catch {
+      if (!fallbackPath) {
+        throw new Error(`Unable to reach authentication service for ${action}.`);
+      }
     }
 
-    return fetch(fallbackPath, {
+    return fetch(fallbackPath, requestInit);
+  };
+
+  const postAuthResolveAction = async (action: string, payload: Record<string, any>, fallbackPath?: string) => {
+    const requestInit: RequestInit = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    });
+    };
+
+    try {
+      const primaryResponse = await fetch(`/api/health?action=${action}`, requestInit);
+      if ((primaryResponse.status !== 404 && primaryResponse.status !== 405) || !fallbackPath) {
+        return primaryResponse;
+      }
+    } catch {
+      if (!fallbackPath) {
+        throw new Error(`Unable to reach resolve service for ${action}.`);
+      }
+    }
+
+    return fetch(fallbackPath, requestInit);
   };
 
   const resolvePhoneLoginClientSide = async (value: string) => {
@@ -3386,11 +3410,11 @@ const AuthPage = ({
         } else if (authMode === 'login') {
           let existingProfile: { uid: string; role: string; email: string; phoneNumber: string } | null = null;
           try {
-            const resolveResponse = await fetch('/api/health?action=resolve-phone-login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ phoneNumber: phoneNumber || username }),
-            });
+            const resolveResponse = await postAuthResolveAction(
+              'resolve-phone-login',
+              { phoneNumber: phoneNumber || username },
+              '/api/auth/resolve-phone-login'
+            );
             existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
           } catch (error: any) {
             console.warn('Server-side phone login resolve failed; trying client-side fallback.', error);
