@@ -114,14 +114,35 @@ jobs:
             configurations.all {
               exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7"
               exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"
-              resolutionStrategy.eachDependency { details ->
-                if (details.requested.group == "org.jetbrains.kotlin") {
-                  if (details.requested.name == "kotlin-stdlib-jdk7" || details.requested.name == "kotlin-stdlib-jdk8") {
-                    details.useTarget "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
+              resolutionStrategy.force(
+                "org.jetbrains.kotlin:kotlin-stdlib:1.8.22",
+                "org.jetbrains.kotlin:kotlin-stdlib-common:1.8.22"
+              )
+              resolutionStrategy.eachDependency { d ->
+                if (d.requested.group == "org.jetbrains.kotlin") {
+                  if (d.requested.name == "kotlin-stdlib-jdk7" || d.requested.name == "kotlin-stdlib-jdk8") {
+                    d.useTarget "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
+                    d.because("Avoid duplicate Kotlin stdlib classes in Android debug build")
+                  } else if (d.requested.name == "kotlin-stdlib-common") {
+                    d.useVersion "1.8.22"
+                  } else if (d.requested.name == "kotlin-stdlib") {
+                    d.useVersion "1.8.22"
                   }
                 }
               }
             }
+          }
+          EOF
+
+          cat >> android/app/build.gradle <<'EOF'
+
+          configurations.configureEach {
+            exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7"
+            exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"
+          }
+
+          dependencies {
+            implementation("org.jetbrains.kotlin:kotlin-stdlib:1.8.22")
           }
           EOF
 
@@ -179,7 +200,7 @@ jobs:
           APP_VERSION_BASE="${VITE_APP_VERSION}"
           APP_VERSION="${APP_VERSION_BASE}+build.${GITHUB_RUN_NUMBER}"
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          APK_PUBLIC_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/android-latest/mairide-android.apk"
+          APK_PUBLIC_URL="https://www.mairide.in/downloads/mairide-android.apk"
           cat > public/downloads/android-update.json <<EOF
           {
             "appVersion": "${APP_VERSION}",
@@ -221,7 +242,7 @@ jobs:
 
       - name: Strict CI failure alert
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const owner = context.repo.owner;
