@@ -122,6 +122,32 @@ export async function getUserProfile(uid: string) {
   return data;
 }
 
+async function getUserProfileByEmail(email: string) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized) return null;
+  const { data, error } = await getSupabaseAdmin()
+    .from("users")
+    .select("*")
+    .ilike("email", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+async function getUserProfileByPhone(phone: string) {
+  const normalized = String(phone || "").trim();
+  if (!normalized) return null;
+  const { data, error } = await getSupabaseAdmin()
+    .from("users")
+    .select("*")
+    .eq("phone_number", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
 async function findAuthUser(uid: string, email?: string | null) {
   const supabaseAdmin = getSupabaseAdmin();
 
@@ -852,6 +878,20 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
           actorProfile: profileFromToken,
         };
       }
+      const emailFallback = await getUserProfileByEmail(user.email || "");
+      if (emailFallback) {
+        return {
+          actorId: user.id,
+          actorProfile: emailFallback,
+        };
+      }
+      const phoneFallback = await getUserProfileByPhone(user.phone || "");
+      if (phoneFallback) {
+        return {
+          actorId: user.id,
+          actorProfile: phoneFallback,
+        };
+      }
       if (payloadId) {
         const profileFromPayload = await getUserProfile(payloadId);
         if (profileFromPayload) {
@@ -1063,6 +1103,20 @@ export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike
         return {
           actorId: user.id,
           actorProfile: profileFromToken,
+        };
+      }
+      const emailFallback = await getUserProfileByEmail(user.email || "");
+      if (emailFallback) {
+        return {
+          actorId: user.id,
+          actorProfile: emailFallback,
+        };
+      }
+      const phoneFallback = await getUserProfileByPhone(user.phone || "");
+      if (phoneFallback) {
+        return {
+          actorId: user.id,
+          actorProfile: phoneFallback,
         };
       }
       if (payloadId) {

@@ -8812,14 +8812,13 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
     setIsPostingRequest(true);
     try {
-      const resolvedOriginLocation = requestOriginLocation || userLocation || await geocodeAddress(origin);
-      const resolvedDestinationLocation = requestDestinationLocation || await geocodeAddress(destination);
+      const profileLocation = profile.location || null;
+      const resolvedOriginLocation =
+        requestOriginLocation || userLocation || profileLocation || await geocodeAddress(origin);
+      const resolvedDestinationLocation =
+        requestDestinationLocation || await geocodeAddress(destination) || resolvedOriginLocation;
       if (!resolvedOriginLocation) {
         alert('Please allow location access or select a valid origin from suggestions.');
-        return;
-      }
-      if (!resolvedDestinationLocation) {
-        alert('Please select a valid destination from suggestions.');
         return;
       }
 
@@ -10650,16 +10649,14 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
     setIsPostingRide(true);
     try {
-      const resolvedOriginLocation = originLocation || userLocation || await geocodeAddress(origin);
-      const resolvedDestinationLocation = destinationLocation || await geocodeAddress(destination);
+      const profileLocation = profile.location || null;
+      const resolvedOriginLocation =
+        originLocation || userLocation || profileLocation || await geocodeAddress(origin);
+      const resolvedDestinationLocation =
+        destinationLocation || await geocodeAddress(destination) || resolvedOriginLocation;
 
       if (!resolvedOriginLocation) {
         alert('Please allow location access or select a valid origin from the suggestions.');
-        return;
-      }
-
-      if (!resolvedDestinationLocation) {
-        alert('Please select a valid destination from the suggestions.');
         return;
       }
 
