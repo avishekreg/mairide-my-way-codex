@@ -2085,6 +2085,11 @@ const getAccessToken = async () => {
   return token;
 };
 
+const getSessionUserId = async () => {
+  const session = (await supabase.auth.getSession()).data.session;
+  return session?.user?.id || '';
+};
+
 const getAdminRequestHeaders = async (adminEmail?: string | null) => {
   const token = await getAccessToken();
   return {
@@ -8818,7 +8823,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         return;
       }
 
-      const resolvedConsumerId = profile.uid || auth.currentUser?.uid || '';
+      const resolvedConsumerId =
+        profile.uid || auth.currentUser?.uid || (await getSessionUserId()) || '';
       const resolvedConsumerName =
         profile.displayName || auth.currentUser?.displayName || profile.email || auth.currentUser?.email || 'Traveler';
 
@@ -10657,7 +10663,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         return;
       }
 
-      const resolvedDriverId = profile.uid || auth.currentUser?.uid || '';
+      const resolvedDriverId =
+        profile.uid || auth.currentUser?.uid || (await getSessionUserId()) || '';
       if (!resolvedDriverId) {
         throw new Error('Unable to resolve authenticated driver identity. Please sign in again and retry.');
       }
