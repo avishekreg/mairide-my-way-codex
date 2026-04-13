@@ -92,19 +92,25 @@ jobs:
 
       - name: Apply MaiRide launcher icon
         run: |
-          ICON_SRC="public/icons/icon-512.png"
+          ICON_SRC="public/logo.png"
           if [ ! -f "$ICON_SRC" ]; then
             echo "Missing launcher icon source: $ICON_SRC"
             exit 1
           fi
-          # Prefer bitmap launcher icon to avoid adaptive-icon defaults.
+          # Prefer bitmap launcher icon from a single canonical source to avoid icon drift.
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
-          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            mkdir -p "android/app/src/main/res/mipmap-$d"
-            cp "$ICON_SRC" "android/app/src/main/res/mipmap-$d/ic_launcher.png"
-            cp "$ICON_SRC" "android/app/src/main/res/mipmap-$d/ic_launcher_round.png"
-          done
+          mkdir -p android/app/src/main/res/mipmap-mdpi android/app/src/main/res/mipmap-hdpi android/app/src/main/res/mipmap-xhdpi android/app/src/main/res/mipmap-xxhdpi android/app/src/main/res/mipmap-xxxhdpi
+          sips -z 48 48   "$ICON_SRC" --out android/app/src/main/res/mipmap-mdpi/ic_launcher.png >/dev/null
+          sips -z 72 72   "$ICON_SRC" --out android/app/src/main/res/mipmap-hdpi/ic_launcher.png >/dev/null
+          sips -z 96 96   "$ICON_SRC" --out android/app/src/main/res/mipmap-xhdpi/ic_launcher.png >/dev/null
+          sips -z 144 144 "$ICON_SRC" --out android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png >/dev/null
+          sips -z 192 192 "$ICON_SRC" --out android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png >/dev/null
+          cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
 
       - name: Patch Gradle Kotlin dependency conflicts
         run: |
