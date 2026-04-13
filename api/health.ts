@@ -78,7 +78,18 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const action = Array.isArray(req.query?.action) ? req.query.action[0] : req.query?.action;
+    let action = Array.isArray(req.query?.action) ? req.query.action[0] : req.query?.action;
+    if (!action && req?.url) {
+      try {
+        const parsed = new URL(req.url, "http://localhost");
+        action = parsed.searchParams.get("action") || "";
+        if (!action && parsed.pathname.endsWith("/build-stamp")) action = "build-stamp";
+        if (!action && parsed.pathname.endsWith("/app-version")) action = "app-version";
+        if (!action && parsed.pathname.endsWith("/ping")) action = "ping";
+      } catch {
+        // ignore parse errors
+      }
+    }
     if (action === "app-version") {
       let configuredVersion = "";
       try {
