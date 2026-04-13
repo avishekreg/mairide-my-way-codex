@@ -144,15 +144,21 @@ const WEB_API_ORIGIN_FAILOVER = 'https://mairide-my-way-codex.vercel.app';
 const UI_LANGUAGE_PROMPT_APP_SEEN_KEY = 'mairide_ui_language_prompt_seen_app';
 
 const isAppWebViewRuntime = () => {
-  if (typeof window === 'undefined') return false;
-  const protocol = String(window.location.protocol || '').toLowerCase();
-  const hostname = String(window.location.hostname || '').toLowerCase();
-  const port = String(window.location.port || '').trim();
+  if (typeof window === "undefined") return false;
+  const protocol = String(window.location.protocol || "").toLowerCase();
+  const hostname = String(window.location.hostname || "").toLowerCase();
+  const port = String(window.location.port || "").trim();
   return (
-    (protocol === 'http:' || protocol === 'https:')
-    && (hostname === 'localhost' || hostname === '127.0.0.1')
+    (protocol === "http:" || protocol === "https:")
+    && (hostname === "localhost" || hostname === "127.0.0.1")
     && !port
   );
+};
+
+const isAppDisplayMode = () => {
+  if (typeof window === "undefined") return false;
+  const isStandalone = typeof window.matchMedia === "function" && window.matchMedia("(display-mode: standalone)").matches;
+  return isAppWebViewRuntime() || isAndroidWebViewLikeRuntime() || isStandalone;
 };
 
 const isLocalDevFirestoreMode = () => {
@@ -193,7 +199,13 @@ const isAndroidWebViewLikeRuntime = () => {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
   const ua = String(navigator.userAgent || '').toLowerCase();
   const protocol = String(window.location.protocol || '').toLowerCase();
-  return /android/.test(ua) && (/ wv|; wv|version\/\d+\.\d+ mobile/.test(ua) || protocol === 'capacitor:' || protocol === 'ionic:');
+  const hasCapacitor = typeof (window as any).Capacitor !== 'undefined';
+  const hasCordova = typeof (window as any).cordova !== 'undefined';
+  const hasReactNative = typeof (window as any).ReactNativeWebView !== 'undefined';
+  return (
+    /android/.test(ua) &&
+    (/ wv|; wv|version\/\d+\.\d+ mobile/.test(ua) || protocol === 'capacitor:' || protocol === 'ionic:')
+  ) || hasCapacitor || hasCordova || hasReactNative;
 };
 
 const buildOriginCandidates = (path?: string) => {
@@ -8339,7 +8351,7 @@ const finalizeDriverRazorpayPayment = async (
 
 const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
-  const showDashboardHeroLogo = !(isAppWebViewRuntime() || isAndroidWebViewLikeRuntime());
+  const showDashboardHeroLogo = !isAppDisplayMode();
   const [search, setSearch] = useState({ from: '', to: '' });
   const [rides, setRides] = useState<any[]>([]);
   const [dashboardBookings, setDashboardBookings] = useState<Booking[]>([]);
@@ -8771,6 +8783,32 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       return null;
     }
   };
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((resolve) => {
+          timer = setTimeout(() => resolve(fallback), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((resolve) => {
+          timer = setTimeout(() => resolve(fallback), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
 
   const buildScheduledDeparture = (dayKey: string, timeValue: string) => {
     const scheduledDate = new Date();
@@ -8812,11 +8850,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
     setIsPostingRequest(true);
     try {
+      const geocodeTimeoutMs = 8000;
       const profileLocation = profile.location || null;
       const resolvedOriginLocation =
-        requestOriginLocation || userLocation || profileLocation || await geocodeAddress(origin);
+        requestOriginLocation || userLocation || profileLocation || await withTimeout(geocodeAddress(origin), geocodeTimeoutMs, null);
       const resolvedDestinationLocation =
-        requestDestinationLocation || await geocodeAddress(destination) || resolvedOriginLocation;
+        requestDestinationLocation || await withTimeout(geocodeAddress(destination), geocodeTimeoutMs, null) || resolvedOriginLocation;
       if (!resolvedOriginLocation) {
         alert('Please allow location access or select a valid origin from suggestions.');
         return;
@@ -8857,17 +8896,22 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           updatedAt: now,
         } as Omit<TravelerRideRequest, 'id'>);
       } else {
-        const token = await getAccessToken();
+        const token = await withTimeout(getAccessToken(), 8000, '');
+        if (!token) {
+          throw new Error('Authentication timed out. Please retry.');
+        }
         const headers = {
           Authorization: `Bearer ${token}`,
         };
         try {
           await axios.post(apiPath('/api/user?action=create-traveler-request'), requestPayload, {
             headers,
+            timeout: 15000,
           });
         } catch (primaryError) {
           await axios.post(apiPath('/api/user/create-traveler-request'), requestPayload, {
             headers,
+            timeout: 15000,
           });
         }
       }
@@ -10174,7 +10218,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
 const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
-  const showDashboardHeroLogo = !(isAppWebViewRuntime() || isAndroidWebViewLikeRuntime());
+  const showDashboardHeroLogo = !isAppDisplayMode();
   const [isOnline, setIsOnline] = useState(profile.driverDetails?.isOnline || false);
   const [newRide, setNewRide] = useState({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
   const [showOfferForm, setShowOfferForm] = useState(false);
@@ -10649,11 +10693,12 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
     setIsPostingRide(true);
     try {
+      const geocodeTimeoutMs = 8000;
       const profileLocation = profile.location || null;
       const resolvedOriginLocation =
-        originLocation || userLocation || profileLocation || await geocodeAddress(origin);
+        originLocation || userLocation || profileLocation || await withTimeout(geocodeAddress(origin), geocodeTimeoutMs, null);
       const resolvedDestinationLocation =
-        destinationLocation || await geocodeAddress(destination) || resolvedOriginLocation;
+        destinationLocation || await withTimeout(geocodeAddress(destination), geocodeTimeoutMs, null) || resolvedOriginLocation;
 
       if (!resolvedOriginLocation) {
         alert('Please allow location access or select a valid origin from the suggestions.');
@@ -10702,7 +10747,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           });
         }
       } else {
-        const token = await getAccessToken();
+        const token = await withTimeout(getAccessToken(), 8000, '');
+        if (!token) {
+          throw new Error('Authentication timed out. Please retry.');
+        }
         const body = {
           ...ridePayload,
           linkedTravelerRequestId: linkedTravelerRequestId || null,
@@ -10712,9 +10760,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         };
         let response;
         try {
-          response = await axios.post(apiPath('/api/user?action=create-ride'), body, { headers });
+          response = await axios.post(apiPath('/api/user?action=create-ride'), body, { headers, timeout: 15000 });
         } catch (primaryError) {
-          response = await axios.post(apiPath('/api/user/create-ride'), body, { headers });
+          response = await axios.post(apiPath('/api/user/create-ride'), body, { headers, timeout: 15000 });
         }
         createdRideId = String(response?.data?.rideId || '');
       }
