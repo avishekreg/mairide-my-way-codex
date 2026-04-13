@@ -155,6 +155,15 @@ const isAppWebViewRuntime = () => {
   );
 };
 
+const isLocalDevFirestoreMode = () => {
+  if (typeof window === 'undefined') return false;
+  const hostname = String(window.location.hostname || '').toLowerCase();
+  const port = String(window.location.port || '').trim();
+  // Local Firestore emulation mode should only run for explicit localhost + port dev sessions.
+  // Android/iOS webviews often report localhost without a port and must use production APIs.
+  return (hostname === 'localhost' || hostname === '127.0.0.1') && port.length > 0;
+};
+
 const resolveApiBaseUrl = () => {
   if (typeof window === 'undefined') return '';
   const protocol = String(window.location.protocol || '').toLowerCase();
@@ -2456,7 +2465,7 @@ const listSupportTickets = async (all = false) => {
 
 const createSupportTicket = async (payload: { subject: string; message: string; priority?: SupportTicket['priority'] }) => {
   const token = await getAccessToken();
-  const response = await axios.post('/api/support?action=create-ticket', payload, {
+  const response = await axios.post(apiPath('/api/support?action=create-ticket'), payload, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -2466,7 +2475,7 @@ const createSupportTicket = async (payload: { subject: string; message: string; 
 
 const respondSupportTicket = async (payload: { ticketId: string; message: string }) => {
   const token = await getAccessToken();
-  const response = await axios.post('/api/support?action=respond-ticket', payload, {
+  const response = await axios.post(apiPath('/api/support?action=respond-ticket'), payload, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -2476,7 +2485,7 @@ const respondSupportTicket = async (payload: { ticketId: string; message: string
 
 const updateSupportTicketStatus = async (payload: { ticketId: string; status: SupportTicket['status'] }) => {
   const token = await getAccessToken();
-  const response = await axios.post('/api/support?action=update-ticket-status', payload, {
+  const response = await axios.post(apiPath('/api/support?action=update-ticket-status'), payload, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -2486,7 +2495,7 @@ const updateSupportTicketStatus = async (payload: { ticketId: string; status: Su
 
 const submitSupportFeedback = async (payload: { ticketId: string; rating: number; tags: string[]; comment?: string }) => {
   const token = await getAccessToken();
-  const response = await axios.post('/api/support?action=submit-ticket-feedback', payload, {
+  const response = await axios.post(apiPath('/api/support?action=submit-ticket-feedback'), payload, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -7401,8 +7410,8 @@ const MyRides = ({
         return;
       }
 
-      if (window.location.hostname === 'localhost') {
-        await axios.post('/api/user/cancel-ride', {
+      if (isLocalDevFirestoreMode()) {
+        await axios.post(apiPath('/api/user/cancel-ride'), {
           rideId: ride.id,
           driverId: profile.uid,
           driverPhone: profile.phoneNumber || '',
@@ -8419,7 +8428,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, [profile.uid]);
 
   useEffect(() => {
-    if (window.location.hostname === 'localhost') {
+    if (isLocalDevFirestoreMode()) {
       const q = query(collection(db, 'travelerRideRequests'), where('consumerId', '==', profile.uid));
       const unsubscribe = onSnapshot(
         q,
@@ -8447,7 +8456,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     const loadTravelerRequests = async () => {
       try {
         const token = await getAccessToken();
-        const { data } = await axios.get('/api/user?action=list-traveler-requests&scope=own', {
+        const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=own'), {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -8826,7 +8835,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         departureTime: buildScheduledDeparture(newRequest.departureDay, newRequest.departureClock),
       };
 
-      if (window.location.hostname === 'localhost') {
+      if (isLocalDevFirestoreMode()) {
         const now = new Date().toISOString();
         await addDoc(collection(db, 'travelerRideRequests'), {
           ...requestPayload,
@@ -8836,7 +8845,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         } as Omit<TravelerRideRequest, 'id'>);
       } else {
         const token = await getAccessToken();
-        await axios.post('/api/user?action=create-traveler-request', requestPayload, {
+        await axios.post(apiPath('/api/user?action=create-traveler-request'), requestPayload, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -8864,7 +8873,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   const handleCancelTravelerRequest = async (requestId: string) => {
     try {
-      if (window.location.hostname === 'localhost') {
+      if (isLocalDevFirestoreMode()) {
         await updateDoc(doc(db, 'travelerRideRequests', requestId), {
           status: 'cancelled',
           updatedAt: new Date().toISOString(),
@@ -8872,7 +8881,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       } else {
         const token = await getAccessToken();
         await axios.post(
-          '/api/user?action=cancel-traveler-request',
+          apiPath('/api/user?action=cancel-traveler-request'),
           {
             requestId,
             consumerId: profile.uid,
@@ -8901,7 +8910,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       let availableRides: Ride[] = [];
       let allBookings: Booking[] = [];
 
-      if (window.location.hostname === 'localhost') {
+      if (isLocalDevFirestoreMode()) {
         const [querySnapshot, bookingsSnapshot] = await Promise.all([
           getDocs(query(collection(db, 'rides'), where('status', '==', 'available'))),
           getDocs(collection(db, 'bookings')),
@@ -8909,7 +8918,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         availableRides = querySnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
         allBookings = bookingsSnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
       } else {
-        const { data } = await axios.get('/api/health?action=search-rides');
+        const { data } = await axios.get(apiPath('/api/health?action=search-rides'));
         availableRides = Array.isArray(data?.rides) ? data.rides : [];
         allBookings = Array.isArray(data?.bookings) ? data.bookings : [];
       }
@@ -10236,7 +10245,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, []);
 
   useEffect(() => {
-    if (window.location.hostname === 'localhost') {
+    if (isLocalDevFirestoreMode()) {
       const q = query(collection(db, 'travelerRideRequests'), where('status', '==', 'open'));
       const unsubscribe = onSnapshot(
         q,
@@ -10264,7 +10273,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     const loadOpenTravelerRequests = async () => {
       try {
         const token = await getAccessToken();
-        const { data } = await axios.get('/api/user?action=list-traveler-requests&scope=open', {
+        const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=open'), {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -10654,7 +10663,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       };
 
       let createdRideId = '';
-      if (window.location.hostname === 'localhost') {
+      if (isLocalDevFirestoreMode()) {
         const nowIso = new Date().toISOString();
         const rideRef = await addDoc(collection(db, 'rides'), ridePayload);
         createdRideId = rideRef.id;
@@ -10671,7 +10680,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       } else {
         const token = await getAccessToken();
         const response = await axios.post(
-          '/api/user?action=create-ride',
+          apiPath('/api/user?action=create-ride'),
           {
             ...ridePayload,
             linkedTravelerRequestId: linkedTravelerRequestId || null,
@@ -14246,7 +14255,7 @@ const ForcePasswordChangeModal = ({ profile }: { profile: UserProfile }) => {
     setIsUpdating(true);
     try {
       const idToken = await getAccessToken();
-      await axios.post('/api/user?action=change-password', { newPassword }, {
+      await axios.post(apiPath('/api/user?action=change-password'), { newPassword }, {
         headers: { Authorization: `Bearer ${idToken}` }
       });
       alert("Password updated successfully! You can now access the app.");

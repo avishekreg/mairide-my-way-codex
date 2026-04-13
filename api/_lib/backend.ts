@@ -926,7 +926,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       }
     }
 
-    return res.status(201).json({ message: "Ride created successfully", id: rideId });
+    return res.status(201).json({ message: "Ride created successfully", id: rideId, rideId });
   } catch (error: any) {
     console.error("Error creating ride:", error);
     return res.status(error?.status || 500).json({

@@ -92,7 +92,7 @@ jobs:
 
       - name: Apply MaiRide launcher icon
         run: |
-          ICON_SRC="public/logo.png"
+          ICON_SRC="public/icons/android-app-icon.png"
           if [ ! -f "$ICON_SRC" ]; then
             echo "Missing launcher icon source: $ICON_SRC"
             exit 1
