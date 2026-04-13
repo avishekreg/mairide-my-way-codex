@@ -2540,7 +2540,18 @@ const LoadingScreen = ({ releaseVersion: releaseVersionProp }: { releaseVersion?
   );
 };
 
-const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
+type BuildStampInfo = {
+  appVersion?: string;
+  commitSha?: string;
+  commitRef?: string;
+  commitMessage?: string;
+  deployId?: string;
+  env?: string;
+  vercelUrl?: string;
+  builtAt?: string;
+};
+
+const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; buildStamp?: BuildStampInfo | null }) => {
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installStatus, setInstallStatus] = useState('');
   const [isAndroidDevice, setIsAndroidDevice] = useState(false);
@@ -2634,6 +2645,11 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
     }
   };
 
+  const trimmedSha = buildStamp?.commitSha ? buildStamp.commitSha.slice(0, 7) : '';
+  const buildLabel = trimmedSha ? `Build ${trimmedSha}` : 'Build local';
+  const buildTime = buildStamp?.builtAt ? new Date(buildStamp.builtAt).toLocaleString() : '';
+  const buildMeta = buildTime ? `${buildLabel} • ${buildTime}` : buildLabel;
+
   return (
     <footer className="px-4 pb-6">
       <div className="max-w-7xl mx-auto">
@@ -2696,6 +2712,9 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
         </div>
         <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
           Release {releaseVersion} | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.
+        </p>
+        <p className="text-[10px] text-mairide-secondary/70 tracking-wide text-center mt-1">
+          {buildMeta}
         </p>
       </div>
     </footer>
@@ -8836,15 +8855,15 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     const seatsNeeded = Number(newRequest.seats);
 
     if (!origin || !destination) {
-      alert('Please select both origin and destination before posting your ride request.');
+      showAppDialog('Please select both origin and destination before posting your ride request.', 'warning');
       return;
     }
     if (!Number.isFinite(fareValue) || fareValue <= 0) {
-      alert('Please enter a valid target fare greater than zero.');
+      showAppDialog('Please enter a valid target fare greater than zero.', 'warning');
       return;
     }
     if (!Number.isFinite(seatsNeeded) || seatsNeeded < 1) {
-      alert('Please choose at least one seat.');
+      showAppDialog('Please choose at least one seat.', 'warning');
       return;
     }
 
@@ -8857,7 +8876,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       const resolvedDestinationLocation =
         requestDestinationLocation || await withTimeout(geocodeAddress(destination), geocodeTimeoutMs, null) || resolvedOriginLocation;
       if (!resolvedOriginLocation) {
-        alert('Please allow location access or select a valid origin from suggestions.');
+        showAppDialog('Please allow location access or select a valid origin from suggestions.', 'warning');
         return;
       }
 
@@ -8882,6 +8901,10 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         departureNote: 'Planned departure time may vary due to traffic, road, and operational conditions.',
         departureTime: buildScheduledDeparture(newRequest.departureDay, newRequest.departureClock),
       };
+      const requestBody = {
+        ...requestPayload,
+        action: 'create-traveler-request',
+      };
 
       if (!requestPayload.consumerId) {
         throw new Error('Unable to resolve authenticated traveler identity. Please sign in again and retry.');
@@ -8904,15 +8927,22 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           Authorization: `Bearer ${token}`,
         };
         try {
-          await axios.post(apiPath('/api/user?action=create-traveler-request'), requestPayload, {
+          await axios.post(apiPath('/api/user?action=create-traveler-request'), requestBody, {
             headers,
             timeout: 15000,
           });
         } catch (primaryError) {
-          await axios.post(apiPath('/api/user/create-traveler-request'), requestPayload, {
-            headers,
-            timeout: 15000,
-          });
+          try {
+            await axios.post(apiPath('/api/user/create-traveler-request'), requestBody, {
+              headers,
+              timeout: 15000,
+            });
+          } catch (secondaryError) {
+            await axios.post(apiPath('/api/user'), requestBody, {
+              headers,
+              timeout: 15000,
+            });
+          }
         }
       }
 
@@ -8927,9 +8957,10 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       setRequestOriginLocation(null);
       setRequestDestinationLocation(null);
       setShowRequestForm(false);
-      alert('Ride request posted successfully. Drivers can now match your request.');
+      showAppDialog('Ride request posted successfully. Drivers can now match your request.', 'success');
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'travelerRideRequests');
+      console.error('Failed to post ride request:', error);
+      showAppDialog('Ride request failed to post. Please retry in a moment.', 'error');
     } finally {
       setIsPostingRequest(false);
     }
@@ -16962,6 +16993,7 @@ const App = () => {
   });
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
   const [remoteAppVersion, setRemoteAppVersion] = useState('');
+  const [buildStamp, setBuildStamp] = useState<BuildStampInfo | null>(null);
   const releaseVersion = resolveReleaseVersion(appConfigState.config?.appVersion, remoteAppVersion);
 
   useEffect(() => {
@@ -16978,6 +17010,34 @@ const App = () => {
       }
     };
     void loadRemoteVersion();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadBuildStamp = async () => {
+      try {
+        const response = await fetch(apiPath('/api/health?action=build-stamp'), { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!active) return;
+        setBuildStamp({
+          appVersion: String(data?.appVersion || '').trim(),
+          commitSha: String(data?.commitSha || '').trim(),
+          commitRef: String(data?.commitRef || '').trim(),
+          commitMessage: String(data?.commitMessage || '').trim(),
+          deployId: String(data?.deployId || '').trim(),
+          env: String(data?.env || '').trim(),
+          vercelUrl: String(data?.vercelUrl || '').trim(),
+          builtAt: String(data?.builtAt || '').trim(),
+        });
+      } catch {
+        // Ignore build stamp failures; footer will fall back.
+      }
+    };
+    void loadBuildStamp();
     return () => {
       active = false;
     };
@@ -17476,7 +17536,7 @@ const App = () => {
             releaseVersion={releaseVersion}
           />
         </div>
-        <AppFooter releaseVersion={releaseVersion} />
+        <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
         <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
           <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
         </div>
@@ -17553,7 +17613,7 @@ const App = () => {
           <div className="flex-1">
             <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} />
           </div>
-          <AppFooter releaseVersion={releaseVersion} />
+          <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
           <AppDialogHost />
           {androidUpdatePrompt}
         </div>
@@ -17587,7 +17647,7 @@ const App = () => {
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>
-          <AppFooter releaseVersion={releaseVersion} />
+          <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
           <Chatbot userRole={profile?.role} userId={profile?.uid} />
           <AppDialogHost />
           {androidUpdatePrompt}

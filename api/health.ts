@@ -107,6 +107,57 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    if (action === "build-stamp") {
+      let configuredVersion = "";
+      try {
+        const supabaseAdmin = getSupabaseAdmin(req);
+        const { data, error } = await supabaseAdmin
+          .from("app_config")
+          .select("data")
+          .eq("id", "global")
+          .maybeSingle();
+        if (error) throw error;
+        configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+      } catch {
+        const supabasePublic = getSupabasePublic(req);
+        if (supabasePublic) {
+          const { data } = await supabasePublic
+            .from("app_config")
+            .select("data")
+            .eq("id", "global")
+            .maybeSingle();
+          configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+        }
+      }
+
+      const fallbackVersion = String(process.env.VITE_APP_VERSION || "v2.0.1-beta").trim();
+      const commitSha = String(process.env.VERCEL_GIT_COMMIT_SHA || "").trim();
+      const commitRef = String(process.env.VERCEL_GIT_COMMIT_REF || "").trim();
+      const commitMessage = String(process.env.VERCEL_GIT_COMMIT_MESSAGE || "").trim();
+      const deployId = String(process.env.VERCEL_DEPLOYMENT_ID || "").trim();
+      const env = String(process.env.VERCEL_ENV || process.env.NODE_ENV || "").trim();
+      const vercelUrl = String(process.env.VERCEL_URL || "").trim();
+      const builtAt = new Date().toISOString();
+
+      return res.status(200).json({
+        appVersion: configuredVersion || fallbackVersion,
+        commitSha,
+        commitRef,
+        commitMessage,
+        deployId,
+        env,
+        vercelUrl,
+        builtAt,
+      });
+    }
+
+    if (action === "ping") {
+      return res.status(200).json({
+        status: "ok",
+        serverTime: new Date().toISOString(),
+      });
+    }
+
     if (action === "resolve-phone-login") {
       const phoneNumber = req.body?.phoneNumber || req.query?.phoneNumber;
       const variants = buildPhoneVariants(phoneNumber);
