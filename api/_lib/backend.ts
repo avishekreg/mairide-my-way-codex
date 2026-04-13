@@ -972,7 +972,7 @@ function mapTravelerRequestRow(row: any) {
 
 export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike) {
   const {
-    consumerId,
+    consumerId: consumerIdInput,
     consumerName,
     consumerPhone,
     origin,
@@ -987,6 +987,8 @@ export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike
     departureNote,
     departureTime,
   } = req.body || {};
+
+  let consumerId = String(consumerIdInput || "");
 
   if (
     !consumerId ||
@@ -1006,9 +1008,9 @@ export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike
         ? req.headers.authorization[0]
         : req.headers.authorization;
       const user = await verifyTokenFromHeader(authHeader);
-      if (user.id !== consumerId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
+      // Always trust the authenticated identity in production. This avoids
+      // payload/token drift for older traveler profiles while keeping auth strict.
+      consumerId = user.id;
     }
 
     const requestId = crypto.randomUUID();
