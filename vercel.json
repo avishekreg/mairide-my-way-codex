@@ -63,26 +63,14 @@
       ]
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/downloads/mairide-android-download.apk",
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Content-Type": "application/octet-stream",
-        "Content-Disposition": "attachment; filename=\"mairide-android.apk\""
-      },
-      "dest": "/downloads/mairide-android.apk"
+      "source": "/downloads/mairide-android-download.apk",
+      "destination": "/downloads/mairide-android.apk"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }
