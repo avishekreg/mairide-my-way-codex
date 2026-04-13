@@ -8818,9 +8818,13 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         return;
       }
 
+      const resolvedConsumerId = profile.uid || auth.currentUser?.uid || '';
+      const resolvedConsumerName =
+        profile.displayName || auth.currentUser?.displayName || profile.email || auth.currentUser?.email || 'Traveler';
+
       const requestPayload = {
-        consumerId: profile.uid,
-        consumerName: profile.displayName,
+        consumerId: resolvedConsumerId,
+        consumerName: resolvedConsumerName,
         consumerPhone: profile.phoneNumber || '',
         origin,
         destination,
@@ -8835,6 +8839,10 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         departureTime: buildScheduledDeparture(newRequest.departureDay, newRequest.departureClock),
       };
 
+      if (!requestPayload.consumerId) {
+        throw new Error('Unable to resolve authenticated traveler identity. Please sign in again and retry.');
+      }
+
       if (isLocalDevFirestoreMode()) {
         const now = new Date().toISOString();
         await addDoc(collection(db, 'travelerRideRequests'), {
@@ -8845,11 +8853,18 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         } as Omit<TravelerRideRequest, 'id'>);
       } else {
         const token = await getAccessToken();
-        await axios.post(apiPath('/api/user?action=create-traveler-request'), requestPayload, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const headers = {
+          Authorization: `Bearer ${token}`,
+        };
+        try {
+          await axios.post(apiPath('/api/user?action=create-traveler-request'), requestPayload, {
+            headers,
+          });
+        } catch (primaryError) {
+          await axios.post(apiPath('/api/user/create-traveler-request'), requestPayload, {
+            headers,
+          });
+        }
       }
 
       setNewRequest({
