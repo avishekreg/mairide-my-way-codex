@@ -90,7 +90,7 @@ export default async function handler(req: any, res: any) {
         // ignore parse errors
       }
     }
-    if (action === "app-version") {
+    const resolveConfiguredVersion = async () => {
       let configuredVersion = "";
       try {
         const supabaseAdmin = getSupabaseAdmin(req);
@@ -113,59 +113,33 @@ export default async function handler(req: any, res: any) {
         }
       }
       const fallbackVersion = String(process.env.VITE_APP_VERSION || "v2.0.1-beta").trim();
-      return res.status(200).json({
-        appVersion: configuredVersion || fallbackVersion,
-      });
+      return configuredVersion || fallbackVersion;
+    };
+
+    const buildStampPayload = async () => ({
+      appVersion: await resolveConfiguredVersion(),
+      commitSha: String(process.env.VERCEL_GIT_COMMIT_SHA || "").trim(),
+      commitRef: String(process.env.VERCEL_GIT_COMMIT_REF || "").trim(),
+      commitMessage: String(process.env.VERCEL_GIT_COMMIT_MESSAGE || "").trim(),
+      deployId: String(process.env.VERCEL_DEPLOYMENT_ID || "").trim(),
+      env: String(process.env.VERCEL_ENV || process.env.NODE_ENV || "").trim(),
+      vercelUrl: String(process.env.VERCEL_URL || "").trim(),
+      builtAt: new Date().toISOString(),
+    });
+    if (action === "app-version") {
+      const appVersion = await resolveConfiguredVersion();
+      return res.status(200).json({ appVersion });
     }
 
     if (action === "build-stamp") {
-      let configuredVersion = "";
-      try {
-        const supabaseAdmin = getSupabaseAdmin(req);
-        const { data, error } = await supabaseAdmin
-          .from("app_config")
-          .select("data")
-          .eq("id", "global")
-          .maybeSingle();
-        if (error) throw error;
-        configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
-      } catch {
-        const supabasePublic = getSupabasePublic(req);
-        if (supabasePublic) {
-          const { data } = await supabasePublic
-            .from("app_config")
-            .select("data")
-            .eq("id", "global")
-            .maybeSingle();
-          configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
-        }
-      }
-
-      const fallbackVersion = String(process.env.VITE_APP_VERSION || "v2.0.1-beta").trim();
-      const commitSha = String(process.env.VERCEL_GIT_COMMIT_SHA || "").trim();
-      const commitRef = String(process.env.VERCEL_GIT_COMMIT_REF || "").trim();
-      const commitMessage = String(process.env.VERCEL_GIT_COMMIT_MESSAGE || "").trim();
-      const deployId = String(process.env.VERCEL_DEPLOYMENT_ID || "").trim();
-      const env = String(process.env.VERCEL_ENV || process.env.NODE_ENV || "").trim();
-      const vercelUrl = String(process.env.VERCEL_URL || "").trim();
-      const builtAt = new Date().toISOString();
-
-      return res.status(200).json({
-        appVersion: configuredVersion || fallbackVersion,
-        commitSha,
-        commitRef,
-        commitMessage,
-        deployId,
-        env,
-        vercelUrl,
-        builtAt,
-      });
+      return res.status(200).json(await buildStampPayload());
     }
 
     if (action === "ping") {
       return res.status(200).json({
         status: "ok",
         serverTime: new Date().toISOString(),
+        ...(await buildStampPayload()),
       });
     }
 
@@ -210,7 +184,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action !== "search-rides") {
-      return res.status(200).json({ status: "ok", backend: "supabase" });
+      return res.status(200).json({ status: "ok", backend: "supabase", ...(await buildStampPayload()) });
     }
 
     const supabaseAdmin = getSupabaseAdmin(req);
