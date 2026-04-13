@@ -10655,21 +10655,34 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
       let createdRideId = '';
       if (window.location.hostname === 'localhost') {
-        const response = await axios.post('/api/user/create-ride', ridePayload);
-        createdRideId = String(response?.data?.rideId || '');
-      } else {
+        const nowIso = new Date().toISOString();
         const rideRef = await addDoc(collection(db, 'rides'), ridePayload);
         createdRideId = rideRef.id;
-      }
 
-      if (linkedTravelerRequestId) {
-        await updateDoc(doc(db, 'travelerRideRequests', linkedTravelerRequestId), {
-          status: 'matched',
-          matchedRideId: createdRideId || null,
-          matchedDriverId: profile.uid,
-          matchedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
+        if (linkedTravelerRequestId) {
+          await updateDoc(doc(db, 'travelerRideRequests', linkedTravelerRequestId), {
+            status: 'matched',
+            matchedRideId: createdRideId || null,
+            matchedDriverId: profile.uid,
+            matchedAt: nowIso,
+            updatedAt: nowIso,
+          });
+        }
+      } else {
+        const token = await getAccessToken();
+        const response = await axios.post(
+          '/api/user?action=create-ride',
+          {
+            ...ridePayload,
+            linkedTravelerRequestId: linkedTravelerRequestId || null,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        createdRideId = String(response?.data?.rideId || '');
       }
       setNewRide({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
       setOriginLocation(null);
