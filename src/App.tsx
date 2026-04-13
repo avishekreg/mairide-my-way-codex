@@ -8419,25 +8419,61 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, [profile.uid]);
 
   useEffect(() => {
-    const q = query(collection(db, 'travelerRideRequests'), where('consumerId', '==', profile.uid));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const list: TravelerRideRequest[] = snapshot.docs.map((snapshotDoc) => ({
-          id: snapshotDoc.id,
-          ...(snapshotDoc.data() as TravelerRideRequest),
-        }));
+    if (window.location.hostname === 'localhost') {
+      const q = query(collection(db, 'travelerRideRequests'), where('consumerId', '==', profile.uid));
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const list: TravelerRideRequest[] = snapshot.docs.map((snapshotDoc) => ({
+            id: snapshotDoc.id,
+            ...(snapshotDoc.data() as TravelerRideRequest),
+          }));
+          setTravelerRequests(
+            list
+              .filter((item) => isRideWithinPlanningWindow(item))
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          );
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
+        }
+      );
+      return () => unsubscribe();
+    }
+
+    let isMounted = true;
+    let pollTimer: number | null = null;
+
+    const loadTravelerRequests = async () => {
+      try {
+        const token = await getAccessToken();
+        const { data } = await axios.get('/api/user?action=list-traveler-requests&scope=own', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!isMounted) return;
+        const list = Array.isArray(data?.requests) ? data.requests as TravelerRideRequest[] : [];
         setTravelerRequests(
           list
             .filter((item) => isRideWithinPlanningWindow(item))
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         );
-      },
-      (error) => {
+      } catch (error) {
+        if (!isMounted) return;
         handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
       }
-    );
-    return () => unsubscribe();
+    };
+
+    void loadTravelerRequests();
+    pollTimer = window.setInterval(() => {
+      void loadTravelerRequests();
+    }, 8000);
+
+    return () => {
+      isMounted = false;
+      if (pollTimer) window.clearInterval(pollTimer);
+    };
   }, [profile.uid]);
 
   useEffect(() => {
@@ -8773,8 +8809,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         return;
       }
 
-      const now = new Date().toISOString();
-      await addDoc(collection(db, 'travelerRideRequests'), {
+      const requestPayload = {
         consumerId: profile.uid,
         consumerName: profile.displayName,
         consumerPhone: profile.phoneNumber || '',
@@ -8784,15 +8819,29 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         destinationLocation: resolvedDestinationLocation,
         fare: fareValue,
         seatsNeeded,
-        status: 'open',
         departureDay: newRequest.departureDay,
         departureDayLabel: formatDepartureDayLabel(newRequest.departureDay),
         departureClock: newRequest.departureClock,
         departureNote: 'Planned departure time may vary due to traffic, road, and operational conditions.',
         departureTime: buildScheduledDeparture(newRequest.departureDay, newRequest.departureClock),
-        createdAt: now,
-        updatedAt: now,
-      } as Omit<TravelerRideRequest, 'id'>);
+      };
+
+      if (window.location.hostname === 'localhost') {
+        const now = new Date().toISOString();
+        await addDoc(collection(db, 'travelerRideRequests'), {
+          ...requestPayload,
+          status: 'open',
+          createdAt: now,
+          updatedAt: now,
+        } as Omit<TravelerRideRequest, 'id'>);
+      } else {
+        const token = await getAccessToken();
+        await axios.post('/api/user?action=create-traveler-request', requestPayload, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
 
       setNewRequest({
         origin: '',
@@ -8815,10 +8864,26 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   const handleCancelTravelerRequest = async (requestId: string) => {
     try {
-      await updateDoc(doc(db, 'travelerRideRequests', requestId), {
-        status: 'cancelled',
-        updatedAt: new Date().toISOString(),
-      });
+      if (window.location.hostname === 'localhost') {
+        await updateDoc(doc(db, 'travelerRideRequests', requestId), {
+          status: 'cancelled',
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        const token = await getAccessToken();
+        await axios.post(
+          '/api/user?action=cancel-traveler-request',
+          {
+            requestId,
+            consumerId: profile.uid,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+      }
       alert('Ride request cancelled.');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `travelerRideRequests/${requestId}`);
@@ -10171,26 +10236,62 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'travelerRideRequests'), where('status', '==', 'open'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const list: TravelerRideRequest[] = snapshot.docs.map((snapshotDoc) => ({
-          id: snapshotDoc.id,
-          ...(snapshotDoc.data() as TravelerRideRequest),
-        }));
+    if (window.location.hostname === 'localhost') {
+      const q = query(collection(db, 'travelerRideRequests'), where('status', '==', 'open'));
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const list: TravelerRideRequest[] = snapshot.docs.map((snapshotDoc) => ({
+            id: snapshotDoc.id,
+            ...(snapshotDoc.data() as TravelerRideRequest),
+          }));
+          setTravelerRideRequests(
+            list
+              .filter((item) => isRideWithinPlanningWindow(item))
+              .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime())
+          );
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
+        }
+      );
+      return () => unsubscribe();
+    }
+
+    let isMounted = true;
+    let pollTimer: number | null = null;
+
+    const loadOpenTravelerRequests = async () => {
+      try {
+        const token = await getAccessToken();
+        const { data } = await axios.get('/api/user?action=list-traveler-requests&scope=open', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!isMounted) return;
+        const list = Array.isArray(data?.requests) ? data.requests as TravelerRideRequest[] : [];
         setTravelerRideRequests(
           list
             .filter((item) => isRideWithinPlanningWindow(item))
             .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime())
         );
-      },
-      (error) => {
+      } catch (error) {
+        if (!isMounted) return;
         handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
       }
-    );
-    return () => unsubscribe();
-  }, []);
+    };
+
+    void loadOpenTravelerRequests();
+    pollTimer = window.setInterval(() => {
+      void loadOpenTravelerRequests();
+    }, 8000);
+
+    return () => {
+      isMounted = false;
+      if (pollTimer) window.clearInterval(pollTimer);
+    };
+  }, [profile.uid]);
 
   useEffect(() => {
     const q = query(

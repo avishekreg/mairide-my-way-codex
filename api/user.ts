@@ -1,9 +1,12 @@
 import {
   handleUserCancelRide,
+  handleUserCancelTravelerRequest,
   handleUserChangePassword,
   handleUserCompleteDriverOnboarding,
   handleUserCounterBooking,
+  handleUserCreateTravelerRequest,
   handleUserCreateRide,
+  handleUserListTravelerRequests,
   handleUserRejectBooking,
   handleUserRespondBooking,
   handleUserSearchRides,
@@ -66,6 +69,18 @@ export default async function handler(req: any, res: any) {
     return handleUserCompleteDriverOnboarding(req, res);
   }
 
+  if (action === "create-traveler-request") {
+    return handleUserCreateTravelerRequest(req, res);
+  }
+
+  if (action === "list-traveler-requests") {
+    return handleUserListTravelerRequests(req, res);
+  }
+
+  if (action === "cancel-traveler-request") {
+    return handleUserCancelTravelerRequest(req, res);
+  }
+
   if (req.url?.endsWith("/create-ride")) {
     return handleUserCreateRide(req, res);
   }
@@ -104,6 +119,18 @@ export default async function handler(req: any, res: any) {
 
   if (req.url?.endsWith("/complete-driver-onboarding")) {
     return handleUserCompleteDriverOnboarding(req, res);
+  }
+
+  if (req.url?.endsWith("/create-traveler-request")) {
+    return handleUserCreateTravelerRequest(req, res);
+  }
+
+  if (req.url?.endsWith("/list-traveler-requests")) {
+    return handleUserListTravelerRequests(req, res);
+  }
+
+  if (req.url?.endsWith("/cancel-traveler-request")) {
+    return handleUserCancelTravelerRequest(req, res);
   }
 
   if (req.url?.endsWith("/change-password")) {

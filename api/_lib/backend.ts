@@ -844,6 +844,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
     departureClock,
     departureNote,
     departureTime,
+    linkedTravelerRequestId,
   } = req.body || {};
 
   if (
@@ -903,11 +904,266 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
     const { error } = await getSupabaseAdmin().from("rides").insert(rideRow);
     if (error) throw error;
 
+    if (linkedTravelerRequestId) {
+      const { error: requestUpdateError } = await getSupabaseAdmin()
+        .from("bookings")
+        .update({
+          status: "traveler_request_matched",
+          updated_at: new Date().toISOString(),
+          data: {
+            status: "matched",
+            matchedRideId: rideId,
+            matchedDriverId: driverId,
+            matchedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        })
+        .eq("id", linkedTravelerRequestId)
+        .eq("status", "traveler_request_open");
+
+      if (requestUpdateError) {
+        console.error("Failed to mark traveler request as matched:", requestUpdateError);
+      }
+    }
+
     return res.status(201).json({ message: "Ride created successfully", id: rideId });
   } catch (error: any) {
     console.error("Error creating ride:", error);
     return res.status(error?.status || 500).json({
       error: extractErrorMessage(error, "Failed to create ride"),
+    });
+  }
+}
+
+function mapTravelerRequestRow(row: any) {
+  const data = row?.data || {};
+  return {
+    id: row?.id,
+    consumerId: row?.consumer_id || data.consumerId || "",
+    consumerName: data.consumerName || "",
+    consumerPhone: data.consumerPhone || "",
+    origin: data.origin || "",
+    destination: data.destination || "",
+    originLocation: data.originLocation || null,
+    destinationLocation: data.destinationLocation || null,
+    fare: Number(data.fare || 0),
+    seatsNeeded: Number(data.seatsNeeded || 1),
+    departureTime: data.departureTime || row?.created_at || new Date().toISOString(),
+    departureDay: data.departureDay || "today",
+    departureDayLabel: data.departureDayLabel || "Today",
+    departureClock: data.departureClock || "09:00",
+    departureNote:
+      data.departureNote ||
+      "Planned departure time may vary due to traffic, road, and operational conditions.",
+    status:
+      data.status ||
+      (row?.status === "traveler_request_matched"
+        ? "matched"
+        : row?.status === "traveler_request_cancelled"
+          ? "cancelled"
+          : "open"),
+    matchedRideId: data.matchedRideId || null,
+    matchedDriverId: data.matchedDriverId || null,
+    matchedAt: data.matchedAt || null,
+    createdAt: row?.created_at || new Date().toISOString(),
+    updatedAt: row?.updated_at || row?.created_at || new Date().toISOString(),
+  };
+}
+
+export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike) {
+  const {
+    consumerId,
+    consumerName,
+    consumerPhone,
+    origin,
+    destination,
+    originLocation,
+    destinationLocation,
+    fare,
+    seatsNeeded,
+    departureDay,
+    departureDayLabel,
+    departureClock,
+    departureNote,
+    departureTime,
+  } = req.body || {};
+
+  if (
+    !consumerId ||
+    !origin ||
+    !destination ||
+    !originLocation ||
+    !destinationLocation ||
+    !Number.isFinite(Number(fare)) ||
+    !Number.isFinite(Number(seatsNeeded))
+  ) {
+    return res.status(400).json({ error: "Missing required traveler request fields" });
+  }
+
+  try {
+    if (process.env.NODE_ENV === "production") {
+      const authHeader = Array.isArray(req.headers.authorization)
+        ? req.headers.authorization[0]
+        : req.headers.authorization;
+      const user = await verifyTokenFromHeader(authHeader);
+      if (user.id !== consumerId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
+    const requestId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const requestData = {
+      id: requestId,
+      consumerId,
+      consumerName: consumerName || "",
+      consumerPhone: consumerPhone || "",
+      origin,
+      destination,
+      originLocation,
+      destinationLocation,
+      fare: Number(fare),
+      seatsNeeded: Number(seatsNeeded),
+      status: "open",
+      departureDay: departureDay || "today",
+      departureDayLabel: departureDayLabel || "Today",
+      departureClock: departureClock || "09:00",
+      departureNote:
+        departureNote ||
+        "Planned departure time may vary due to traffic, road, and operational conditions.",
+      departureTime: departureTime || now,
+      createdAt: now,
+      updatedAt: now,
+      recordType: "traveler_ride_request",
+    };
+
+    const { error } = await getSupabaseAdmin().from("bookings").insert({
+      id: requestId,
+      ride_id: null,
+      consumer_id: consumerId,
+      driver_id: null,
+      status: "traveler_request_open",
+      created_at: now,
+      updated_at: now,
+      data: requestData,
+    });
+
+    if (error) throw error;
+
+    return res.status(201).json({ message: "Traveler ride request created", id: requestId });
+  } catch (error: any) {
+    console.error("Error creating traveler ride request:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to create traveler ride request"),
+    });
+  }
+}
+
+export async function handleUserListTravelerRequests(req: any, res: ResLike) {
+  try {
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+
+    let currentUserId = req.body?.userId || req.query?.userId || "";
+    if (process.env.NODE_ENV === "production") {
+      const user = await verifyTokenFromHeader(authHeader);
+      currentUserId = user.id;
+    }
+
+    const scope = String(req.query?.scope || req.body?.scope || "open").toLowerCase();
+    let queryBuilder = getSupabaseAdmin()
+      .from("bookings")
+      .select("id, consumer_id, status, data, created_at, updated_at")
+      .in("status", [
+        "traveler_request_open",
+        "traveler_request_matched",
+        "traveler_request_cancelled",
+      ])
+      .order("created_at", { ascending: false });
+
+    if (scope === "own" && currentUserId) {
+      queryBuilder = queryBuilder.eq("consumer_id", currentUserId);
+    } else if (scope === "open") {
+      queryBuilder = queryBuilder.eq("status", "traveler_request_open");
+    }
+
+    const { data, error } = await queryBuilder;
+    if (error) throw error;
+
+    const requests = (data || []).map(mapTravelerRequestRow);
+
+    return res.status(200).json({
+      requests:
+        scope === "open" && currentUserId
+          ? requests.filter((item: any) => item.consumerId !== currentUserId)
+          : requests,
+    });
+  } catch (error: any) {
+    console.error("Error fetching traveler ride requests:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to fetch traveler ride requests"),
+    });
+  }
+}
+
+export async function handleUserCancelTravelerRequest(req: ReqLike, res: ResLike) {
+  const { requestId, consumerId } = req.body || {};
+  if (!requestId || !consumerId) {
+    return res.status(400).json({ error: "Missing requestId or consumerId" });
+  }
+
+  try {
+    if (process.env.NODE_ENV === "production") {
+      const authHeader = Array.isArray(req.headers.authorization)
+        ? req.headers.authorization[0]
+        : req.headers.authorization;
+      const user = await verifyTokenFromHeader(authHeader);
+      if (user.id !== consumerId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const { data: existingRow, error: readError } = await getSupabaseAdmin()
+      .from("bookings")
+      .select("id, consumer_id, status, data")
+      .eq("id", requestId)
+      .eq("consumer_id", consumerId)
+      .maybeSingle();
+
+    if (readError) throw readError;
+    if (!existingRow) {
+      return res.status(404).json({ error: "Traveler request not found" });
+    }
+    if (existingRow.status !== "traveler_request_open") {
+      return res.status(409).json({ error: "Only open traveler requests can be cancelled" });
+    }
+
+    const mergedData = {
+      ...(existingRow.data || {}),
+      status: "cancelled",
+      updatedAt: now,
+    };
+
+    const { error } = await getSupabaseAdmin()
+      .from("bookings")
+      .update({
+        status: "traveler_request_cancelled",
+        updated_at: now,
+        data: mergedData,
+      })
+      .eq("id", requestId)
+      .eq("consumer_id", consumerId)
+      .eq("status", "traveler_request_open");
+
+    if (error) throw error;
+
+    return res.status(200).json({ message: "Traveler request cancelled" });
+  } catch (error: any) {
+    console.error("Error cancelling traveler ride request:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to cancel traveler ride request"),
     });
   }
 }
