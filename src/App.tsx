@@ -10657,8 +10657,13 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         return;
       }
 
+      const resolvedDriverId = profile.uid || auth.currentUser?.uid || '';
+      if (!resolvedDriverId) {
+        throw new Error('Unable to resolve authenticated driver identity. Please sign in again and retry.');
+      }
+
       const ridePayload = {
-        driverId: profile.uid,
+        driverId: resolvedDriverId,
         driverName: profile.displayName,
         driverPhotoUrl: getResolvedUserPhoto(profile),
         driverRating: getResolvedUserRating(profile),
@@ -10687,25 +10692,26 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           await updateDoc(doc(db, 'travelerRideRequests', linkedTravelerRequestId), {
             status: 'matched',
             matchedRideId: createdRideId || null,
-            matchedDriverId: profile.uid,
+            matchedDriverId: resolvedDriverId,
             matchedAt: nowIso,
             updatedAt: nowIso,
           });
         }
       } else {
         const token = await getAccessToken();
-        const response = await axios.post(
-          apiPath('/api/user?action=create-ride'),
-          {
-            ...ridePayload,
-            linkedTravelerRequestId: linkedTravelerRequestId || null,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const body = {
+          ...ridePayload,
+          linkedTravelerRequestId: linkedTravelerRequestId || null,
+        };
+        const headers = {
+          Authorization: `Bearer ${token}`,
+        };
+        let response;
+        try {
+          response = await axios.post(apiPath('/api/user?action=create-ride'), body, { headers });
+        } catch (primaryError) {
+          response = await axios.post(apiPath('/api/user/create-ride'), body, { headers });
+        }
         createdRideId = String(response?.data?.rideId || '');
       }
       setNewRide({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });

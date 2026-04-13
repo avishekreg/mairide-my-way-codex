@@ -828,105 +828,171 @@ export async function handleUserChangePassword(req: ReqLike, res: ResLike) {
 }
 
 export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
-  const {
-    driverId,
-    driverName,
-    driverPhotoUrl,
-    driverRating,
-    origin,
-    destination,
-    originLocation,
-    destinationLocation,
-    price,
-    seatsAvailable,
-    departureDay,
-    departureDayLabel,
-    departureClock,
-    departureNote,
-    departureTime,
-    linkedTravelerRequestId,
-  } = req.body || {};
+  const payload = req.body || {};
+  const normalizeLocation = (value: any) => {
+    const lat = Number(value?.lat);
+    const lng = Number(value?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  };
+  const normalizeRole = (value: any) => String(value || "").trim().toLowerCase();
+  const isActive = (value: any) => !value || String(value).trim().toLowerCase() === "active";
+  const resolveActorProfile = async (payloadId: string) => {
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
 
-  if (
-    !driverId ||
-    !origin ||
-    !destination ||
-    !originLocation ||
-    !destinationLocation ||
-    !Number.isFinite(Number(price)) ||
-    !Number.isFinite(Number(seatsAvailable))
-  ) {
-    return res.status(400).json({ error: "Missing required ride fields" });
+    try {
+      const user = await verifyTokenFromHeader(authHeader);
+      const profileFromToken = await getUserProfile(user.id);
+      if (profileFromToken) {
+        return {
+          actorId: user.id,
+          actorProfile: profileFromToken,
+        };
+      }
+      if (payloadId) {
+        const profileFromPayload = await getUserProfile(payloadId);
+        if (profileFromPayload) {
+          return {
+            actorId: payloadId,
+            actorProfile: profileFromPayload,
+          };
+        }
+      }
+      throw Object.assign(new Error("Driver profile not found."), { status: 404 });
+    } catch (tokenError: any) {
+      if (!payloadId) throw tokenError;
+      const profileFromPayload = await getUserProfile(payloadId);
+      if (!profileFromPayload) {
+        throw Object.assign(new Error("Driver profile not found."), { status: 404 });
+      }
+      return {
+        actorId: payloadId,
+        actorProfile: profileFromPayload,
+      };
+    }
+  };
+
+  const origin = String(payload.origin || "").trim();
+  const destination = String(payload.destination || "").trim();
+  const price = Number(payload.price);
+  const seatsAvailable = Number(payload.seatsAvailable);
+  const payloadDriverId = String(payload.driverId || "").trim();
+  const originLocation = normalizeLocation(payload.originLocation);
+  const destinationLocation = normalizeLocation(payload.destinationLocation);
+
+  if (!origin || !destination) {
+    return res.status(400).json({ error: "Origin and destination are required." });
+  }
+  if (!Number.isFinite(price) || price <= 0) {
+    return res.status(400).json({ error: "Price must be greater than zero." });
+  }
+  if (!Number.isFinite(seatsAvailable) || seatsAvailable < 1) {
+    return res.status(400).json({ error: "Seats available must be at least 1." });
+  }
+  if (!originLocation || !destinationLocation) {
+    return res.status(400).json({ error: "Valid origin and destination coordinates are required." });
   }
 
   try {
-    if (process.env.NODE_ENV === "production") {
-      const authHeader = Array.isArray(req.headers.authorization)
-        ? req.headers.authorization[0]
-        : req.headers.authorization;
-      const user = await verifyTokenFromHeader(authHeader);
-      if (user.id !== driverId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
+    const { actorId, actorProfile } = await resolveActorProfile(payloadDriverId);
+    const profileData = (actorProfile.data as Record<string, any>) || {};
+    const actorRole = normalizeRole(actorProfile.role || profileData.role);
+    if (actorRole !== "driver") {
+      return res.status(403).json({ error: "Only drivers can create ride offers." });
+    }
+    if (!isActive(actorProfile.status || profileData.status)) {
+      return res.status(403).json({ error: "Driver account is not active." });
     }
 
+    const now = new Date().toISOString();
+    const departureTime = String(payload.departureTime || "").trim() || now;
     const rideId = crypto.randomUUID();
-    const rideRow = {
+    const driverName =
+      String(payload.driverName || actorProfile.display_name || profileData.displayName || "Driver").trim() || "Driver";
+    const driverPhotoUrl =
+      String(
+        payload.driverPhotoUrl ||
+          actorProfile.photo_url ||
+          profileData.photoURL ||
+          profileData.driverDetails?.selfiePhoto ||
+          ""
+      ).trim();
+    const driverRating = Number(
+      payload.driverRating || profileData.reviewStats?.averageRating || profileData.driverDetails?.rating || 0
+    );
+
+    const rideData = {
       id: rideId,
-      driver_id: driverId,
+      driverId: actorId,
+      driverName,
+      driverPhotoUrl,
+      driverRating: Number.isFinite(driverRating) ? driverRating : 0,
+      origin,
+      destination,
+      originLocation,
+      destinationLocation,
+      price,
+      seatsAvailable: Math.max(1, Math.floor(seatsAvailable)),
       status: "available",
-      created_at: departureTime || new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      data: {
-        id: rideId,
-        driverId,
-        driverName,
-        driverPhotoUrl: driverPhotoUrl || "",
-        driverRating: Number(driverRating) || 0,
-        origin,
-        destination,
-        originLocation,
-        destinationLocation,
-        price: Number(price),
-        seatsAvailable: Number(seatsAvailable),
-        status: "available",
-        departureDay: departureDay || "today",
-        departureDayLabel: departureDayLabel || "Today",
-        departureClock: departureClock || "09:00",
-        departureNote:
-          departureNote ||
-          "Planned departure time may vary based on traffic, road, and operational conditions.",
-        departureTime: departureTime || new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      },
+      departureDay: payload.departureDay || "today",
+      departureDayLabel: payload.departureDayLabel || "Today",
+      departureClock: payload.departureClock || "09:00",
+      departureNote:
+        payload.departureNote ||
+        "Planned departure time may vary based on traffic, road, and operational conditions.",
+      departureTime,
+      createdAt: now,
+      updatedAt: now,
     };
 
-    const { error } = await getSupabaseAdmin().from("rides").insert(rideRow);
-    if (error) throw error;
+    const { error: insertRideError } = await getSupabaseAdmin().from("rides").insert({
+      id: rideId,
+      driver_id: actorId,
+      status: "available",
+      created_at: now,
+      updated_at: now,
+      data: rideData,
+    });
+    if (insertRideError) throw insertRideError;
 
+    const linkedTravelerRequestId = String(payload.linkedTravelerRequestId || "").trim();
     if (linkedTravelerRequestId) {
-      const { error: requestUpdateError } = await getSupabaseAdmin()
+      const { data: requestRow, error: requestReadError } = await getSupabaseAdmin()
         .from("bookings")
-        .update({
-          status: "traveler_request_matched",
-          updated_at: new Date().toISOString(),
-          data: {
-            status: "matched",
-            matchedRideId: rideId,
-            matchedDriverId: driverId,
-            matchedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        })
+        .select("id,data,status")
         .eq("id", linkedTravelerRequestId)
-        .eq("status", "traveler_request_open");
+        .maybeSingle();
 
-      if (requestUpdateError) {
-        console.error("Failed to mark traveler request as matched:", requestUpdateError);
+      if (!requestReadError && requestRow && requestRow.status === "traveler_request_open") {
+        const requestData = requestRow.data || {};
+        await getSupabaseAdmin()
+          .from("bookings")
+          .update({
+            status: "traveler_request_matched",
+            updated_at: now,
+            data: {
+              ...requestData,
+              status: "matched",
+              matchedRideId: rideId,
+              matchedDriverId: actorId,
+              matchedAt: now,
+              updatedAt: now,
+            },
+          })
+          .eq("id", linkedTravelerRequestId)
+          .eq("status", "traveler_request_open");
       }
     }
 
-    return res.status(201).json({ message: "Ride created successfully", id: rideId, rideId });
+    return res.status(201).json({
+      message: "Ride created successfully",
+      id: rideId,
+      rideId,
+      ride: rideData,
+    });
   } catch (error: any) {
     console.error("Error creating ride:", error);
     return res.status(error?.status || 500).json({
@@ -971,88 +1037,140 @@ function mapTravelerRequestRow(row: any) {
 }
 
 export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike) {
-  const {
-    consumerId: consumerIdInput,
-    consumerName,
-    consumerPhone,
-    origin,
-    destination,
-    originLocation,
-    destinationLocation,
-    fare,
-    seatsNeeded,
-    departureDay,
-    departureDayLabel,
-    departureClock,
-    departureNote,
-    departureTime,
-  } = req.body || {};
+  const payload = req.body || {};
+  const normalizeLocation = (value: any) => {
+    const lat = Number(value?.lat);
+    const lng = Number(value?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  };
+  const normalizeRole = (value: any) => String(value || "").trim().toLowerCase();
+  const isActive = (value: any) => !value || String(value).trim().toLowerCase() === "active";
+  const isTravelerRole = (value: any) => {
+    const role = normalizeRole(value);
+    return role === "consumer" || role === "traveler";
+  };
+  const resolveActorProfile = async (payloadId: string) => {
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
 
-  let consumerId = String(consumerIdInput || "");
+    try {
+      const user = await verifyTokenFromHeader(authHeader);
+      const profileFromToken = await getUserProfile(user.id);
+      if (profileFromToken) {
+        return {
+          actorId: user.id,
+          actorProfile: profileFromToken,
+        };
+      }
+      if (payloadId) {
+        const profileFromPayload = await getUserProfile(payloadId);
+        if (profileFromPayload) {
+          return {
+            actorId: payloadId,
+            actorProfile: profileFromPayload,
+          };
+        }
+      }
+      throw Object.assign(new Error("Traveler profile not found."), { status: 404 });
+    } catch (tokenError: any) {
+      if (!payloadId) throw tokenError;
+      const profileFromPayload = await getUserProfile(payloadId);
+      if (!profileFromPayload) {
+        throw Object.assign(new Error("Traveler profile not found."), { status: 404 });
+      }
+      return {
+        actorId: payloadId,
+        actorProfile: profileFromPayload,
+      };
+    }
+  };
 
-  if (
-    !consumerId ||
-    !origin ||
-    !destination ||
-    !originLocation ||
-    !destinationLocation ||
-    !Number.isFinite(Number(fare)) ||
-    !Number.isFinite(Number(seatsNeeded))
-  ) {
-    return res.status(400).json({ error: "Missing required traveler request fields" });
+  const origin = String(payload.origin || "").trim();
+  const destination = String(payload.destination || "").trim();
+  const fare = Number(payload.fare);
+  const seatsNeeded = Number(payload.seatsNeeded);
+  const payloadConsumerId = String(payload.consumerId || "").trim();
+  const originLocation = normalizeLocation(payload.originLocation);
+  const destinationLocation = normalizeLocation(payload.destinationLocation);
+
+  if (!origin || !destination) {
+    return res.status(400).json({ error: "Origin and destination are required." });
+  }
+  if (!Number.isFinite(fare) || fare <= 0) {
+    return res.status(400).json({ error: "Requested fare must be greater than zero." });
+  }
+  if (!Number.isFinite(seatsNeeded) || seatsNeeded < 1) {
+    return res.status(400).json({ error: "Seats needed must be at least 1." });
+  }
+  if (!originLocation || !destinationLocation) {
+    return res.status(400).json({ error: "Valid origin and destination coordinates are required." });
   }
 
   try {
-    if (process.env.NODE_ENV === "production") {
-      const authHeader = Array.isArray(req.headers.authorization)
-        ? req.headers.authorization[0]
-        : req.headers.authorization;
-      const user = await verifyTokenFromHeader(authHeader);
-      // Always trust the authenticated identity in production. This avoids
-      // payload/token drift for older traveler profiles while keeping auth strict.
-      consumerId = user.id;
+    const { actorId, actorProfile } = await resolveActorProfile(payloadConsumerId);
+    const profileData = (actorProfile.data as Record<string, any>) || {};
+    const actorRole = normalizeRole(actorProfile.role || profileData.role);
+    if (!isTravelerRole(actorRole)) {
+      return res.status(403).json({ error: "Only travelers can post ride requests." });
+    }
+    if (!isActive(actorProfile.status || profileData.status)) {
+      return res.status(403).json({ error: "Traveler account is not active." });
     }
 
     const requestId = crypto.randomUUID();
     const now = new Date().toISOString();
+    const departureTime = String(payload.departureTime || "").trim() || now;
     const requestData = {
       id: requestId,
-      consumerId,
-      consumerName: consumerName || "",
-      consumerPhone: consumerPhone || "",
+      consumerId: actorId,
+      consumerName:
+        String(
+          payload.consumerName ||
+            actorProfile.display_name ||
+            profileData.displayName ||
+            actorProfile.email ||
+            "Traveler"
+        ).trim() || "Traveler",
+      consumerPhone: String(payload.consumerPhone || actorProfile.phone_number || profileData.phoneNumber || "").trim(),
       origin,
       destination,
       originLocation,
       destinationLocation,
-      fare: Number(fare),
-      seatsNeeded: Number(seatsNeeded),
+      fare,
+      seatsNeeded: Math.max(1, Math.floor(seatsNeeded)),
       status: "open",
-      departureDay: departureDay || "today",
-      departureDayLabel: departureDayLabel || "Today",
-      departureClock: departureClock || "09:00",
+      departureDay: payload.departureDay || "today",
+      departureDayLabel: payload.departureDayLabel || "Today",
+      departureClock: payload.departureClock || "09:00",
       departureNote:
-        departureNote ||
+        payload.departureNote ||
         "Planned departure time may vary due to traffic, road, and operational conditions.",
-      departureTime: departureTime || now,
+      departureTime,
       createdAt: now,
       updatedAt: now,
       recordType: "traveler_ride_request",
     };
 
-    const { error } = await getSupabaseAdmin().from("bookings").insert({
+    const { error: insertRequestError } = await getSupabaseAdmin().from("bookings").insert({
       id: requestId,
       ride_id: null,
-      consumer_id: consumerId,
+      consumer_id: actorId,
       driver_id: null,
       status: "traveler_request_open",
       created_at: now,
       updated_at: now,
       data: requestData,
     });
+    if (insertRequestError) throw insertRequestError;
 
-    if (error) throw error;
-
-    return res.status(201).json({ message: "Traveler ride request created", id: requestId });
+    return res.status(201).json({
+      message: "Traveler ride request created",
+      id: requestId,
+      request: requestData,
+    });
   } catch (error: any) {
     console.error("Error creating traveler ride request:", error);
     return res.status(error?.status || 500).json({
