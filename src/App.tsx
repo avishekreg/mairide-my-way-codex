@@ -1114,6 +1114,18 @@ const resolveReleaseVersion = (configVersion?: unknown, remoteVersion?: unknown)
   if (remote) return remote;
   return APP_VERSION;
 };
+const normalizeVersionTag = (version?: unknown) =>
+  String(version || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\+.*$/, '');
+
+const extractLatLng = (location?: { lat?: unknown; lng?: unknown } | null) => {
+  const lat = Number(location?.lat);
+  const lng = Number(location?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+};
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
@@ -1397,7 +1409,9 @@ const LanguageSwitcher = ({
         variant === 'auth' ? 'text-white' : 'text-mairide-primary',
         compact ? 'text-xs font-semibold' : 'text-sm font-semibold',
         variant === 'nav'
-          ? 'w-[106px] md:w-[132px] truncate'
+          ? isAppWebViewRuntime()
+            ? 'w-[94px] md:w-[112px] truncate'
+            : 'w-[106px] md:w-[132px] truncate'
           : compact
             ? 'w-[128px] md:w-[152px] truncate'
             : 'w-[172px]'
@@ -2531,7 +2545,8 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
         setAndroidUpdateMessage('Update metadata unavailable. Please try again.');
         return;
       }
-      if (latestVersion !== releaseVersion) {
+      const hasUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(releaseVersion);
+      if (hasUpdate) {
         setIsAndroidUpdateAvailable(true);
         setAndroidUpdateMessage(`New Android build ${latestVersion} is available.`);
       } else {
@@ -2599,24 +2614,20 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
         <div className="flex flex-col items-center gap-3 mb-3">
           {isAndroidDevice ? (
             <div className="w-full max-w-md">
-              <button
-                type="button"
-                onClick={isAndroidUpdateAvailable ? () => {
-                  openAndroidDownload();
-                } : () => void checkAndroidUpdate()}
-                className={cn(
-                  'w-full rounded-2xl px-4 py-3 text-sm font-bold transition',
-                  isAndroidUpdateAvailable
-                    ? 'bg-mairide-accent text-white hover:opacity-90 shadow-lg shadow-mairide-accent/25 animate-pulse'
-                    : 'bg-mairide-primary text-white hover:bg-mairide-accent'
-                )}
-              >
-                {isCheckingAndroidUpdate
-                  ? 'Checking updates...'
-                  : isAndroidUpdateAvailable
-                    ? 'Update App Now'
-                    : 'Check for App Update'}
-              </button>
+              {isAndroidUpdateAvailable ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    openAndroidDownload();
+                  }}
+                  className={cn(
+                    'w-full rounded-2xl px-4 py-3 text-sm font-bold transition',
+                    'bg-mairide-accent text-white hover:opacity-90 shadow-lg shadow-mairide-accent/25 animate-pulse'
+                  )}
+                >
+                  Update App Now
+                </button>
+              ) : null}
             </div>
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -2644,7 +2655,7 @@ const AppFooter = ({ releaseVersion }: { releaseVersion: string }) => {
               Install Web App
             </button>
           </div>
-          {isAndroidDevice && androidUpdateMessage ? (
+          {isAndroidDevice && androidUpdateMessage && isAndroidUpdateAvailable ? (
             <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
               {androidUpdateMessage}
             </p>
@@ -8314,6 +8325,7 @@ const finalizeDriverRazorpayPayment = async (
 
 const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
+  const showDashboardHeroLogo = !(isAppWebViewRuntime() || isAndroidWebViewLikeRuntime());
   const [search, setSearch] = useState({ from: '', to: '' });
   const [rides, setRides] = useState<any[]>([]);
   const [dashboardBookings, setDashboardBookings] = useState<Booking[]>([]);
@@ -8324,7 +8336,10 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
   const hasMapsIssue = Boolean(loadError || authFailure);
-  const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(() => {
+    if (isAppWebViewRuntime() || isAndroidWebViewLikeRuntime()) return null;
+    return extractLatLng(profile.location);
+  });
   const [drivers, setDrivers] = useState<UserProfile[]>([]);
   const [selectedRide, setSelectedRide] = useState<any | null>(null);
   const [pendingFutureRideAction, setPendingFutureRideAction] = useState<{
@@ -8539,6 +8554,14 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   };
 
   useEffect(() => {
+    if (userLocation || isAppWebViewRuntime() || isAndroidWebViewLikeRuntime()) return;
+    const fallbackLocation = extractLatLng(profile.location);
+    if (fallbackLocation) {
+      setUserLocation(fallbackLocation);
+    }
+  }, [profile.location?.lat, profile.location?.lng, userLocation]);
+
+  useEffect(() => {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -8554,7 +8577,13 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
             }
           }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
         },
-        (error) => console.error("Initial Geolocation Error:", error),
+        (error) => {
+          console.error("Initial Geolocation Error:", error);
+          const fallbackLocation = extractLatLng(profile.location);
+          if (fallbackLocation) {
+            setUserLocation((prev) => prev || fallbackLocation);
+          }
+        },
         { enableHighAccuracy: true, timeout: 5000 }
       );
 
@@ -8571,12 +8600,18 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
             }
           }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
         },
-        (error) => console.error("Watch Geolocation Error:", error),
+        (error) => {
+          console.error("Watch Geolocation Error:", error);
+          const fallbackLocation = extractLatLng(profile.location);
+          if (fallbackLocation) {
+            setUserLocation((prev) => prev || fallbackLocation);
+          }
+        },
         { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
       );
       return () => navigator.geolocation.clearWatch(watchId);
     }
-  }, [profile.uid]);
+  }, [profile.uid, profile.location?.lat, profile.location?.lng]);
 
   useEffect(() => {
     const handleOnline = () => setTripNetworkState('recovered');
@@ -9409,7 +9444,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
         <>
           <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-col gap-6 md:flex-row md:items-center">
-              <img src={LOGO_URL} className="h-24 w-24 object-contain rounded-[22%]" alt="MaiRide Logo" />
+              {showDashboardHeroLogo ? (
+                <img src={LOGO_URL} className="h-24 w-24 object-contain rounded-[22%]" alt="MaiRide Logo" />
+              ) : null}
               <div>
                 <h1 className="mb-2 text-4xl font-bold uppercase tracking-tight text-mairide-primary">Where to?</h1>
                 <p className="italic serif text-mairide-secondary">Find discounted intercity rides on empty leg journeys.</p>
@@ -10043,6 +10080,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
 const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
+  const showDashboardHeroLogo = !(isAppWebViewRuntime() || isAndroidWebViewLikeRuntime());
   const [isOnline, setIsOnline] = useState(profile.driverDetails?.isOnline || false);
   const [newRide, setNewRide] = useState({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
   const [showOfferForm, setShowOfferForm] = useState(false);
@@ -10067,7 +10105,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [isPostingRide, setIsPostingRide] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'requests' | 'history' | 'wallet' | 'support' | 'profile'>('dashboard');
   const hasMapsIssue = Boolean(loadError || authFailure);
-  const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(() => {
+    if (isAppWebViewRuntime() || isAndroidWebViewLikeRuntime()) return null;
+    return extractLatLng(profile.location);
+  });
   const [autocompleteFrom, setAutocompleteFrom] = useState<any | null>(null);
   const [autocompleteTo, setAutocompleteTo] = useState<any | null>(null);
   const [originLocation, setOriginLocation] = useState<{ lat: number, lng: number } | null>(null);
@@ -10281,6 +10322,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, []);
 
   useEffect(() => {
+    if (userLocation || isAppWebViewRuntime() || isAndroidWebViewLikeRuntime()) return;
+    const fallbackLocation = extractLatLng(profile.location);
+    if (fallbackLocation) {
+      setUserLocation(fallbackLocation);
+      setDriverSignalLocation((prev) => prev || { lat: fallbackLocation.lat, lng: fallbackLocation.lng });
+    }
+  }, [profile.location?.lat, profile.location?.lng, userLocation]);
+
+  useEffect(() => {
     if ("geolocation" in navigator) {
       const watchId = navigator.geolocation.watchPosition(
         (position) => {
@@ -10303,12 +10353,19 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             }
           }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
         },
-        (error) => console.error("Geolocation Error:", error),
+        (error) => {
+          console.error("Geolocation Error:", error);
+          const fallbackLocation = extractLatLng(profile.location);
+          if (fallbackLocation) {
+            setUserLocation((prev) => prev || fallbackLocation);
+            setDriverSignalLocation((prev) => prev || { lat: fallbackLocation.lat, lng: fallbackLocation.lng });
+          }
+        },
         { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
       );
       return () => navigator.geolocation.clearWatch(watchId);
     }
-  }, [profile.uid]);
+  }, [profile.uid, profile.location?.lat, profile.location?.lng]);
 
   useEffect(() => {
     const trackableRequests = requests.filter(isBookingTrackable);
@@ -11098,7 +11155,9 @@ const finalizeDriverDashboardRazorpayPayment = async (
         <>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
             <div className="flex items-center space-x-6">
-              <img src={LOGO_URL} className="w-24 h-24 object-contain rounded-[22%]" alt="MaiRide Logo" />
+              {showDashboardHeroLogo ? (
+                <img src={LOGO_URL} className="w-24 h-24 object-contain rounded-[22%]" alt="MaiRide Logo" />
+              ) : null}
               <div>
                 <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Driver Dashboard</h1>
                 <p className="text-mairide-secondary italic serif">Manage your empty leg journeys and earnings.</p>
@@ -17110,7 +17169,7 @@ const App = () => {
         const latestVersion = String(data?.appVersion || '').trim();
         const apkUrl = String(data?.apkUrl || '/downloads/mairide-android.apk').trim() || '/downloads/mairide-android.apk';
         if (!latestVersion) return;
-        const needsUpdate = latestVersion !== releaseVersion;
+        const needsUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(releaseVersion);
         if (!active) return;
         setAndroidUpdateState({
           available: needsUpdate,
@@ -17118,7 +17177,7 @@ const App = () => {
           apkUrl,
         });
         if (needsUpdate) {
-          const dismissedForVersion = safeStorageGet('session', 'mairide_android_update_dismissed_version');
+          const dismissedForVersion = safeStorageGet('local', 'mairide_android_update_dismissed_version');
           setShowAndroidUpdatePrompt(dismissedForVersion !== latestVersion);
         } else {
           setShowAndroidUpdatePrompt(false);
@@ -17157,13 +17216,13 @@ const App = () => {
 
   const handleDismissAndroidUpdatePrompt = () => {
     if (androidUpdateState.latestVersion) {
-      safeStorageSet('session', 'mairide_android_update_dismissed_version', androidUpdateState.latestVersion);
+      safeStorageSet('local', 'mairide_android_update_dismissed_version', androidUpdateState.latestVersion);
     }
     setShowAndroidUpdatePrompt(false);
   };
 
   const handleApplyAndroidUpdate = () => {
-    window.location.href = androidUpdateState.apkUrl || '/downloads/mairide-android.apk';
+    window.open(androidUpdateState.apkUrl || '/downloads/mairide-android.apk', '_blank', 'noopener,noreferrer');
   };
 
   const androidUpdatePrompt = showAndroidUpdatePrompt && androidUpdateState.available ? (
