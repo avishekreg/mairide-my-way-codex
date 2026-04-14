@@ -2184,6 +2184,24 @@ export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLik
         })
       );
 
+      const rideId = bookingRow.ride_id || seedData.rideId;
+      if (rideId) {
+        const { error: rideError } = await supabaseAdmin
+          .from("rides")
+          .update({
+            status: "full",
+            updated_at: updatedAt,
+            data: {
+              ...((bookingRow.data as Record<string, any>) || {}),
+              status: "full",
+              updatedAt,
+            },
+          })
+          .eq("id", rideId);
+
+        if (rideError) throw rideError;
+      }
+
       return res.status(200).json({ message: "Counter offer accepted." });
     }
 
