@@ -7026,14 +7026,25 @@ const finalizeTravelerRazorpayPayment = async (
         }
       );
 
-      const updatedAt = new Date().toISOString();
+      const acceptedFare =
+        action === 'accepted'
+          ? negotiatedFare ?? getNegotiationDisplayFare(booking)
+          : undefined;
+      let updatedAt = new Date().toISOString();
+      try {
+        updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
+          acceptedFare,
+        });
+      } catch (syncError) {
+        console.warn('Negotiation sync (traveler accept) failed after API success.', syncError);
+      }
       setBookings((prev) =>
         prev.map((candidate) =>
           getBookingThreadKey(candidate) === getBookingThreadKey(booking)
             ? {
                 ...candidate,
                 status: action === 'accepted' ? 'confirmed' : 'rejected',
-                fare: action === 'accepted' && negotiatedFare ? negotiatedFare : candidate.fare,
+                ...(action === 'accepted' && acceptedFare ? { fare: acceptedFare } : {}),
                 negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
                 negotiationActor: 'driver',
                 driverCounterPending: false,
@@ -9313,14 +9324,25 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         }
       );
 
-      const updatedAt = new Date().toISOString();
+      const acceptedFare =
+        action === 'accepted'
+          ? booking.negotiatedFare ?? getNegotiationDisplayFare(booking)
+          : undefined;
+      let updatedAt = new Date().toISOString();
+      try {
+        updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
+          acceptedFare,
+        });
+      } catch (syncError) {
+        console.warn('Negotiation sync (traveler dashboard) failed after API success.', syncError);
+      }
       setDashboardBookings((prev) =>
         prev.map((candidate) =>
           getBookingThreadKey(candidate) === getBookingThreadKey(booking)
             ? {
                 ...candidate,
                 status: action === 'accepted' ? 'confirmed' : 'rejected',
-                fare: action === 'accepted' && booking.negotiatedFare ? booking.negotiatedFare : candidate.fare,
+                ...(action === 'accepted' && acceptedFare ? { fare: acceptedFare } : {}),
                 negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
                 negotiationActor: 'driver',
                 driverCounterPending: false,
@@ -10865,6 +10887,16 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         hasPendingTravelerCounterOffer(request) && request.negotiatedFare
           ? request.negotiatedFare
           : request.fare;
+      const negotiationActor = hasPendingTravelerCounterOffer(request) ? 'consumer' : 'driver';
+      let updatedAt = new Date().toISOString();
+      try {
+        updatedAt = await persistNegotiationResolutionThroughCompatStore(request, negotiationActor, status, {
+          acceptedFare,
+          driverPhone: profile.phoneNumber || '',
+        });
+      } catch (syncError) {
+        console.warn('Negotiation sync (driver response) failed after API success.', syncError);
+      }
 
       setRequests((prev) =>
         status === 'rejected'
@@ -10879,7 +10911,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
                       booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
                     driverCounterPending: false,
                     driverPhone: profile.phoneNumber || '',
-                    updatedAt: new Date().toISOString(),
+                    updatedAt,
                   }
                 : booking
             )
