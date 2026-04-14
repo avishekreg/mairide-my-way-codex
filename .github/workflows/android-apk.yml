@@ -101,15 +101,18 @@ jobs:
             echo "Missing launcher icon source: $ICON_SRC"
             exit 1
           fi
+          # Ubuntu runners do not include sips; install ImageMagick for resizing.
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
           # Prefer bitmap launcher icon from a single canonical source to avoid icon drift.
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
           mkdir -p android/app/src/main/res/mipmap-mdpi android/app/src/main/res/mipmap-hdpi android/app/src/main/res/mipmap-xhdpi android/app/src/main/res/mipmap-xxhdpi android/app/src/main/res/mipmap-xxxhdpi
-          sips -z 48 48   "$ICON_SRC" --out android/app/src/main/res/mipmap-mdpi/ic_launcher.png >/dev/null
-          sips -z 72 72   "$ICON_SRC" --out android/app/src/main/res/mipmap-hdpi/ic_launcher.png >/dev/null
-          sips -z 96 96   "$ICON_SRC" --out android/app/src/main/res/mipmap-xhdpi/ic_launcher.png >/dev/null
-          sips -z 144 144 "$ICON_SRC" --out android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png >/dev/null
-          sips -z 192 192 "$ICON_SRC" --out android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png >/dev/null
+          magick "$ICON_SRC" -resize 48x48   android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          magick "$ICON_SRC" -resize 72x72   android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          magick "$ICON_SRC" -resize 96x96   android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          magick "$ICON_SRC" -resize 144x144 android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          magick "$ICON_SRC" -resize 192x192 android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
           cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
           cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
           cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
