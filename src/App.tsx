@@ -1085,6 +1085,7 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "MaiRide my way";
 const BRAND_TAGLINE = "";
+const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v3.0.1-beta';
@@ -2627,7 +2628,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
   const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
   const openAndroidDownload = () => {
-    window.location.href = `https://downloads.mairide.in/mairide-android.apk?t=${Date.now()}`;
+    window.location.href = `${LIVE_ANDROID_APK_URL}?t=${Date.now()}`;
   };
 
   useEffect(() => {
@@ -17014,7 +17015,7 @@ const App = () => {
   }>({
     available: false,
     latestVersion: '',
-    apkUrl: '/downloads/mairide-android.apk',
+    apkUrl: LIVE_ANDROID_APK_URL,
   });
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
   const [remoteAppVersion, setRemoteAppVersion] = useState('');
@@ -17449,7 +17450,7 @@ const App = () => {
         if (!response.ok) return;
         const data = await response.json();
         const latestVersion = String(data?.appVersion || '').trim();
-        const apkUrl = String(data?.apkUrl || '/downloads/mairide-android.apk').trim() || '/downloads/mairide-android.apk';
+        const apkUrl = String(data?.apkUrl || LIVE_ANDROID_APK_URL).trim() || LIVE_ANDROID_APK_URL;
         if (!latestVersion) return;
         const needsUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(releaseVersion);
         if (!active) return;
@@ -17504,7 +17505,7 @@ const App = () => {
   };
 
   const handleApplyAndroidUpdate = () => {
-    window.open(androidUpdateState.apkUrl || '/downloads/mairide-android.apk', '_blank', 'noopener,noreferrer');
+    window.location.href = `${LIVE_ANDROID_APK_URL}?t=${Date.now()}`;
   };
 
   const androidUpdatePrompt = showAndroidUpdatePrompt && androidUpdateState.available ? (
