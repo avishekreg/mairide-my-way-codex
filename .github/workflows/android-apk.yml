@@ -225,8 +225,8 @@ jobs:
           APP_VERSION_BASE="${VITE_APP_VERSION}"
           APP_VERSION="${APP_VERSION_BASE}+build.${GITHUB_RUN_NUMBER}"
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          # Use GitHub Release asset URL for reliable large-file hosting.
-          APK_PUBLIC_URL="https://github.com/avishekreg/mairide-my-way-codex/releases/download/android-latest/mairide-android.apk"
+          # Publish a stable direct-download URL on mairide.in.
+          APK_PUBLIC_URL="https://www.mairide.in/downloads/mairide-android.apk"
           cat > public/downloads/android-update.json <<EOF
           {
             "appVersion": "${APP_VERSION}",
