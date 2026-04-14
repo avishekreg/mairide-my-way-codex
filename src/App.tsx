@@ -2161,6 +2161,25 @@ const isMissingSupabaseTableError = (error: any) => {
   );
 };
 
+let tripSessionsAvailability: 'unknown' | 'missing' | 'available' = 'unknown';
+let tripSessionsWarningEmitted = false;
+
+const markTripSessionsMissing = (error?: unknown) => {
+  if (tripSessionsAvailability === 'missing') return;
+  tripSessionsAvailability = 'missing';
+  if (!tripSessionsWarningEmitted) {
+    tripSessionsWarningEmitted = true;
+    console.warn('Trip sessions table missing; disabling live trip session sync.', error);
+  }
+};
+
+let geolocationWarningEmitted = false;
+const logGeolocationIssue = (context: string, error: GeolocationPositionError) => {
+  if (geolocationWarningEmitted) return;
+  geolocationWarningEmitted = true;
+  console.warn(`${context} geolocation unavailable; falling back to last known location.`, error);
+};
+
 const parseApiResponse = async (response: Response, fallback: string) => {
   const rawText = await response.text();
   let payload: any = null;
@@ -2351,8 +2370,22 @@ const upsertTripSession = async ({
 }) => {
   const now = new Date().toISOString();
   const sessionRef = doc(db, 'tripSessions', booking.id);
-  const snapshot = await getDoc(sessionRef);
-  const previous = snapshot.exists() ? (snapshot.data() as TripSession) : null;
+  let previous: TripSession | null = null;
+
+  if (tripSessionsAvailability !== 'missing') {
+    try {
+      const snapshot = await getDoc(sessionRef);
+      previous = snapshot.exists() ? (snapshot.data() as TripSession) : null;
+      tripSessionsAvailability = 'available';
+    } catch (error) {
+      if (isMissingSupabaseTableError(error)) {
+        markTripSessionsMissing(error);
+        previous = null;
+      } else {
+        throw error;
+      }
+    }
+  }
   const resolvedStatus = forceStatus || getBookingRealtimeStatus(booking);
   const previousActorLocation =
     actorRole === 'driver'
@@ -2459,25 +2492,48 @@ const upsertTripSession = async ({
     updatedAt: now,
   };
 
-  await setDoc(sessionRef, sessionPayload, { merge: true });
+  if (tripSessionsAvailability === 'missing') {
+    return sessionPayload;
+  }
+
+  try {
+    await setDoc(sessionRef, sessionPayload, { merge: true });
+    tripSessionsAvailability = 'available';
+  } catch (error) {
+    if (isMissingSupabaseTableError(error)) {
+      markTripSessionsMissing(error);
+      return sessionPayload;
+    }
+    throw error;
+  }
   return sessionPayload;
 };
 
 const markTripSessionStale = async (session: TripSession) => {
+  if (tripSessionsAvailability === 'missing') return;
   const staleAfterMs = Number(session.staleAfterMs || TRIP_SESSION_STALE_AFTER_MS);
   const lastSignal = session.lastSignalAt ? new Date(session.lastSignalAt).getTime() : 0;
   if (!lastSignal) return;
   if (Date.now() - lastSignal <= staleAfterMs) return;
 
-  await setDoc(
-    doc(db, 'tripSessions', session.id),
-    {
-      isStale: true,
-      networkState: 'offline',
-      updatedAt: new Date().toISOString(),
-    },
-    { merge: true }
-  );
+  try {
+    await setDoc(
+      doc(db, 'tripSessions', session.id),
+      {
+        isStale: true,
+        networkState: 'offline',
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+    tripSessionsAvailability = 'available';
+  } catch (error) {
+    if (isMissingSupabaseTableError(error)) {
+      markTripSessionsMissing(error);
+      return;
+    }
+    throw error;
+  }
 };
 
 const listSupportTickets = async (all = false) => {
@@ -3245,6 +3301,10 @@ const withTimeout = async <T,>(promise: Promise<T>, ms: number, fallback: T): Pr
     if (timer) clearTimeout(timer);
   }
 };
+
+if (typeof globalThis !== 'undefined' && !(globalThis as any).withTimeout) {
+  (globalThis as any).withTimeout = withTimeout;
+}
 
 const isFutureRide = (ride: Partial<Ride>) => {
   if (!ride.departureTime) return false;
@@ -5033,7 +5093,7 @@ const DriverOnboarding = ({
           ...(capturingField.startsWith('dl') ? { dlGeoTag: location } : {})
         }));
       } catch (error) {
-        console.error("Geo-tagging failed:", error);
+        console.warn("Geo-tagging failed:", error);
         // Still set the image even if geo-tagging fails, but maybe alert the user
         const normalizedImage = await compressDataUrlImage(image);
         setFormData(prev => ({ ...prev, [capturingField]: normalizedImage }));
@@ -8692,7 +8752,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
         },
         (error) => {
-          console.error("Initial Geolocation Error:", error);
+          logGeolocationIssue('Traveler', error);
           const fallbackLocation = extractLatLng(profile.location);
           if (fallbackLocation) {
             setUserLocation((prev) => prev || fallbackLocation);
@@ -8715,7 +8775,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
         },
         (error) => {
-          console.error("Watch Geolocation Error:", error);
+          logGeolocationIssue('Traveler', error);
           const fallbackLocation = extractLatLng(profile.location);
           if (fallbackLocation) {
             setUserLocation((prev) => prev || fallbackLocation);
@@ -10532,7 +10592,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
         },
         (error) => {
-          console.error("Geolocation Error:", error);
+          logGeolocationIssue('Driver', error);
           const fallbackLocation = extractLatLng(profile.location);
           if (fallbackLocation) {
             setUserLocation((prev) => prev || fallbackLocation);
@@ -14679,7 +14739,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       (position) => {
         syncLocation(position.coords.latitude, position.coords.longitude);
       },
-      (error) => console.error('Admin geolocation error:', error),
+      (error) => logGeolocationIssue('Admin', error),
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
 
@@ -14687,7 +14747,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       (position) => {
         syncLocation(position.coords.latitude, position.coords.longitude);
       },
-      (error) => console.error('Admin geolocation watch error:', error),
+      (error) => logGeolocationIssue('Admin', error),
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }
     );
 
