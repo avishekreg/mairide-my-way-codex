@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.ts";
 
 function applyCorsHeaders(req: any, res: any) {
   const requestOrigin = String(req?.headers?.origin || "").trim();
