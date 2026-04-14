@@ -2856,41 +2856,34 @@ const Navbar = ({
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
-          <div className="flex items-center cursor-pointer" onClick={handleHomeNavigation}>
-            <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="MaiRide Logo" />
-            <span className="text-xl font-black tracking-tighter text-mairide-primary">
-              {BRAND_NAME}
-            </span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsOpen(true)}
+              className="inline-flex items-center justify-center rounded-xl border border-mairide-secondary bg-white p-2 text-mairide-primary hover:bg-mairide-bg transition-colors"
+              aria-label="Open menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="flex items-center cursor-pointer" onClick={handleHomeNavigation}>
+              <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="MaiRide Logo" />
+              <span className="text-xl font-black tracking-tighter text-mairide-primary">
+                {BRAND_NAME}
+              </span>
+            </div>
           </div>
-          
-          <div className="hidden md:flex items-center space-x-4">
-            <button onClick={handleHomeNavigation} className="text-mairide-primary hover:text-mairide-accent font-medium">Home</button>
-            <button onClick={() => navigate('/support')} className="text-mairide-primary hover:text-mairide-accent font-medium">Support</button>
-            {profile?.role === 'admin' && (
-              <button onClick={() => navigate('/admin')} className="text-mairide-primary hover:text-mairide-accent font-medium">Admin Panel</button>
-            )}
-            {profile?.role === 'driver' ? (
-              <button onClick={() => navigate('/driver/rides')} className="text-mairide-primary hover:text-mairide-accent font-medium">My Rides</button>
-            ) : (
-              <button onClick={() => navigate('/consumer/bookings')} className="text-mairide-primary hover:text-mairide-accent font-medium">My Bookings</button>
-            )}
+
+          <div className="flex items-center space-x-4">
             <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact variant="nav" />
             <div className="flex items-center space-x-3 pl-3 border-l border-mairide-secondary">
               <div className="text-right">
                 <p className="text-sm font-semibold text-mairide-primary">{profile?.displayName}</p>
                 <p className="text-xs text-mairide-secondary capitalize">{profile?.role}</p>
               </div>
-                <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="w-8 h-8 rounded-full border border-mairide-secondary" />
+              <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="w-8 h-8 rounded-full border border-mairide-secondary" />
               <button onClick={onLogout} className="p-2 text-mairide-secondary hover:text-red-600 transition-colors">
                 <LogOut className="w-5 h-5" />
               </button>
             </div>
-          </div>
-
-          <div className="md:hidden">
-            <button onClick={() => setIsOpen(!isOpen)} className="p-2 text-mairide-primary">
-              {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
           </div>
         </div>
       </div>
@@ -2902,7 +2895,7 @@ const Navbar = ({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-mairide-primary/40 backdrop-blur-sm md:hidden"
+              className="fixed inset-0 z-40 bg-mairide-primary/40 backdrop-blur-sm"
               onClick={() => setIsOpen(false)}
             />
             <motion.div
@@ -2910,7 +2903,7 @@ const Navbar = ({
               animate={{ x: 0 }}
               exit={{ x: -320 }}
               transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-              className="fixed inset-y-0 left-0 z-50 w-72 bg-white shadow-2xl border-r border-mairide-secondary md:hidden"
+              className="fixed inset-y-0 left-0 z-50 w-72 bg-white shadow-2xl border-r border-mairide-secondary"
             >
               <div className="flex items-center justify-between px-5 py-4 border-b border-mairide-secondary">
                 <div className="flex items-center gap-3">
@@ -8382,6 +8375,7 @@ const finalizeDriverRazorpayPayment = async (
 const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
   const showDashboardHeroLogo = !isAppDisplayMode();
+  const firstName = String(profile.displayName || profile.email || 'Traveler').split(' ')[0] || 'Traveler';
   const [search, setSearch] = useState({ from: '', to: '' });
   const [rides, setRides] = useState<any[]>([]);
   const [dashboardBookings, setDashboardBookings] = useState<Booking[]>([]);
@@ -9571,65 +9565,14 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <div className="hidden md:flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('search')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'search' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <Search className="w-4 h-4" />
-          <span>Request Ride</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('history')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'history' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <History className="w-4 h-4" />
-          <span>History</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('wallet')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'wallet' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <Wallet className="w-4 h-4" />
-          <span>Wallet</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('support')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'support' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <LifeBuoy className="w-4 h-4" />
-          <span>Support</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('profile')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'profile' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <UserIcon className="w-4 h-4" />
-          <span>Profile</span>
-        </button>
-      </div>
-
       {activeTab === 'search' && (
         <>
           <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-col gap-6 md:flex-row md:items-center">
               {showDashboardHeroLogo ? (
-                <img src={LOGO_URL} className="h-24 w-24 object-contain rounded-[22%]" alt="MaiRide Logo" />
+                <div className="h-24 w-24 rounded-[22%] bg-mairide-primary text-white flex items-center justify-center text-2xl font-black uppercase tracking-wide">
+                  {firstName}
+                </div>
               ) : null}
               <div>
                 <h1 className="mb-2 text-4xl font-bold uppercase tracking-tight text-mairide-primary">Where to?</h1>
@@ -10265,6 +10208,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
   const showDashboardHeroLogo = !isAppDisplayMode();
+  const firstName = String(profile.displayName || profile.email || 'Driver').split(' ')[0] || 'Driver';
   const [isOnline, setIsOnline] = useState(profile.driverDetails?.isOnline || false);
   const [newRide, setNewRide] = useState({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
   const [showOfferForm, setShowOfferForm] = useState(false);
@@ -11344,75 +11288,14 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <div className="hidden md:flex bg-mairide-bg p-1 rounded-2xl mb-8 w-fit mx-auto overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'dashboard' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <Settings className="w-4 h-4" />
-          <span>Dashboard</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('requests')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'requests' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <Clock className="w-4 h-4" />
-          <span>Requests</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('history')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'history' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <History className="w-4 h-4" />
-          <span>History</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('wallet')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'wallet' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <Wallet className="w-4 h-4" />
-          <span>Wallet</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('support')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'support' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <LifeBuoy className="w-4 h-4" />
-          <span>Support</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('profile')}
-          className={cn(
-            "px-6 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2 whitespace-nowrap",
-            activeTab === 'profile' ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary"
-          )}
-        >
-          <UserIcon className="w-4 h-4" />
-          <span>Profile</span>
-        </button>
-      </div>
-
       {activeTab === 'dashboard' && (
         <>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
             <div className="flex items-center space-x-6">
               {showDashboardHeroLogo ? (
-                <img src={LOGO_URL} className="w-24 h-24 object-contain rounded-[22%]" alt="MaiRide Logo" />
+                <div className="w-24 h-24 rounded-[22%] bg-mairide-primary text-white flex items-center justify-center text-2xl font-black uppercase tracking-wide">
+                  {firstName}
+                </div>
               ) : null}
               <div>
                 <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Driver Dashboard</h1>
