@@ -3143,6 +3143,8 @@ interface AuthPageProps {
 const normalizePhoneForAuth = (value: string) => String(value || '').replace(/[^\d]/g, '');
 const PHONE_LOGIN_PROFILE_KEY = 'mairide_phone_profile_uid';
 const PHONE_LOGIN_NUMBER_KEY = 'mairide_phone_login_number';
+const OAUTH_MODE_KEY = 'mairide_oauth_mode';
+const OAUTH_ROLE_KEY = 'mairide_oauth_role';
 
 const sanitizeDisplayName = (value: string) =>
   String(value || '')
@@ -3152,6 +3154,12 @@ const sanitizeDisplayName = (value: string) =>
     .slice(0, 80);
 
 const normalizeEmailValue = (value: string) => String(value || '').trim().toLowerCase();
+const getStoredOAuthRole = (): 'consumer' | 'driver' =>
+  safeStorageGet('session', OAUTH_ROLE_KEY) === 'driver' ? 'driver' : 'consumer';
+const clearStoredOAuthIntent = () => {
+  safeStorageRemove('session', OAUTH_MODE_KEY);
+  safeStorageRemove('session', OAUTH_ROLE_KEY);
+};
 
 const isValidEmailValue = (value: string) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(normalizeEmailValue(value));
@@ -3991,7 +3999,8 @@ const findUserProfileByPhone = async (value: string) => {
     setIsLoading(true);
     setNotRegisteredError(false);
     try {
-      safeStorageSet('session', 'mairide_oauth_mode', authMode);
+      safeStorageSet('session', OAUTH_MODE_KEY, authMode);
+      safeStorageSet('session', OAUTH_ROLE_KEY, role);
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       if (result?.user) {
@@ -4028,15 +4037,24 @@ const findUserProfileByPhone = async (value: string) => {
       if (!docSnap.exists()) {
         const targetPhone = user.phoneNumber || phone || '';
         const phoneCandidates = buildPhoneVariants(targetPhone);
-        const targetEmail = user.email || '';
+        const targetEmail = normalizeEmailValue(user.email || '');
+        const emailCandidates = Array.from(
+          new Set([user.email || '', targetEmail].map(normalizeEmailValue).filter(Boolean))
+        );
+        const selectedOAuthRole = getStoredOAuthRole();
 
         // Check for existing profile by email or phone
         let existingProfile: UserProfile | null = null;
         
-        if (targetEmail) {
-          const qEmail = query(collection(db, 'users'), where('email', '==', targetEmail));
-          const emailSnap = await getDocs(qEmail);
-          if (!emailSnap.empty) existingProfile = emailSnap.docs[0].data() as UserProfile;
+        if (emailCandidates.length) {
+          for (const emailCandidate of emailCandidates) {
+            const qEmail = query(collection(db, 'users'), where('email', '==', emailCandidate));
+            const emailSnap = await getDocs(qEmail);
+            if (!emailSnap.empty) {
+              existingProfile = emailSnap.docs[0].data() as UserProfile;
+              break;
+            }
+          }
         }
 
         if (!existingProfile && phoneCandidates.length) {
@@ -4079,6 +4097,7 @@ const findUserProfileByPhone = async (value: string) => {
           };
           
           await setDoc(docRef, newProfile);
+          clearStoredOAuthIntent();
           
           if (oldUid !== user.uid && !oldUid.startsWith('manual_')) {
             await deleteDoc(doc(db, 'users', oldUid));
@@ -4086,12 +4105,12 @@ const findUserProfileByPhone = async (value: string) => {
           return;
         }
 
-        const isAdminEmail = user.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+        const isAdminEmail = targetEmail === SUPER_ADMIN_EMAIL;
         const newProfile: UserProfile = {
           uid: user.uid,
           email: targetEmail,
           displayName: name || user.displayName || phone || 'User',
-          role: isAdminEmail ? 'admin' : (role || 'consumer'),
+          role: isAdminEmail ? 'admin' : selectedOAuthRole,
           status: 'active',
           photoURL: user.photoURL || '',
           phoneNumber: targetPhone,
@@ -4115,6 +4134,7 @@ const findUserProfileByPhone = async (value: string) => {
             : {}),
         };
         await setDoc(docRef, newProfile);
+        clearStoredOAuthIntent();
         
         // Initialize wallet and referral
         await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined);
@@ -4123,6 +4143,7 @@ const findUserProfileByPhone = async (value: string) => {
         if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL && existingProfile.role !== 'admin') {
           await updateDoc(docRef, { role: 'admin', onboardingComplete: true });
         }
+        clearStoredOAuthIntent();
       }
     } catch (error: any) {
       if (error.message === "NOT_REGISTERED") throw error;
@@ -17155,10 +17176,22 @@ const App = () => {
           } else if (u.email && !u.isAnonymous) {
             // If not found by UID, try to find by email (for pre-created admin users)
             try {
-              const q = query(collection(db, 'users'), where('email', '==', u.email));
-              const querySnapshot = await getDocs(q);
+              const normalizedEmail = normalizeEmailValue(u.email);
+              const emailCandidates = Array.from(
+                new Set([u.email || '', normalizedEmail].map(normalizeEmailValue).filter(Boolean))
+              );
+              let querySnapshot = null;
+
+              for (const emailCandidate of emailCandidates) {
+                const q = query(collection(db, 'users'), where('email', '==', emailCandidate));
+                const nextSnapshot = await getDocs(q);
+                if (!nextSnapshot.empty) {
+                  querySnapshot = nextSnapshot;
+                  break;
+                }
+              }
               
-              if (!querySnapshot.empty) {
+              if (querySnapshot && !querySnapshot.empty) {
                 const existingProfileDoc = querySnapshot.docs[0];
                 const existingProfile = existingProfileDoc.data() as UserProfile;
                 
@@ -17177,27 +17210,30 @@ const App = () => {
                 } else {
                   setProfile(existingProfile);
                 }
+                clearStoredOAuthIntent();
                 setLoading(false);
               } else {
-                const oauthMode = safeStorageGet('session', 'mairide_oauth_mode');
+                const oauthMode = safeStorageGet('session', OAUTH_MODE_KEY);
                 if (oauthMode === 'signup') {
+                  const isAdminEmail = normalizedEmail === SUPER_ADMIN_EMAIL;
+                  const selectedOAuthRole = getStoredOAuthRole();
                   const newProfile: UserProfile = {
                     uid: u.uid,
-                    email: u.email || '',
+                    email: normalizedEmail,
                     displayName: u.displayName || u.email || 'User',
-                    role: 'consumer',
+                    role: isAdminEmail ? 'admin' : selectedOAuthRole,
                     status: 'active',
                     photoURL: u.photoURL || '',
                     phoneNumber: u.phoneNumber || '',
-                    onboardingComplete: true,
+                    onboardingComplete: isAdminEmail,
                     forcePasswordChange: false,
                   };
                   await setDoc(doc(db, 'users', u.uid), newProfile);
                   await walletService.initializeUserWallet(u.uid);
                   setProfile(newProfile);
-                  safeStorageRemove('session', 'mairide_oauth_mode');
+                  clearStoredOAuthIntent();
                 } else {
-                  safeStorageRemove('session', 'mairide_oauth_mode');
+                  clearStoredOAuthIntent();
                   setNotRegisteredError(true);
                   await signOut(auth);
                   setProfile(null);
