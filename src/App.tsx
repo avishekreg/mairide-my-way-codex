@@ -1082,7 +1082,7 @@ class ErrorBoundary extends Component<any, any> {
 
 // --- Components ---
 
-const LOGO_URL = "/logo.png";
+const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "MaiRide my way";
 const BRAND_TAGLINE = "";
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
@@ -2866,9 +2866,10 @@ const Navbar = ({
             </button>
             <div className="flex items-center cursor-pointer" onClick={handleHomeNavigation}>
               <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="MaiRide Logo" />
-              <span className="text-xl font-black tracking-tighter text-mairide-primary">
-                {BRAND_NAME}
-              </span>
+              <div className="flex flex-col leading-none">
+                <span className="text-xl font-black tracking-tighter text-mairide-primary">MaiRide</span>
+                <span className="text-xl font-black tracking-tighter text-mairide-primary -mt-1">my way</span>
+              </div>
             </div>
           </div>
 
