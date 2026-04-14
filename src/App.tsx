@@ -2913,33 +2913,36 @@ const Navbar = ({
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex min-h-[78px] items-center justify-between gap-3 py-3 sm:h-16 sm:min-h-0 sm:py-0">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0">
+          <div className="flex items-center">
             <button
               onClick={() => setIsOpen(true)}
-              className="inline-flex shrink-0 items-center justify-center rounded-xl border border-mairide-secondary bg-white p-2.5 text-mairide-primary transition-colors hover:bg-mairide-bg"
+              className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
               aria-label="Open menu"
             >
-              <Menu className="w-5 h-5" />
+              <Menu className="h-6 w-6 sm:h-5 sm:w-5" />
             </button>
-            <div className="flex min-w-0 items-center cursor-pointer" onClick={handleHomeNavigation}>
-              <img src={LOGO_URL} className="mr-2 h-11 w-11 shrink-0 object-contain rounded-[22%] sm:h-12 sm:w-12" alt="MaiRide Logo" />
-              <div className="flex min-w-0 flex-col justify-center leading-none">
-                <span className="text-[2.2rem] font-black tracking-tighter text-mairide-primary sm:text-3xl">MaiRide</span>
-                <span className="-mt-1 text-[1.6rem] font-black tracking-tight text-mairide-primary sm:text-xl sm:tracking-wide">my way</span>
+          </div>
+
+          <div className="min-w-0">
+            <div className="mx-auto flex min-w-0 max-w-[220px] items-center justify-center cursor-pointer sm:mx-0 sm:max-w-none sm:justify-start" onClick={handleHomeNavigation}>
+              <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:h-12 sm:w-12" alt="MaiRide Logo" />
+              <div className="flex min-w-0 flex-col justify-center leading-[0.9]">
+                <span className="truncate text-[1.9rem] font-black tracking-tighter text-mairide-primary sm:text-3xl">MaiRide</span>
+                <span className="truncate text-[1.05rem] font-black tracking-[0.02em] text-mairide-primary sm:-mt-1 sm:text-xl sm:tracking-wide">my way</span>
               </div>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center">
-            <div className="flex items-center space-x-2 sm:space-x-3 sm:border-l sm:border-mairide-secondary sm:pl-3">
+          <div className="flex shrink-0 items-center justify-end">
+            <div className="flex items-center gap-1.5 sm:space-x-3 sm:border-l sm:border-mairide-secondary sm:pl-3">
               <div className="hidden text-right sm:block">
                 <p className="text-sm font-semibold text-mairide-primary">{profile?.displayName}</p>
                 <p className="text-xs text-mairide-secondary capitalize">{profile?.role}</p>
               </div>
-              <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="h-9 w-9 rounded-full border border-mairide-secondary object-cover sm:h-8 sm:w-8" />
-              <button onClick={onLogout} className="p-2 text-mairide-secondary transition-colors hover:text-red-600">
-                <LogOut className="w-5 h-5" />
+              <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="h-11 w-11 rounded-full border border-mairide-secondary object-cover sm:h-8 sm:w-8" />
+              <button onClick={onLogout} className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600">
+                <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
               </button>
             </div>
           </div>
