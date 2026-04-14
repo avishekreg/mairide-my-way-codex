@@ -2913,32 +2913,32 @@ const Navbar = ({
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16 items-center">
-          <div className="flex items-center gap-3">
+        <div className="flex min-h-[78px] items-center justify-between gap-3 py-3 sm:h-16 sm:min-h-0 sm:py-0">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               onClick={() => setIsOpen(true)}
-              className="inline-flex items-center justify-center rounded-xl border border-mairide-secondary bg-white p-2 text-mairide-primary hover:bg-mairide-bg transition-colors"
+              className="inline-flex shrink-0 items-center justify-center rounded-xl border border-mairide-secondary bg-white p-2.5 text-mairide-primary transition-colors hover:bg-mairide-bg"
               aria-label="Open menu"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div className="flex items-center cursor-pointer" onClick={handleHomeNavigation}>
-              <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="MaiRide Logo" />
-              <div className="flex flex-col leading-none">
-                <span className="text-3xl font-black tracking-tighter text-mairide-primary">MaiRide</span>
-                <span className="text-xl font-black tracking-wide text-mairide-primary -mt-1">my way</span>
+            <div className="flex min-w-0 items-center cursor-pointer" onClick={handleHomeNavigation}>
+              <img src={LOGO_URL} className="mr-2 h-11 w-11 shrink-0 object-contain rounded-[22%] sm:h-12 sm:w-12" alt="MaiRide Logo" />
+              <div className="flex min-w-0 flex-col justify-center leading-none">
+                <span className="text-[2.2rem] font-black tracking-tighter text-mairide-primary sm:text-3xl">MaiRide</span>
+                <span className="-mt-1 text-[1.6rem] font-black tracking-tight text-mairide-primary sm:text-xl sm:tracking-wide">my way</span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-3 pl-3 border-l border-mairide-secondary">
-              <div className="text-right">
+          <div className="flex shrink-0 items-center">
+            <div className="flex items-center space-x-2 sm:space-x-3 sm:border-l sm:border-mairide-secondary sm:pl-3">
+              <div className="hidden text-right sm:block">
                 <p className="text-sm font-semibold text-mairide-primary">{profile?.displayName}</p>
                 <p className="text-xs text-mairide-secondary capitalize">{profile?.role}</p>
               </div>
-              <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="w-8 h-8 rounded-full border border-mairide-secondary" />
-              <button onClick={onLogout} className="p-2 text-mairide-secondary hover:text-red-600 transition-colors">
+              <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="h-9 w-9 rounded-full border border-mairide-secondary object-cover sm:h-8 sm:w-8" />
+              <button onClick={onLogout} className="p-2 text-mairide-secondary transition-colors hover:text-red-600">
                 <LogOut className="w-5 h-5" />
               </button>
             </div>
