@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
-import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
 const DRIVER_JOINING_BONUS = 500;
 const TRAVELER_JOINING_BONUS = 250;

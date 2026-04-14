@@ -13,7 +13,7 @@ import {
   handleUserTravelerCounterBooking,
   handleUserTravelerRespondBooking,
   handleUserUploadDriverDoc,
-} from "./_lib/backend";
+} from "./_lib/backend.js";
 
 function getAction(req: any) {
   const fromQuery = req.query?.action;

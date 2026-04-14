@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
 type CapacityMetricSeverity = "healthy" | "watch" | "warning" | "critical";
 const DRIVER_JOINING_BONUS = 500;
