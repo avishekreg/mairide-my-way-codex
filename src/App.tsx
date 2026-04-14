@@ -1094,6 +1094,7 @@ const APP_NAV_TAB_EVENT = 'mairide:navigate-tab';
 const APP_DIALOG_EVENT = 'mairide:dialog';
 const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
 const CONSENT_VERSION = 'consent-v1';
+const isAndroidAppRuntime = () => isAppWebViewRuntime() || isAndroidWebViewLikeRuntime();
 const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const safeStorageGet = (storageType: 'local' | 'session', key: string) => {
@@ -1142,6 +1143,23 @@ const normalizeVersionTag = (version?: unknown) =>
     .trim()
     .toLowerCase()
     .replace(/\+.*$/, '');
+
+const resolveInstalledAndroidVersion = async () => {
+  if (typeof window === 'undefined' || !isAndroidAppRuntime()) return APP_VERSION;
+
+  try {
+    const appPlugin = (window as any)?.Capacitor?.Plugins?.App;
+    if (appPlugin?.getInfo) {
+      const info = await appPlugin.getInfo();
+      const nativeVersion = String(info?.version || '').trim();
+      if (nativeVersion) return nativeVersion;
+    }
+  } catch {
+    // Fall back to bundled app version when native app info is unavailable.
+  }
+
+  return APP_VERSION;
+};
 
 const extractLatLng = (location?: { lat?: unknown; lng?: unknown } | null) => {
   const lat = Number(location?.lat);
@@ -2633,7 +2651,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
 
   useEffect(() => {
     if (typeof navigator === 'undefined') return;
-    setIsAndroidDevice(/android/i.test(navigator.userAgent || ''));
+    setIsAndroidDevice(/android/i.test(navigator.userAgent || '') && isAndroidAppRuntime());
   }, []);
 
   const checkAndroidUpdate = useCallback(async () => {
@@ -17023,6 +17041,7 @@ const App = () => {
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
   const [remoteAppVersion, setRemoteAppVersion] = useState('');
   const [buildStamp, setBuildStamp] = useState<BuildStampInfo | null>(null);
+  const [installedAndroidVersion, setInstalledAndroidVersion] = useState(APP_VERSION);
   const releaseVersion = resolveReleaseVersion(appConfigState.config?.appVersion, remoteAppVersion);
 
   useEffect(() => {
@@ -17442,9 +17461,19 @@ const App = () => {
   }, [user]);
 
   useEffect(() => {
+    let active = true;
+    void resolveInstalledAndroidVersion().then((version) => {
+      if (!active) return;
+      setInstalledAndroidVersion(String(version || APP_VERSION).trim() || APP_VERSION);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
-    const isAndroidDevice = /android/i.test(navigator.userAgent || '');
-    if (!isAndroidDevice) return;
+    if (!isAndroidAppRuntime()) return;
 
     let active = true;
     const checkForAndroidUpdate = async () => {
@@ -17455,7 +17484,7 @@ const App = () => {
         const latestVersion = String(data?.appVersion || '').trim();
         const apkUrl = String(data?.apkUrl || LIVE_ANDROID_APK_URL).trim() || LIVE_ANDROID_APK_URL;
         if (!latestVersion) return;
-        const needsUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(releaseVersion);
+        const needsUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(installedAndroidVersion);
         if (!active) return;
         setAndroidUpdateState({
           available: needsUpdate,
@@ -17482,7 +17511,7 @@ const App = () => {
       active = false;
       window.clearInterval(interval);
     };
-  }, [releaseVersion]);
+  }, [installedAndroidVersion]);
 
   const commitUiLanguage = (nextLanguage: string) => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
