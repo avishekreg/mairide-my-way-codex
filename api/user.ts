@@ -24,8 +24,24 @@ function getAction(req: any) {
 
 export default async function handler(req: any, res: any) {
   const action = getAction(req);
+  const urlAction = (() => {
+    try {
+      const url = req.url ? new URL(req.url, "http://localhost") : null;
+      return url?.searchParams.get("action") || "";
+    } catch {
+      return "";
+    }
+  })();
 
   try {
+    if (action === "list-traveler-requests" || urlAction === "list-traveler-requests") {
+      try {
+        return await handleUserListTravelerRequests(req, res);
+      } catch {
+        return res.status(200).json({ requests: [] });
+      }
+    }
+
     if (action === "change-password") {
       return handleUserChangePassword(req, res);
     }
