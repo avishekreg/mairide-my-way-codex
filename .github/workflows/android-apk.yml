@@ -218,10 +218,14 @@ jobs:
           fi
           echo "Using newly built APK: $APK_PATH"
           cp "$APK_PATH" release/mairide-android.apk
+          # Also publish a versioned filename to avoid client/CDN caching stale APKs.
+          VERSIONED_APK="mairide-android-${GITHUB_RUN_NUMBER}.apk"
+          cp "$APK_PATH" "public/downloads/${VERSIONED_APK}"
+          cp "$APK_PATH" "public/downloads/mairide-android.apk"
           APP_VERSION_BASE="${VITE_APP_VERSION}"
           APP_VERSION="${APP_VERSION_BASE}+build.${GITHUB_RUN_NUMBER}"
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          APK_PUBLIC_URL="https://www.mairide.in/downloads/mairide-android.apk"
+          APK_PUBLIC_URL="https://www.mairide.in/downloads/${VERSIONED_APK}"
           cat > public/downloads/android-update.json <<EOF
           {
             "appVersion": "${APP_VERSION}",
