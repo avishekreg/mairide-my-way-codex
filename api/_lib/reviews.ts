@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getRuntimeSupabaseConfig } from "./supabaseRuntime.js";
+import { getRuntimeSupabaseConfig } from "./supabaseRuntime";
 
 function getSupabaseAdmin() {
   const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig();

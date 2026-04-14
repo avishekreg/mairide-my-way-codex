@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI } from "@google/genai";
-import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
 
 const FALLBACK_GEMINI_PROJECT_ID = "";
 const FALLBACK_GEMINI_API_KEY = "";

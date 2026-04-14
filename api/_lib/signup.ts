@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getRuntimeSupabaseConfig } from "./supabaseRuntime.js";
+import { getRuntimeSupabaseConfig } from "./supabaseRuntime";
 
 const DRIVER_JOINING_BONUS = 500;
 const TRAVELER_JOINING_BONUS = 250;
