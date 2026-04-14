@@ -33,10 +33,6 @@ export default async function handler(req: any, res: any) {
     }
   })();
 
-  if (action === "list-traveler-requests" || urlAction === "list-traveler-requests") {
-    return res.status(200).json({ requests: [] });
-  }
-
   try {
     if (action === "change-password") {
       return handleUserChangePassword(req, res);
