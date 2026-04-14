@@ -1011,14 +1011,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 async function testConnection() {
+  if (!isLocalDevFirestoreMode()) return;
   try {
     // Try to reach the server directly to verify configuration
     await getDocFromServer(doc(db, '_connection_test_', 'ping'));
     console.log("Firestore connection verified.");
   } catch (error) {
-    if (isMissingSupabaseTableError(error)) {
-      return;
-    }
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error("CRITICAL: Firestore connection failed. The configuration in firebase-applet-config.json may be incorrect or the database is not provisioned.");
     }
@@ -8540,6 +8538,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, [profile.uid]);
 
   useEffect(() => {
+    if (!isLocalDevFirestoreMode()) return;
     const q = query(collection(db, 'tripSessions'), where('consumerId', '==', profile.uid));
     let unsubscribe: (() => void) | null = null;
     unsubscribe = onSnapshot(
@@ -10447,6 +10446,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, [profile.uid, retiredRideIds]);
 
   useEffect(() => {
+    if (!isLocalDevFirestoreMode()) return;
     const q = query(collection(db, 'tripSessions'), where('driverId', '==', profile.uid));
     let unsubscribe: (() => void) | null = null;
     unsubscribe = onSnapshot(
@@ -14643,6 +14643,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   }, []);
 
   useEffect(() => {
+    if (!isLocalDevFirestoreMode()) return;
     const q = query(collection(db, 'tripSessions'), orderBy('updatedAt', 'desc'), limit(200));
     let unsubscribe: (() => void) | null = null;
     unsubscribe = onSnapshot(
@@ -17096,15 +17097,13 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!isLocalDevFirestoreMode()) return;
     async function testConnection() {
       try {
         // Use getDocFromServer to bypass cache and test real connection
         await getDocFromServer(doc(db, '_connection_test_', 'connection'));
         console.log("Firestore connection successful");
       } catch (error) {
-        if (isMissingSupabaseTableError(error)) {
-          return;
-        }
         if (error instanceof Error && error.message.includes('the client is offline')) {
           console.error("Firestore is offline. Please check your Firebase configuration and ensure the database is provisioned.");
         } else {
