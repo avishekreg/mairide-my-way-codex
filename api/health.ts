@@ -188,21 +188,29 @@ export default async function handler(req: any, res: any) {
     }
 
     const supabaseAdmin = getSupabaseAdmin(req);
-    const [{ data: rideRows, error: ridesError }, { data: driverRows, error: driversError }] =
-      await Promise.all([
-        supabaseAdmin
-          .from("rides")
-          .select("*")
-          .eq("status", "available")
-          .order("created_at", { ascending: false }),
-        supabaseAdmin
-          .from("users")
-          .select("*")
-          .eq("role", "driver"),
-      ]);
+    const [
+      { data: rideRows, error: ridesError },
+      { data: driverRows, error: driversError },
+      { data: bookingRows, error: bookingsError },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("rides")
+        .select("*")
+        .eq("status", "available")
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("users")
+        .select("*")
+        .eq("role", "driver"),
+      supabaseAdmin
+        .from("bookings")
+        .select("*")
+        .eq("status", "confirmed"),
+    ]);
 
     if (ridesError) throw ridesError;
     if (driversError) throw driversError;
+    if (bookingsError) throw bookingsError;
 
     const approvedDriverIds = new Set((driverRows || []).filter(isApprovedDriver).map((row: any) => row.id));
 
@@ -223,7 +231,17 @@ export default async function handler(req: any, res: any) {
         };
       });
 
-    return res.status(200).json({ rides, bookings: [] });
+    const bookings = (bookingRows || []).map((row: any) => {
+      const data = (row.data as Record<string, any>) || {};
+      return {
+        id: row.id,
+        rideId: row.ride_id || data.rideId || null,
+        status: row.status || data.status || null,
+        rideLifecycleStatus: data.rideLifecycleStatus || null,
+      };
+    });
+
+    return res.status(200).json({ rides, bookings });
   } catch (error: any) {
     console.error("Standalone health/search failed:", error);
     return res.status(error?.status || 500).json({

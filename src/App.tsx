@@ -10358,6 +10358,14 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     () => requests.filter((request) => !retiredRideIds.includes(request.rideId)),
     [requests, retiredRideIds]
   );
+  const lockedRideIds = useMemo(
+    () => Array.from(getLockedRideIds(driverBookings)),
+    [driverBookings]
+  );
+  const suppressedRideIds = useMemo(
+    () => Array.from(new Set([...retiredRideIds, ...lockedRideIds])),
+    [retiredRideIds, lockedRideIds]
+  );
   const activeTravelerRideRequests = useMemo(
     () =>
       travelerRideRequests
@@ -11779,7 +11787,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
             <MyRides
               profile={profile}
-              hiddenRideIds={retiredRideIds}
+              hiddenRideIds={suppressedRideIds}
               onRideRetired={(rideId) =>
                 setRetiredRideIds((prev) => (prev.includes(rideId) ? prev : [...prev, rideId]))
               }
