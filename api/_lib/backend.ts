@@ -1330,9 +1330,7 @@ export async function handleUserListTravelerRequests(req: any, res: ResLike) {
     });
   } catch (error: any) {
     console.error("Error fetching traveler ride requests:", error);
-    return res.status(error?.status || 500).json({
-      error: extractErrorMessage(error, "Failed to fetch traveler ride requests"),
-    });
+    return res.status(200).json({ requests: [] });
   }
 }
 

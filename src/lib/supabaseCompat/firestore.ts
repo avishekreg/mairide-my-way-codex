@@ -291,7 +291,14 @@ function applyPatch<T extends Record<string, any>>(current: T, patch: Record<str
 
 async function executeDocumentRead<T>(ref: DocumentReference<T>) {
   const { data, error } = await supabase.from(ref.collection).select('*').eq('id', ref.id).maybeSingle();
-  if (error) throw error;
+  if (error) {
+    const code = String((error as any)?.code || '');
+    const message = String((error as any)?.message || '');
+    if (code === 'PGRST205' || message.includes('schema cache')) {
+      return new DocumentSnapshot<T>(null, ref.id);
+    }
+    throw error;
+  }
   return new DocumentSnapshot<T>(data ? inflateRecord<T>(ref.collection, data) : null, ref.id);
 }
 
@@ -319,7 +326,14 @@ async function executeQueryRead<T>(ref: Query<T>) {
   let builder = supabase.from(ref.collection).select('*');
   builder = applyConstraints(builder, ref.collection, ref.constraints.map((constraint) => ({ ...constraint })));
   const { data, error } = await builder;
-  if (error) throw error;
+  if (error) {
+    const code = String((error as any)?.code || '');
+    const message = String((error as any)?.message || '');
+    if (code === 'PGRST205' || message.includes('schema cache')) {
+      return new QuerySnapshot<T>([]);
+    }
+    throw error;
+  }
   const docs = (data || []).map((row: any) => {
     const id = row.uid ?? row.id;
     return new QueryDocumentSnapshot<T>(inflateRecord<T>(ref.collection, row), id);
