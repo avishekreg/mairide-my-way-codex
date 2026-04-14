@@ -246,8 +246,8 @@ jobs:
             echo "Missing Cloudflare R2 credentials (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, R2_BUCKET)."
             exit 1
           fi
-          npx --yes wrangler@3 r2 object put "$R2_BUCKET/mairide-android.apk" --file release/mairide-android.apk
-          npx --yes wrangler@3 r2 object put "$R2_BUCKET/mairide-android-${GITHUB_RUN_NUMBER}.apk" --file release/mairide-android.apk
+          npx --yes wrangler@3 r2 object put "$R2_BUCKET/mairide-android.apk" --file release/mairide-android.apk --content-type application/vnd.android.package-archive
+          npx --yes wrangler@3 r2 object put "$R2_BUCKET/mairide-android-${GITHUB_RUN_NUMBER}.apk" --file release/mairide-android.apk --content-type application/vnd.android.package-archive
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
