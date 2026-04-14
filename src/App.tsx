@@ -3232,6 +3232,20 @@ const formatRideDeparture = (ride: Partial<Ride>) => {
   return 'Departure time to be confirmed';
 };
 
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 const isFutureRide = (ride: Partial<Ride>) => {
   if (!ride.departureTime) return false;
   const departure = new Date(ride.departureTime);
@@ -8821,20 +8835,6 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       return null;
     }
   };
-  const withTimeout = async <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise<T>((resolve) => {
-          timer = setTimeout(() => resolve(fallback), ms);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  };
-
   const buildScheduledDeparture = (dayKey: string, timeValue: string) => {
     const scheduledDate = new Date();
     if (dayKey === 'tomorrow') {
