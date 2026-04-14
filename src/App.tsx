@@ -1716,6 +1716,7 @@ const getNegotiationDisplayFare = (booking: Booking) => {
 const getBookingStateLabel = (booking: Booking) => {
   if (hasPendingDriverCounterOffer(booking)) return 'counter offer';
   if (hasPendingTravelerCounterOffer(booking)) return 'your offer pending';
+  if (booking.status === 'confirmed') return 'booked';
   return booking.status;
 };
 
@@ -7452,7 +7453,7 @@ const MyRides = ({
     () =>
       rides.filter((ride) => {
         if (hiddenRideIds.includes(ride.id)) return false;
-        return ['available', 'full'].includes(String(ride.status || ''));
+        return String(ride.status || '') === 'available';
       }),
     [rides, hiddenRideIds]
   );
@@ -9102,6 +9103,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       const rideMap = new Map<string, any>();
       availableRides.forEach((data) => {
         if (!data?.id || lockedRideIds.has(data.id)) {
+          return;
+        }
+        if (String(data.status || '') !== 'available') {
           return;
         }
 
