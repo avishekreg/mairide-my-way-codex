@@ -9568,11 +9568,11 @@ const finalizeTravelerDashboardRazorpayPayment = async (
       {activeTab === 'search' && (
         <>
           <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-col gap-6 md:flex-row md:items-center">
+            <div className="flex flex-col gap-2">
               {showDashboardHeroLogo ? (
-                <div className="text-4xl font-bold uppercase tracking-tight text-mairide-primary">
+                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
                   {firstName}
-                </div>
+                </p>
               ) : null}
               <div>
                 <h1 className="mb-2 text-4xl font-bold uppercase tracking-tight text-mairide-primary">Where to?</h1>
@@ -11291,11 +11291,11 @@ const finalizeDriverDashboardRazorpayPayment = async (
       {activeTab === 'dashboard' && (
         <>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
-            <div className="flex items-center space-x-6">
+            <div className="flex flex-col gap-2">
               {showDashboardHeroLogo ? (
-                <div className="text-4xl font-bold uppercase tracking-tight text-mairide-primary">
+                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
                   {firstName}
-                </div>
+                </p>
               ) : null}
               <div>
                 <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Driver Dashboard</h1>
