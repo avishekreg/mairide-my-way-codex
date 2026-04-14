@@ -249,17 +249,18 @@ jobs:
           files: release/mairide-android.apk
           overwrite_files: true
 
-      - name: Commit APK into repository
+      - name: Commit APK metadata into repository
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/downloads/android-update.json
+          # Only commit the metadata file so the repo always reflects the latest build info.
+          git add -f public/downloads/android-update.json
           if git diff --staged --quiet; then
             echo "No update metadata changes to commit."
             exit 0
           fi
           git commit -m "chore: update android release metadata [skip ci]"
-          git push
+          git push origin HEAD:main
 
       - name: Strict CI failure alert
         if: failure()
