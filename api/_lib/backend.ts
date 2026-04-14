@@ -1,6 +1,6 @@
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
-import { getRuntimeSupabaseConfig } from "./supabaseRuntime.ts";
+import { getRuntimeSupabaseConfig } from "./supabaseRuntime";
 
 export type ReqLike = {
   body?: any;

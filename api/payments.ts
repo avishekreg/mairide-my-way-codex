@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
-import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.ts";
+import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime";
 
 function getAction(req: any) {
   const fromQuery = req.query?.action;
