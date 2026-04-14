@@ -892,6 +892,39 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
           actorProfile: phoneFallback,
         };
       }
+      if (user?.id) {
+        const now = new Date().toISOString();
+        const seedProfile = {
+          id: user.id,
+          email: user.email ?? null,
+          display_name: user.user_metadata?.displayName || user.user_metadata?.full_name || user.email || "Traveler",
+          role: "consumer",
+          status: "active",
+          phone_number: user.phone ?? null,
+          created_at: now,
+          updated_at: now,
+          data: {
+            uid: user.id,
+            email: user.email ?? "",
+            displayName: user.user_metadata?.displayName || user.user_metadata?.full_name || user.email || "Traveler",
+            role: "consumer",
+            status: "active",
+            phoneNumber: user.phone ?? "",
+            createdAt: now,
+            updatedAt: now,
+          },
+        };
+        await getSupabaseAdmin()
+          .from("users")
+          .upsert(seedProfile, { onConflict: "id" });
+        const freshProfile = await getUserProfile(user.id);
+        if (freshProfile) {
+          return {
+            actorId: user.id,
+            actorProfile: freshProfile,
+          };
+        }
+      }
       if (payloadId) {
         const profileFromPayload = await getUserProfile(payloadId);
         if (profileFromPayload) {
@@ -1261,7 +1294,7 @@ export async function handleUserListTravelerRequests(req: any, res: ResLike) {
 
     const scope = String(scopeParam).toLowerCase();
     if (scope === "own" && !currentUserId) {
-      return res.status(400).json({ error: "Missing user scope for traveler requests." });
+      return res.status(200).json({ requests: [] });
     }
     let queryBuilder = getSupabaseAdmin()
       .from("bookings")
@@ -1280,7 +1313,12 @@ export async function handleUserListTravelerRequests(req: any, res: ResLike) {
     }
 
     const { data, error } = await queryBuilder;
-    if (error) throw error;
+    if (error) {
+      if (String(error?.code || "") === "42P01") {
+        return res.status(200).json({ requests: [] });
+      }
+      throw error;
+    }
 
     const requests = (data || []).map(mapTravelerRequestRow);
 

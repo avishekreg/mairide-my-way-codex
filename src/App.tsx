@@ -1016,6 +1016,9 @@ async function testConnection() {
     await getDocFromServer(doc(db, '_connection_test_', 'ping'));
     console.log("Firestore connection verified.");
   } catch (error) {
+    if (isMissingSupabaseTableError(error)) {
+      return;
+    }
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error("CRITICAL: Firestore connection failed. The configuration in firebase-applet-config.json may be incorrect or the database is not provisioned.");
     }
@@ -8970,7 +8973,10 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       showAppDialog('Ride request posted successfully. Drivers can now match your request.', 'success');
     } catch (error) {
       console.error('Failed to post ride request:', error);
-      showAppDialog('Ride request failed to post. Please retry in a moment.', 'error');
+      showAppDialog(
+        getApiErrorMessage(error, 'Ride request failed to post. Please retry in a moment.'),
+        'error'
+      );
     } finally {
       setIsPostingRequest(false);
     }
@@ -17096,6 +17102,9 @@ const App = () => {
         await getDocFromServer(doc(db, '_connection_test_', 'connection'));
         console.log("Firestore connection successful");
       } catch (error) {
+        if (isMissingSupabaseTableError(error)) {
+          return;
+        }
         if (error instanceof Error && error.message.includes('the client is offline')) {
           console.error("Firestore is offline. Please check your Firebase configuration and ensure the database is provisioned.");
         } else {
