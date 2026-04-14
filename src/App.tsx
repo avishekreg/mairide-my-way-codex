@@ -9570,7 +9570,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-col gap-6 md:flex-row md:items-center">
               {showDashboardHeroLogo ? (
-                <div className="h-24 w-24 rounded-[22%] bg-mairide-primary text-white flex items-center justify-center text-2xl font-black uppercase tracking-wide">
+                <div className="text-4xl font-bold uppercase tracking-tight text-mairide-primary">
                   {firstName}
                 </div>
               ) : null}
@@ -11293,7 +11293,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
             <div className="flex items-center space-x-6">
               {showDashboardHeroLogo ? (
-                <div className="w-24 h-24 rounded-[22%] bg-mairide-primary text-white flex items-center justify-center text-2xl font-black uppercase tracking-wide">
+                <div className="text-4xl font-bold uppercase tracking-tight text-mairide-primary">
                   {firstName}
                 </div>
               ) : null}
