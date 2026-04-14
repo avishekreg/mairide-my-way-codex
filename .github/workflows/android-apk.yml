@@ -225,8 +225,8 @@ jobs:
           APP_VERSION_BASE="${VITE_APP_VERSION}"
           APP_VERSION="${APP_VERSION_BASE}+build.${GITHUB_RUN_NUMBER}"
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          # Publish a stable direct-download URL on mairide.in.
-          APK_PUBLIC_URL="https://www.mairide.in/downloads/mairide-android.apk"
+          # Publish a stable direct-download URL on R2 custom domain.
+          APK_PUBLIC_URL="https://downloads.mairide.in/mairide-android.apk"
           cat > public/downloads/android-update.json <<EOF
           {
             "appVersion": "${APP_VERSION}",
@@ -235,6 +235,19 @@ jobs:
             "builtAt": "${NOW_UTC}"
           }
           EOF
+
+      - name: Upload APK to Cloudflare R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$R2_BUCKET" ]; then
+            echo "Missing Cloudflare R2 credentials (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, R2_BUCKET)."
+            exit 1
+          fi
+          npx --yes wrangler@3 r2 object put "$R2_BUCKET/mairide-android.apk" --file release/mairide-android.apk
+          npx --yes wrangler@3 r2 object put "$R2_BUCKET/mairide-android-${GITHUB_RUN_NUMBER}.apk" --file release/mairide-android.apk
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

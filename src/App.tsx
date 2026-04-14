@@ -2627,7 +2627,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
   const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
   const openAndroidDownload = () => {
-    window.location.href = `https://www.mairide.in/downloads/mairide-android.apk?t=${Date.now()}`;
+    window.location.href = `https://downloads.mairide.in/mairide-android.apk?t=${Date.now()}`;
   };
 
   useEffect(() => {
