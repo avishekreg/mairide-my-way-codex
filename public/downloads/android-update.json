@@ -1,6 +1,6 @@
 {
-  "appVersion": "v3.0.1-beta+build.136",
-  "apkUrl": "https://www.mairide.in/downloads/mairide-android-136.apk",
-  "buildSha": "9e990b84977d9cf1a6190c2a501fdfc1d03d4d8b",
-  "builtAt": "2026-04-14T13:15:59Z"
+  "appVersion": "v3.0.1-beta+build.137",
+  "apkUrl": "https://github.com/avishekreg/mairide-my-way-codex/releases/download/android-latest/mairide-android.apk",
+  "buildSha": "8b2c8b2ee6cd3010405e48d75de2916ca6e68601",
+  "builtAt": "2026-04-14T13:56:33Z"
 }
