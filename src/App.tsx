@@ -5950,7 +5950,7 @@ const TravelerDashboardSummary = ({
   return (
     <div className="mb-12 space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-mairide-primary">Active Bookings & Driver Responses</h2>
+        <h2 className="text-xl font-bold text-mairide-primary">Live Traveler Requests & Counter Offers</h2>
         <span className="text-xs font-bold uppercase tracking-widest text-mairide-accent">
           {activeBookings.length} Live
         </span>
@@ -9670,6 +9670,22 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </button>
           </div>
 
+          <TravelerDashboardSummary
+            bookings={dashboardBookings}
+            tripSessions={tripSessions}
+            rideStatusById={rideStatusById}
+            ridesResolved={ridesResolved}
+            config={config}
+            onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
+            onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
+            counterFares={dashboardCounterFares}
+            setCounterFares={setDashboardCounterFares}
+            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
+            onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
+            onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
+            onOpenBooking={() => setActiveTab('history')}
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
             <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
               <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">MaiCoins Wallet</p>
@@ -9812,22 +9828,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                 ))}
             </div>
           )}
-
-          <TravelerDashboardSummary
-            bookings={dashboardBookings}
-            tripSessions={tripSessions}
-            rideStatusById={rideStatusById}
-            ridesResolved={ridesResolved}
-            config={config}
-            onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
-            onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
-            counterFares={dashboardCounterFares}
-            setCounterFares={setDashboardCounterFares}
-            onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
-            onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
-            onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
-            onOpenBooking={() => setActiveTab('history')}
-          />
 
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-mairide-primary flex items-center">
