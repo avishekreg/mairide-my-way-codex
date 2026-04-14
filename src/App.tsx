@@ -2867,14 +2867,13 @@ const Navbar = ({
             <div className="flex items-center cursor-pointer" onClick={handleHomeNavigation}>
               <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="MaiRide Logo" />
               <div className="flex flex-col leading-none">
-                <span className="text-xl font-black tracking-tighter text-mairide-primary">MaiRide</span>
-                <span className="text-xl font-black tracking-tighter text-mairide-primary -mt-1">my way</span>
+                <span className="text-2xl font-black tracking-tighter text-mairide-primary">MaiRide</span>
+                <span className="text-xl font-black tracking-tighter text-mairide-primary -mt-2">my way</span>
               </div>
             </div>
           </div>
 
           <div className="flex items-center space-x-4">
-            <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact variant="nav" />
             <div className="flex items-center space-x-3 pl-3 border-l border-mairide-secondary">
               <div className="text-right">
                 <p className="text-sm font-semibold text-mairide-primary">{profile?.displayName}</p>
