@@ -1239,13 +1239,30 @@ export async function handleUserListTravelerRequests(req: any, res: ResLike) {
       ? req.headers.authorization[0]
       : req.headers.authorization;
 
-    let currentUserId = req.body?.userId || req.query?.userId || "";
+    const url = req.url ? new URL(req.url, "http://localhost") : null;
+    const scopeParam =
+      req.query?.scope ||
+      req.body?.scope ||
+      url?.searchParams.get("scope") ||
+      "open";
+    let currentUserId =
+      req.body?.userId || req.query?.userId || url?.searchParams.get("userId") || "";
+
     if (process.env.NODE_ENV === "production") {
-      const user = await verifyTokenFromHeader(authHeader);
-      currentUserId = user.id;
+      try {
+        const user = await verifyTokenFromHeader(authHeader);
+        currentUserId = user.id;
+      } catch (error: any) {
+        return res.status(error?.status || 401).json({
+          error: extractErrorMessage(error, "Unauthorized"),
+        });
+      }
     }
 
-    const scope = String(req.query?.scope || req.body?.scope || "open").toLowerCase();
+    const scope = String(scopeParam).toLowerCase();
+    if (scope === "own" && !currentUserId) {
+      return res.status(400).json({ error: "Missing user scope for traveler requests." });
+    }
     let queryBuilder = getSupabaseAdmin()
       .from("bookings")
       .select("id, consumer_id, status, data, created_at, updated_at")

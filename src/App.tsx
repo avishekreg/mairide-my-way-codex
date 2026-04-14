@@ -2150,6 +2150,16 @@ const getApiErrorMessage = (error: any, fallback: string) => {
   return fallback;
 };
 
+const isMissingSupabaseTableError = (error: any) => {
+  const message = String(error?.message || error?.error || '');
+  const code = String(error?.code || error?.response?.data?.code || '');
+  return (
+    code === 'PGRST205' ||
+    message.includes("Could not find the table 'public.tripSessions'") ||
+    message.includes("Could not find the table 'public.tripSessions'")
+  );
+};
+
 const parseApiResponse = async (response: Response, fallback: string) => {
   const rawText = await response.text();
   let payload: any = null;
@@ -8506,7 +8516,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         );
       } catch (error) {
         if (!isMounted) return;
-        handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
+        console.error('Traveler request load failed:', error);
+        showAppDialog(
+          getApiErrorMessage(error, 'We could not load your ride requests right now. Please retry.'),
+          'error'
+        );
+        setTravelerRequests([]);
       }
     };
 
@@ -8523,7 +8538,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   useEffect(() => {
     const q = query(collection(db, 'tripSessions'), where('consumerId', '==', profile.uid));
-    const unsubscribe = onSnapshot(
+    let unsubscribe: (() => void) | null = null;
+    unsubscribe = onSnapshot(
       q,
       (snapshot) => {
         const next: Record<string, TripSession> = {};
@@ -8534,10 +8550,17 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         setTripSessions(next);
       },
       (error) => {
+        if (isMissingSupabaseTableError(error)) {
+          console.warn('Trip sessions table missing; pausing traveler session polling.');
+          if (unsubscribe) unsubscribe();
+          return;
+        }
         console.error('Trip session subscription error (traveler):', error);
       }
     );
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [profile.uid]);
 
   useEffect(() => {
@@ -10369,7 +10392,12 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         );
       } catch (error) {
         if (!isMounted) return;
-        handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
+        console.error('Traveler request load failed (driver):', error);
+        showAppDialog(
+          getApiErrorMessage(error, 'We could not load traveler requests right now. Please retry.'),
+          'error'
+        );
+        setTravelerRideRequests([]);
       }
     };
 
@@ -10414,7 +10442,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   useEffect(() => {
     const q = query(collection(db, 'tripSessions'), where('driverId', '==', profile.uid));
-    const unsubscribe = onSnapshot(
+    let unsubscribe: (() => void) | null = null;
+    unsubscribe = onSnapshot(
       q,
       (snapshot) => {
         const next: Record<string, TripSession> = {};
@@ -10425,10 +10454,17 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         setTripSessions(next);
       },
       (error) => {
+        if (isMissingSupabaseTableError(error)) {
+          console.warn('Trip sessions table missing; pausing driver session polling.');
+          if (unsubscribe) unsubscribe();
+          return;
+        }
         console.error('Trip session subscription error (driver):', error);
       }
     );
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [profile.uid]);
 
   useEffect(() => {
@@ -14602,17 +14638,25 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
   useEffect(() => {
     const q = query(collection(db, 'tripSessions'), orderBy('updatedAt', 'desc'), limit(200));
-    const unsubscribe = onSnapshot(
+    let unsubscribe: (() => void) | null = null;
+    unsubscribe = onSnapshot(
       q,
       (snapshot) => {
         const list = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as TripSession) }));
         setTripSessions(list);
       },
       (error) => {
+        if (isMissingSupabaseTableError(error)) {
+          console.warn('Trip sessions table missing; pausing admin session polling.');
+          if (unsubscribe) unsubscribe();
+          return;
+        }
         console.error('Admin trip session monitor error:', error);
       }
     );
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
