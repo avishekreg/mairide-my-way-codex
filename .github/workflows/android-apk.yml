@@ -92,7 +92,11 @@ jobs:
 
       - name: Apply MaiRide launcher icon
         run: |
-          ICON_SRC="public/icons/android-app-icon.png"
+          ICON_SRC="public/logo.png"
+          # Keep the Android launcher icon hardwired to the canonical logo asset.
+          if [ -f "public/logo.png" ]; then
+            cp -f public/logo.png public/icons/android-app-icon.png
+          fi
           if [ ! -f "$ICON_SRC" ]; then
             echo "Missing launcher icon source: $ICON_SRC"
             exit 1
