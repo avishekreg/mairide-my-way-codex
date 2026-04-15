@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, Component } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   BrowserRouter as Router, 
   Routes, 
@@ -1145,11 +1146,17 @@ const normalizeVersionTag = (version?: unknown) =>
     .toLowerCase()
     .replace(/\+.*$/, '');
 
+const ANDROID_APP_ID = 'in.mairide.app';
+const getCapacitorPlugin = <T = any,>(pluginName: string): T | undefined => {
+  if (typeof window === 'undefined') return undefined;
+  return (window as any)?.Capacitor?.Plugins?.[pluginName] as T | undefined;
+};
+
 const resolveInstalledAndroidVersion = async () => {
   if (typeof window === 'undefined' || !isAndroidAppRuntime()) return APP_VERSION;
 
   try {
-    const appPlugin = (window as any)?.Capacitor?.Plugins?.App;
+    const appPlugin = getCapacitorPlugin<any>('App');
     if (appPlugin?.getInfo) {
       const info = await appPlugin.getInfo();
       const nativeVersion = String(info?.version || '').trim();
@@ -1160,6 +1167,31 @@ const resolveInstalledAndroidVersion = async () => {
   }
 
   return APP_VERSION;
+};
+
+const openAndroidAppSettings = async () => {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const appPlugin = getCapacitorPlugin<any>('App');
+    if (appPlugin?.openSettings) {
+      await appPlugin.openSettings();
+      return true;
+    }
+  } catch {
+    // Fall through to Android intent fallback.
+  }
+
+  try {
+    if (isAndroidAppRuntime()) {
+      window.location.href = `intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;scheme=package;package=${ANDROID_APP_ID};end`;
+      return true;
+    }
+  } catch {
+    // Ignore and let caller show manual guidance.
+  }
+
+  return false;
 };
 
 const extractLatLng = (location?: { lat?: unknown; lng?: unknown } | null) => {
@@ -2912,7 +2944,9 @@ const Navbar = ({
   const [isUploadingTravelerAvatar, setIsUploadingTravelerAvatar] = useState(false);
   const [showTravelerAvatarOptions, setShowTravelerAvatarOptions] = useState(false);
   const [showTravelerCameraCapture, setShowTravelerCameraCapture] = useState(false);
+  const [showTravelerCameraSettingsPrompt, setShowTravelerCameraSettingsPrompt] = useState(false);
   const travelerAvatarInputRef = useRef<HTMLInputElement | null>(null);
+  const travelerCameraInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
   const handleHomeNavigation = () => {
     window.dispatchEvent(new CustomEvent(APP_NAV_HOME_EVENT, { detail: { role: profile?.role } }));
@@ -2946,6 +2980,7 @@ const Navbar = ({
   const isTravelerProfile = profile?.role === 'consumer';
   const resolvedUserPhoto = getResolvedUserPhoto(profile);
   const travelerAvatarLabel = isUploadingTravelerAvatar ? 'Uploading profile photo' : 'Upload profile photo';
+  const shouldUseNativeTravelerCamera = isAndroidShell;
 
   const updateTravelerAvatar = async (dataUrl: string) => {
     if (!profile || !isTravelerProfile) return;
@@ -2971,6 +3006,78 @@ const Navbar = ({
     setShowTravelerAvatarOptions(true);
   };
 
+  const promptTravelerCameraSettings = () => {
+    setShowTravelerAvatarOptions(false);
+    setShowTravelerCameraCapture(false);
+    setShowTravelerCameraSettingsPrompt(true);
+  };
+
+  const handleTravelerTakePhoto = async () => {
+    if (!isTravelerProfile || isUploadingTravelerAvatar) return;
+
+    setShowTravelerAvatarOptions(false);
+
+    if (shouldUseNativeTravelerCamera) {
+      const nativeCameraPlugin = getCapacitorPlugin<any>('Camera');
+
+      if (nativeCameraPlugin?.getPhoto) {
+        try {
+          let cameraPermission = '';
+          if (nativeCameraPlugin.checkPermissions) {
+            const currentPermissions = await nativeCameraPlugin.checkPermissions();
+            cameraPermission = String(currentPermissions?.camera || currentPermissions?.photos || '');
+          }
+
+          if (!cameraPermission || cameraPermission === 'prompt' || cameraPermission === 'prompt-with-rationale') {
+            if (nativeCameraPlugin.requestPermissions) {
+              const requestedPermissions = await nativeCameraPlugin.requestPermissions().catch(() => null);
+              cameraPermission = String(requestedPermissions?.camera || requestedPermissions?.photos || cameraPermission || '');
+            }
+          }
+
+          if (cameraPermission && !['granted', 'limited'].includes(cameraPermission)) {
+            promptTravelerCameraSettings();
+            return;
+          }
+
+          const photo = await nativeCameraPlugin.getPhoto({
+            quality: 85,
+            allowEditing: false,
+            resultType: 'dataUrl',
+            source: 'CAMERA',
+            promptLabelHeader: 'Traveler profile photo',
+            promptLabelPicture: 'Take Photo',
+            promptLabelPhoto: 'Upload Photo',
+          });
+
+          const imagePayload =
+            String(photo?.dataUrl || '').trim() ||
+            (photo?.base64String ? `data:image/jpeg;base64,${photo.base64String}` : '');
+
+          if (imagePayload) {
+            await updateTravelerAvatar(imagePayload);
+          }
+          return;
+        } catch (error: any) {
+          const nativeMessage = String(error?.message || error || '');
+          if (/permission|denied|not authorized|forbidden/i.test(nativeMessage)) {
+            promptTravelerCameraSettings();
+            return;
+          }
+          if (!/cancel|user cancelled|user canceled/i.test(nativeMessage)) {
+            showAppDialog(nativeMessage || 'We could not open the camera right now. Please try again.', 'error', 'Camera unavailable');
+          }
+          return;
+        }
+      }
+
+      travelerCameraInputRef.current?.click();
+      return;
+    }
+
+    setShowTravelerCameraCapture(true);
+  };
+
   const handleTravelerAvatarSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -2992,13 +3099,23 @@ const Navbar = ({
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       {isTravelerProfile && (
-        <input
-          ref={travelerAvatarInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={handleTravelerAvatarSelected}
-        />
+        <>
+          <input
+            ref={travelerAvatarInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleTravelerAvatarSelected}
+          />
+          <input
+            ref={travelerCameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="user"
+            className="hidden"
+            onChange={handleTravelerAvatarSelected}
+          />
+        </>
       )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div
@@ -3098,58 +3215,130 @@ const Navbar = ({
       </div>
 
       <AnimatePresence>
-        {showTravelerAvatarOptions && isTravelerProfile && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-mairide-primary/40 backdrop-blur-sm"
-              onClick={() => setShowTravelerAvatarOptions(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 16 }}
-              className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-md rounded-t-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
-            >
-              <div className="mx-auto mb-4 h-1.5 w-16 rounded-full bg-mairide-secondary/40" />
-              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler Avatar</p>
-              <h3 className="mt-2 text-2xl font-black text-mairide-primary">Choose profile photo</h3>
-              <p className="mt-2 text-sm text-mairide-secondary">
-                Add a clean profile image for your traveler account.
-              </p>
-              <div className="mt-6 space-y-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowTravelerAvatarOptions(false);
-                    setShowTravelerCameraCapture(true);
-                  }}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-mairide-primary px-4 py-4 font-bold text-white"
+        {showTravelerAvatarOptions && isTravelerProfile && typeof document !== 'undefined' &&
+          createPortal(
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[90] bg-mairide-primary/40 backdrop-blur-sm"
+                onClick={() => setShowTravelerAvatarOptions(false)}
+              />
+              <div className="fixed inset-0 z-[100] p-4 sm:p-6">
+                <motion.div
+                  initial={{ opacity: 0, y: 16, scale: 0.98, x: '-50%' }}
+                  animate={{ opacity: 1, y: '-50%', scale: 1, x: '-50%' }}
+                  exit={{ opacity: 0, y: 16, scale: 0.98, x: '-50%' }}
+                  transition={{ type: 'spring', damping: 24, stiffness: 280 }}
+                  className="absolute left-1/2 top-1/2 w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
                 >
-                  <Camera className="h-5 w-5" />
-                  <span>Take Photo</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => travelerAvatarInputRef.current?.click()}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-4 py-4 font-bold text-mairide-primary"
-                >
-                  <Upload className="h-5 w-5" />
-                  <span>Upload Photo</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowTravelerAvatarOptions(false)}
-                  className="w-full rounded-2xl px-4 py-3 text-sm font-semibold text-mairide-secondary"
-                >
-                  Cancel
-                </button>
+                  <div className="mx-auto mb-4 h-1.5 w-16 rounded-full bg-mairide-secondary/40" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler Avatar</p>
+                  <h3 className="mt-2 text-2xl font-black text-mairide-primary">Choose profile photo</h3>
+                  <p className="mt-2 text-sm text-mairide-secondary">
+                    Add a clean profile image for your traveler account.
+                  </p>
+                  <div className="mt-6 space-y-3">
+                    <button
+                      type="button"
+                      onClick={handleTravelerTakePhoto}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl bg-mairide-primary px-4 py-4 font-bold text-white"
+                    >
+                      <Camera className="h-5 w-5" />
+                      <span>Take Photo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTravelerAvatarOptions(false);
+                        travelerAvatarInputRef.current?.click();
+                      }}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-4 py-4 font-bold text-mairide-primary"
+                    >
+                      <Upload className="h-5 w-5" />
+                      <span>Upload Photo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowTravelerAvatarOptions(false)}
+                      className="w-full rounded-2xl px-4 py-3 text-sm font-semibold text-mairide-secondary"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </motion.div>
               </div>
-            </motion.div>
-          </>
-        )}
+            </>,
+            document.body
+          )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showTravelerCameraSettingsPrompt && isTravelerProfile && typeof document !== 'undefined' &&
+          createPortal(
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[90] bg-mairide-primary/40 backdrop-blur-sm"
+                onClick={() => setShowTravelerCameraSettingsPrompt(false)}
+              />
+              <div className="fixed inset-0 z-[100] p-4 sm:p-6">
+                <motion.div
+                  initial={{ opacity: 0, y: 16, scale: 0.98, x: '-50%' }}
+                  animate={{ opacity: 1, y: '-50%', scale: 1, x: '-50%' }}
+                  exit={{ opacity: 0, y: 16, scale: 0.98, x: '-50%' }}
+                  transition={{ type: 'spring', damping: 24, stiffness: 280 }}
+                  className="absolute left-1/2 top-1/2 w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                >
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-mairide-bg text-mairide-primary">
+                    <Settings className="h-7 w-7" />
+                  </div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Camera Access</p>
+                  <h3 className="mt-2 text-2xl font-black text-mairide-primary">Enable camera permission</h3>
+                  <p className="mt-2 text-sm leading-6 text-mairide-secondary">
+                    MaiRide needs camera access to capture your traveler profile photo. Open app settings, allow camera permission, then come back here and try again.
+                  </p>
+                  <div className="mt-6 space-y-3">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const opened = await openAndroidAppSettings();
+                        if (!opened) {
+                          showAppDialog('Please enable camera access for MaiRide from your phone settings and try again.', 'warning', 'Camera permission needed');
+                        }
+                      }}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl bg-mairide-primary px-4 py-4 font-bold text-white"
+                    >
+                      <Settings className="h-5 w-5" />
+                      <span>Open Settings</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTravelerCameraSettingsPrompt(false);
+                        travelerAvatarInputRef.current?.click();
+                      }}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-4 py-4 font-bold text-mairide-primary"
+                    >
+                      <Upload className="h-5 w-5" />
+                      <span>Upload Photo Instead</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowTravelerCameraSettingsPrompt(false)}
+                      className="w-full rounded-2xl px-4 py-3 text-sm font-semibold text-mairide-secondary"
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            </>,
+            document.body
+          )}
       </AnimatePresence>
 
       <AnimatePresence>
