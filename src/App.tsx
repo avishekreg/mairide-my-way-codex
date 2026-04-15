@@ -2937,7 +2937,7 @@ const Navbar = ({
             "grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3",
             isAndroidShell
               ? "sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0"
-              : "sm:grid sm:min-h-[86px] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-6 sm:py-4"
+              : "sm:grid sm:min-h-[94px] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-6 sm:py-4"
           )}
         >
           <div className={cn("flex items-center", !isAndroidShell && "sm:gap-4")}>
@@ -2954,9 +2954,9 @@ const Navbar = ({
                 onClick={handleHomeNavigation}
               >
                 <img src={LOGO_URL} className="mr-3 h-14 w-14 shrink-0 object-contain rounded-[22%]" alt="MaiRide Logo" />
-                <div className="flex min-w-0 flex-col justify-center overflow-visible leading-[1.02] py-1">
+                <div className="flex min-w-0 flex-col justify-center overflow-visible leading-[1.08] pt-1 pb-1.5">
                   <span className="truncate text-[2.15rem] font-black tracking-tighter text-mairide-primary">MaiRide</span>
-                  <span className="mt-0.5 truncate text-[1.24rem] font-black tracking-[0.08em] text-mairide-primary">my way</span>
+                  <span className="mt-1 truncate text-[1.24rem] font-black tracking-[0.08em] text-mairide-primary">my way</span>
                 </div>
               </div>
             )}
