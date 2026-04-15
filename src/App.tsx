@@ -2145,6 +2145,15 @@ const getResolvedUserRating = (user?: UserProfile | null) => {
 const getResolvedUserPhoto = (user?: UserProfile | null) =>
   user?.photoURL || user?.driverDetails?.selfiePhoto || '';
 
+const getUserAvatarInitials = (user?: UserProfile | null) => {
+  const source = String(user?.displayName || user?.email || user?.phoneNumber || 'MR').trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
+};
+
 const getApiErrorMessage = (error: any, fallback: string) => {
   const normalize = (value: any): string | null => {
     if (typeof value === 'string' && value.trim()) return value;
@@ -2899,6 +2908,8 @@ const Navbar = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const isAndroidShell = isAndroidAppRuntime();
+  const [isUploadingTravelerAvatar, setIsUploadingTravelerAvatar] = useState(false);
+  const travelerAvatarInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
   const handleHomeNavigation = () => {
     window.dispatchEvent(new CustomEvent(APP_NAV_HOME_EVENT, { detail: { role: profile?.role } }));
@@ -2929,8 +2940,53 @@ const Navbar = ({
           { id: 'profile', label: 'Profile' },
         ];
 
+  const isTravelerProfile = profile?.role === 'consumer';
+  const resolvedUserPhoto = getResolvedUserPhoto(profile);
+  const travelerAvatarLabel = isUploadingTravelerAvatar ? 'Uploading profile photo' : 'Upload profile photo';
+
+  const handleTravelerAvatarClick = () => {
+    if (!isTravelerProfile || isUploadingTravelerAvatar) return;
+    travelerAvatarInputRef.current?.click();
+  };
+
+  const handleTravelerAvatarSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !profile || !isTravelerProfile) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please choose an image file.');
+      return;
+    }
+
+    setIsUploadingTravelerAvatar(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const avatarRef = storageRef(storage, `users/${profile.uid}/avatar-${Date.now()}.jpg`);
+      await uploadString(avatarRef, base64, 'data_url');
+      const avatarUrl = await getDownloadURL(avatarRef);
+      await updateDoc(doc(db, 'users', profile.uid), {
+        photoURL: avatarUrl,
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`);
+    } finally {
+      setIsUploadingTravelerAvatar(false);
+    }
+  };
+
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
+      {isTravelerProfile && (
+        <input
+          ref={travelerAvatarInputRef}
+          type="file"
+          accept="image/*"
+          capture="user"
+          className="hidden"
+          onChange={handleTravelerAvatarSelected}
+        />
+      )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div
           className={cn(
@@ -2983,14 +3039,43 @@ const Navbar = ({
                 <p className={cn("font-semibold text-mairide-primary", isAndroidShell ? "text-sm" : "text-base leading-tight")}>{profile?.displayName}</p>
                 <p className={cn("text-mairide-secondary capitalize", isAndroidShell ? "text-xs" : "text-sm leading-tight mt-0.5")}>{profile?.role}</p>
               </div>
-              <img
-                src={getResolvedUserPhoto(profile) || undefined}
-                alt="Profile"
+              <button
+                type="button"
+                onClick={handleTravelerAvatarClick}
+                disabled={!isTravelerProfile || isUploadingTravelerAvatar}
+                aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
+                title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
                 className={cn(
-                  "rounded-full border border-mairide-secondary object-cover",
+                  "relative overflow-hidden rounded-full border border-mairide-secondary",
+                  isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03]" : "cursor-default",
+                  isUploadingTravelerAvatar && "opacity-75",
                   isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10"
                 )}
-              />
+              >
+                {resolvedUserPhoto ? (
+                  <img
+                    src={resolvedUserPhoto}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : isTravelerProfile ? (
+                  <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
+                    <span className={cn("font-black tracking-[0.08em]", isAndroidShell ? "text-sm sm:text-[10px]" : "text-sm sm:text-xs")}>
+                      {getUserAvatarInitials(profile)}
+                    </span>
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.28),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.14),transparent_42%)]" />
+                  </div>
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-mairide-bg">
+                    <UserIcon className="h-5 w-5 text-mairide-secondary" />
+                  </div>
+                )}
+                {isTravelerProfile && !resolvedUserPhoto && (
+                  <div className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-white text-mairide-primary shadow-sm">
+                    <Camera className="h-2.5 w-2.5" />
+                  </div>
+                )}
+              </button>
               <button onClick={onLogout} className={cn("rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600", !isAndroidShell && "sm:p-2.5")}>
                 <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
               </button>
