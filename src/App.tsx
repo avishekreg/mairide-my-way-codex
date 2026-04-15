@@ -1293,6 +1293,41 @@ const isWithinDashboardMatchRadius = (
     ) <= radiusKm
   );
 };
+const getFeedItemRoute = (item?: {
+  originLocation?: { lat?: unknown; lng?: unknown } | null;
+  destinationLocation?: { lat?: unknown; lng?: unknown } | null;
+} | null) => {
+  const originLocation = extractLatLng(item?.originLocation);
+  const destinationLocation = extractLatLng(item?.destinationLocation);
+  if (!originLocation || !destinationLocation) return null;
+  return { originLocation, destinationLocation };
+};
+const isWithinAnyDashboardCorridor = (
+  candidateRoute: { originLocation: { lat: number; lng: number }; destinationLocation: { lat: number; lng: number } } | null,
+  referenceRoutes: Array<{ originLocation: { lat: number; lng: number }; destinationLocation: { lat: number; lng: number } }>,
+  radiusKm: number = DASHBOARD_MATCH_RADIUS_KM
+) => {
+  if (!candidateRoute) return false;
+  if (!referenceRoutes.length) return true;
+  return referenceRoutes.some((referenceRoute) =>
+    routeCorridorMatch({
+      rideOriginLocation: candidateRoute.originLocation,
+      rideDestinationLocation: candidateRoute.destinationLocation,
+      travelerOriginLocation: referenceRoute.originLocation,
+      travelerDestinationLocation: referenceRoute.destinationLocation,
+      pickupDetourKm: radiusKm,
+      dropDetourKm: radiusKm,
+    }) ||
+    routeCorridorMatch({
+      rideOriginLocation: referenceRoute.originLocation,
+      rideDestinationLocation: referenceRoute.destinationLocation,
+      travelerOriginLocation: candidateRoute.originLocation,
+      travelerDestinationLocation: candidateRoute.destinationLocation,
+      pickupDetourKm: radiusKm,
+      dropDetourKm: radiusKm,
+    })
+  );
+};
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
@@ -8975,6 +9010,20 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
   );
+  const activeTravelerRequestRoutes = useMemo(
+    () =>
+      travelerRequests
+        .filter((request) => request.status === 'open')
+        .filter((request) => isRideWithinPlanningWindow(request))
+        .map((request) => getFeedItemRoute(request))
+        .filter(
+          (route): route is {
+            originLocation: { lat: number; lng: number };
+            destinationLocation: { lat: number; lng: number };
+          } => Boolean(route)
+        ),
+    [travelerRequests]
+  );
 
   useEffect(() => {
     const handleHomeNavigation = () => setActiveTab('search');
@@ -9621,13 +9670,18 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           travelerFeedLocation,
           getFeedItemOriginLocation(data)
         );
+        const matchesActiveTravelerCorridor = isWithinAnyDashboardCorridor(
+          getFeedItemRoute(data),
+          activeTravelerRequestRoutes
+        );
 
         const withinPlanningWindow = isRideWithinPlanningWindow(data);
         if (
           originMatches &&
           destinationMatches &&
           withinPlanningWindow &&
-          nearbyToTraveler
+          nearbyToTraveler &&
+          matchesActiveTravelerCorridor
         ) {
           const nextRide = { ...data };
           const dedupeKey = getRideDuplicateKey(nextRide);
@@ -10778,6 +10832,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
   const [driverBookings, setDriverBookings] = useState<Booking[]>([]);
+  const [driverAvailableRideRoutes, setDriverAvailableRideRoutes] = useState<
+    Array<{ originLocation: { lat: number; lng: number }; destinationLocation: { lat: number; lng: number } }>
+  >([]);
   const [tripSessions, setTripSessions] = useState<Record<string, TripSession>>({});
   const [tripNetworkState, setTripNetworkState] = useState<TripSession['networkState']>(
     typeof navigator !== 'undefined' && navigator.onLine ? 'online' : 'offline'
@@ -10815,8 +10872,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       travelerRideRequests
         .filter((request) => request.status === 'open')
         .filter((request) => request.consumerId !== profile.uid)
-        .filter((request) => isWithinDashboardMatchRadius(driverFeedLocation, getFeedItemOriginLocation(request))),
-    [driverFeedLocation, travelerRideRequests, profile.uid]
+        .filter((request) => isWithinDashboardMatchRadius(driverFeedLocation, getFeedItemOriginLocation(request)))
+        .filter((request) => isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
+    [driverAvailableRideRoutes, driverFeedLocation, travelerRideRequests, profile.uid]
   );
 
   useEffect(() => {
@@ -10836,6 +10894,30 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'rides'), where('driverId', '==', profile.uid));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const nextRoutes = snapshot.docs
+          .map((snapshotDoc) => snapshotDoc.data() as Ride)
+          .filter((ride) => String(ride.status || '') === 'available')
+          .map((ride) => getFeedItemRoute(ride as any))
+          .filter(
+            (route): route is {
+              originLocation: { lat: number; lng: number };
+              destinationLocation: { lat: number; lng: number };
+            } => Boolean(route)
+          );
+        setDriverAvailableRideRoutes(nextRoutes);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'rides');
+      }
+    );
+    return () => unsubscribe();
+  }, [profile.uid]);
 
   useEffect(() => {
     if (isLocalDevFirestoreMode()) {
