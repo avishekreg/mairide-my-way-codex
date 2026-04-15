@@ -3283,153 +3283,78 @@ const Navbar = ({
             </div>
           </div>
         ) : (
-          <>
-            <div className="grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 sm:hidden">
-              <div className="flex items-center">
-                <button
-                  onClick={() => setIsOpen(true)}
-                  className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg"
-                  aria-label="Open menu"
-                >
-                  <Menu className="h-6 w-6" />
-                </button>
-              </div>
-
-              <div className="min-w-0">
-                <div className="mx-auto flex min-w-0 max-w-[220px] cursor-pointer items-center justify-center" onClick={handleHomeNavigation}>
-                  <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%]" alt="MaiRide Logo" />
-                  <div className="flex min-w-0 flex-col justify-center leading-[0.9]">
-                    <span className="truncate text-[1.9rem] font-black tracking-tighter text-mairide-primary">MaiRide</span>
-                    <span className="truncate text-[1.05rem] font-black tracking-[0.02em] text-mairide-primary">my way</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex shrink-0 items-center justify-end">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleTravelerAvatarClick}
-                    onPointerUp={handleTravelerAvatarClick}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        handleTravelerAvatarClick(event);
-                      }
-                    }}
-                    disabled={!isTravelerProfile || isUploadingTravelerAvatar}
-                    aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
-                    title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
-                    className={cn(
-                      "relative z-10 h-11 w-11 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none",
-                      isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03]" : "cursor-default",
-                      isUploadingTravelerAvatar && "opacity-75"
-                    )}
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                  >
-                    {resolvedUserPhoto ? (
-                      <img
-                        src={resolvedUserPhoto}
-                        alt="Profile"
-                        className="h-full w-full object-cover"
-                      />
-                    ) : isTravelerProfile ? (
-                      <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
-                        <span className="text-sm font-black tracking-[0.08em]">{getUserAvatarInitials(profile)}</span>
-                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.28),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.14),transparent_42%)]" />
-                      </div>
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-mairide-bg">
-                        <UserIcon className="h-5 w-5 text-mairide-secondary" />
-                      </div>
-                    )}
-                    {isTravelerProfile && !resolvedUserPhoto && (
-                      <div className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-white text-mairide-primary shadow-sm">
-                        <Camera className="h-2.5 w-2.5" />
-                      </div>
-                    )}
-                  </button>
-                  <button onClick={onLogout} className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600">
-                    <LogOut className="h-6 w-6" />
-                  </button>
+          <div className="flex min-h-[84px] items-center justify-between gap-4 py-3">
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+              <button
+                onClick={() => setIsOpen(true)}
+                className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
+                aria-label="Open menu"
+              >
+                <Menu className="h-6 w-6 sm:h-5 sm:w-5" />
+              </button>
+              <div
+                className="flex min-w-0 cursor-pointer items-center justify-start"
+                onClick={handleHomeNavigation}
+              >
+                <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:mr-3 sm:h-[74px] sm:w-[74px]" alt="MaiRide Logo" />
+                <div className="flex min-w-0 flex-col justify-center overflow-visible py-1 leading-[0.92]">
+                  <span className="truncate text-[1.9rem] font-black tracking-tighter text-mairide-primary sm:text-[2rem]">MaiRide</span>
+                  <span className="mt-0.5 truncate text-[1.05rem] font-black tracking-[0.02em] text-mairide-primary sm:mt-1 sm:text-[0.95rem] sm:tracking-[0.08em]">my way</span>
                 </div>
               </div>
             </div>
 
-            <div className="hidden min-h-[88px] items-center justify-between gap-6 py-3 sm:flex">
-              <div className="flex min-w-0 items-center gap-4">
-                <button
-                  onClick={() => setIsOpen(true)}
-                  className="inline-flex shrink-0 items-center justify-center rounded-xl border border-mairide-secondary bg-white p-2.5 text-mairide-primary transition-colors hover:bg-mairide-bg"
-                  aria-label="Open menu"
-                >
-                  <Menu className="h-5 w-5" />
-                </button>
-                <div
-                  className="flex min-w-0 cursor-pointer items-center justify-start"
-                  onClick={handleHomeNavigation}
-                >
-                  <img src={LOGO_URL} className="mr-3 h-[74px] w-[74px] shrink-0 object-contain rounded-[22%]" alt="MaiRide Logo" />
-                  <div className="flex min-w-0 flex-col justify-center overflow-visible leading-[0.95] py-1">
-                    <span className="truncate text-[2rem] font-black tracking-tighter text-mairide-primary">MaiRide</span>
-                    <span className="mt-1 truncate text-[0.95rem] font-black tracking-[0.08em] text-mairide-primary">my way</span>
-                  </div>
-                </div>
+            <div className="flex shrink-0 items-center gap-1.5 border-l border-mairide-secondary pl-3 sm:gap-3 sm:pl-5">
+              <div className="hidden min-w-[120px] text-right sm:block">
+                <p className="text-base font-semibold leading-tight text-mairide-primary">{profile?.displayName}</p>
+                <p className="mt-0.5 text-sm capitalize leading-tight text-mairide-secondary">{profile?.role}</p>
               </div>
-
-              <div className="flex shrink-0 items-center justify-end">
-                <div className="flex items-center gap-3 border-l border-mairide-secondary pl-5">
-                  <div className="hidden min-w-[120px] text-right sm:block">
-                    <p className="text-base font-semibold leading-tight text-mairide-primary">{profile?.displayName}</p>
-                    <p className="mt-0.5 text-sm capitalize leading-tight text-mairide-secondary">{profile?.role}</p>
+              <button
+                type="button"
+                onClick={handleTravelerAvatarClick}
+                onPointerUp={handleTravelerAvatarClick}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    handleTravelerAvatarClick(event);
+                  }
+                }}
+                disabled={!isTravelerProfile || isUploadingTravelerAvatar}
+                aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
+                title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
+                className={cn(
+                  "relative z-10 h-11 w-11 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none sm:h-10 sm:w-10",
+                  isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03]" : "cursor-default",
+                  isUploadingTravelerAvatar && "opacity-75"
+                )}
+                style={{ WebkitTapHighlightColor: 'transparent' }}
+              >
+                {resolvedUserPhoto ? (
+                  <img
+                    src={resolvedUserPhoto}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : isTravelerProfile ? (
+                  <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
+                    <span className="text-sm font-black tracking-[0.08em] sm:text-xs">{getUserAvatarInitials(profile)}</span>
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.28),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.14),transparent_42%)]" />
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleTravelerAvatarClick}
-                    onPointerUp={handleTravelerAvatarClick}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        handleTravelerAvatarClick(event);
-                      }
-                    }}
-                    disabled={!isTravelerProfile || isUploadingTravelerAvatar}
-                    aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
-                    title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
-                    className={cn(
-                      "relative z-10 h-10 w-10 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none",
-                      isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03]" : "cursor-default",
-                      isUploadingTravelerAvatar && "opacity-75"
-                    )}
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                  >
-                    {resolvedUserPhoto ? (
-                      <img
-                        src={resolvedUserPhoto}
-                        alt="Profile"
-                        className="h-full w-full object-cover"
-                      />
-                    ) : isTravelerProfile ? (
-                      <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
-                        <span className="text-xs font-black tracking-[0.08em]">{getUserAvatarInitials(profile)}</span>
-                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.28),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.14),transparent_42%)]" />
-                      </div>
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-mairide-bg">
-                        <UserIcon className="h-5 w-5 text-mairide-secondary" />
-                      </div>
-                    )}
-                    {isTravelerProfile && !resolvedUserPhoto && (
-                      <div className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-white text-mairide-primary shadow-sm">
-                        <Camera className="h-2.5 w-2.5" />
-                      </div>
-                    )}
-                  </button>
-                  <button onClick={onLogout} className="rounded-xl p-2.5 text-mairide-secondary transition-colors hover:text-red-600">
-                    <LogOut className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-mairide-bg">
+                    <UserIcon className="h-5 w-5 text-mairide-secondary" />
+                  </div>
+                )}
+                {isTravelerProfile && !resolvedUserPhoto && (
+                  <div className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-white text-mairide-primary shadow-sm">
+                    <Camera className="h-2.5 w-2.5" />
+                  </div>
+                )}
+              </button>
+              <button onClick={onLogout} className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600 sm:p-2.5">
+                <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
+              </button>
             </div>
-          </>
+          </div>
         )}
       </div>
 
