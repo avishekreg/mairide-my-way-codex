@@ -3298,7 +3298,7 @@ const Navbar = ({
             </div>
           </div>
         ) : (
-          <div className="flex min-h-[84px] items-center justify-between gap-4 py-3">
+          <div className="flex min-h-[92px] items-center justify-between gap-4 py-3">
             <div className="flex min-w-0 items-center gap-3 sm:gap-4">
               <button
                 onClick={() => setIsOpen(true)}
@@ -3311,10 +3311,10 @@ const Navbar = ({
                 className="flex min-w-0 cursor-pointer items-center justify-start"
                 onClick={handleHomeNavigation}
               >
-                <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:mr-3 sm:h-[74px] sm:w-[74px]" alt="MaiRide Logo" />
-                <div className="flex min-w-0 flex-col justify-center overflow-visible py-2 leading-[1.02]">
-                  <span className="truncate text-[1.9rem] font-black leading-[1.02] tracking-tighter text-mairide-primary sm:text-[2rem]">MaiRide</span>
-                  <span className="mt-1 truncate text-[1.05rem] font-black leading-[1.02] tracking-[0.02em] text-mairide-primary sm:text-[0.95rem] sm:tracking-[0.08em]">my way</span>
+                <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:mr-4 sm:h-[84px] sm:w-[84px]" alt="MaiRide Logo" />
+                <div className="flex min-w-0 flex-col justify-center overflow-visible py-2.5 leading-[1.04]">
+                  <span className="truncate text-[1.9rem] font-black leading-[1.02] tracking-tighter text-mairide-primary sm:text-[2.55rem]">MaiRide</span>
+                  <span className="mt-1 truncate text-[1.05rem] font-black leading-[1.04] tracking-[0.02em] text-mairide-primary sm:mt-1.5 sm:text-[1.2rem] sm:tracking-[0.1em]">my way</span>
                 </div>
               </div>
             </div>
