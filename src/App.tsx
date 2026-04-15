@@ -2255,17 +2255,26 @@ const getResolvedUserRating = (user?: UserProfile | null) => {
   return 5.0;
 };
 
-const isTravelerCustomPhoto = (user?: UserProfile | null) => {
-  if (!user || user.role !== 'consumer') return false;
-  if (user.travelerAvatarCustomized) return true;
+const isTravelerCustomPhotoUrl = (photoUrl?: string | null) => {
+  const value = String(photoUrl || '');
+  return /\/avatar-\d+\.jpg/i.test(value) || /users%2F[^/]+%2Favatar-\d+\.jpg/i.test(value);
+};
+
+const resolveTravelerAvatarSource = (user?: UserProfile | null): 'provider' | 'custom' | 'none' => {
+  if (!user || user.role !== 'consumer') return 'none';
+  if (user.travelerAvatarSource === 'provider' || user.travelerAvatarSource === 'custom' || user.travelerAvatarSource === 'none') {
+    return user.travelerAvatarSource;
+  }
   const photoUrl = String(user.photoURL || '');
-  return /\/avatar-\d+\.jpg/i.test(photoUrl) || /users%2F[^/]+%2Favatar-\d+\.jpg/i.test(photoUrl);
+  if (!photoUrl) return 'none';
+  return isTravelerCustomPhotoUrl(photoUrl) ? 'custom' : 'provider';
 };
 
 const getResolvedUserPhoto = (user?: UserProfile | null) => {
   if (!user) return '';
   if (user.role === 'consumer') {
-    return isTravelerCustomPhoto(user) ? String(user.photoURL || '') : '';
+    const avatarSource = resolveTravelerAvatarSource(user);
+    return avatarSource === 'none' ? '' : String(user.photoURL || '');
   }
   return user.photoURL || user.driverDetails?.selfiePhoto || '';
 };
@@ -3100,7 +3109,7 @@ const Navbar = ({
       const avatarUrl = await getDownloadURL(avatarRef);
       await updateDoc(doc(db, 'users', profile.uid), {
         photoURL: avatarUrl,
-        travelerAvatarCustomized: true,
+        travelerAvatarSource: 'custom',
       });
       setShowTravelerAvatarOptions(false);
       setShowTravelerCameraCapture(false);
@@ -4631,9 +4640,14 @@ const findUserProfileByPhone = async (value: string) => {
         if (existingProfile) {
           // If profile exists with different UID, "migrate" it to the new UID
           const oldUid = existingProfile.uid;
+          const existingTravelerAvatarSource =
+            existingProfile.role === 'consumer'
+              ? resolveTravelerAvatarSource(existingProfile)
+              : existingProfile.travelerAvatarSource;
           const newProfile = {
             ...existingProfile,
             uid: user.uid,
+            ...(existingProfile.role === 'consumer' ? { travelerAvatarSource: existingTravelerAvatarSource } : {}),
             ...(isSignUp
               ? {
                   consents: existingProfile.consents ?? {
@@ -4662,14 +4676,15 @@ const findUserProfileByPhone = async (value: string) => {
         }
 
         const isAdminEmail = targetEmail === SUPER_ADMIN_EMAIL;
+        const isTravelerRole = !isAdminEmail && selectedOAuthRole === 'consumer';
         const newProfile: UserProfile = {
           uid: user.uid,
           email: targetEmail,
           displayName: name || user.displayName || phone || 'User',
           role: isAdminEmail ? 'admin' : selectedOAuthRole,
           status: 'active',
-          photoURL: isAdminEmail || selectedOAuthRole === 'driver' ? (user.photoURL || '') : '',
-          travelerAvatarCustomized: selectedOAuthRole === 'consumer' ? false : undefined,
+          photoURL: isTravelerRole ? (user.photoURL || '') : (isAdminEmail || selectedOAuthRole === 'driver' ? (user.photoURL || '') : ''),
+          travelerAvatarSource: isTravelerRole ? (user.photoURL ? 'provider' : 'none') : undefined,
           phoneNumber: targetPhone,
           onboardingComplete: isAdminEmail,
           createdAt: new Date().toISOString(),
@@ -4697,6 +4712,11 @@ const findUserProfileByPhone = async (value: string) => {
         await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined);
       } else {
         const existingProfile = docSnap.data() as UserProfile;
+        if (existingProfile.role === 'consumer' && !existingProfile.travelerAvatarSource) {
+          await updateDoc(docRef, {
+            travelerAvatarSource: resolveTravelerAvatarSource(existingProfile),
+          });
+        }
         if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL && existingProfile.role !== 'admin') {
           await updateDoc(docRef, { role: 'admin', onboardingComplete: true });
         }
