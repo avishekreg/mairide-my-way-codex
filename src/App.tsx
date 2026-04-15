@@ -1402,8 +1402,8 @@ const IN_STATE_LANGUAGE_MAP: Record<string, string> = {
 };
 
 const LOCATION_LANGUAGE_HINTS: Array<{ keywords: string[]; language: string }> = [
-  { keywords: ['kolkata', 'calcutta', 'howrah', 'hooghly', 'north 24 parganas', 'south 24 parganas', 'nabadwip', 'siliguri'], language: 'bn' },
-  { keywords: ['darjeeling', 'kalimpong', 'kurseong', 'gangtok', 'namchi', 'gyalshing', 'mangan', 'soreng', 'pakyong'], language: 'ne' },
+  { keywords: ['kolkata', 'calcutta', 'howrah', 'hooghly', 'north 24 parganas', 'south 24 parganas', 'nabadwip'], language: 'bn' },
+  { keywords: ['siliguri', 'darjeeling', 'kalimpong', 'kurseong', 'gangtok', 'namchi', 'gyalshing', 'mangan', 'soreng', 'pakyong'], language: 'ne' },
   { keywords: ['mumbai', 'pune', 'nagpur', 'nashik', 'thane', 'kolhapur'], language: 'mr' },
 ];
 
@@ -3204,10 +3204,10 @@ const Navbar = ({
             "grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3",
             isAndroidShell
               ? "sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0"
-              : "sm:flex sm:min-h-[88px] sm:items-center sm:justify-between sm:gap-8 sm:py-3"
+              : "sm:grid sm:min-h-[88px] sm:grid-cols-[max-content_1fr_max-content] sm:items-center sm:gap-8 sm:py-3"
           )}
         >
-          <div className={cn("flex items-center", !isAndroidShell && "sm:min-w-0 sm:flex-1 sm:gap-3 sm:justify-start sm:self-center")}>
+          <div className={cn("flex items-center", !isAndroidShell && "sm:min-w-0 sm:w-fit sm:gap-3 sm:justify-start sm:self-center")}>
             <button
               onClick={() => setIsOpen(true)}
               className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
