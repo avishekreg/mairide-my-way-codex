@@ -63,8 +63,8 @@ jobs:
       - name: Build web app
         run: npm run build
 
-      - name: Install Capacitor toolchain
-        run: npm i -D @capacitor/cli @capacitor/core @capacitor/android
+      - name: Install Capacitor toolchain and native app plugins
+        run: npm i -D @capacitor/cli @capacitor/core @capacitor/android @capacitor/camera @capacitor/filesystem @capawesome-team/capacitor-file-opener
 
       - name: Generate Capacitor config
         run: |

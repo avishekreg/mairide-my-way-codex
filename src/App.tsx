@@ -1194,6 +1194,74 @@ const openAndroidAppSettings = async () => {
   return false;
 };
 
+const withCacheBust = (url: string) => {
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}t=${Date.now()}`;
+};
+
+const downloadAndOpenAndroidApk = async (apkUrl: string) => {
+  const fallbackUrl = withCacheBust(apkUrl || LIVE_ANDROID_APK_URL);
+  if (typeof window === 'undefined' || !isAndroidAppRuntime()) {
+    window.location.href = fallbackUrl;
+    return { mode: 'browser-fallback' as const };
+  }
+
+  const filesystemPlugin = getCapacitorPlugin<any>('Filesystem');
+  const fileOpenerPlugin = getCapacitorPlugin<any>('FileOpener');
+
+  if (!filesystemPlugin?.downloadFile || !(fileOpenerPlugin?.openFile || fileOpenerPlugin?.open)) {
+    window.location.href = fallbackUrl;
+    return { mode: 'browser-fallback' as const };
+  }
+
+  const targetFileName = `mairide-update-${Date.now()}.apk`;
+  const candidateDirectories = [
+    filesystemPlugin.Directory?.Documents || 'DOCUMENTS',
+    filesystemPlugin.Directory?.Cache || 'CACHE',
+    filesystemPlugin.Directory?.External || 'EXTERNAL',
+  ].filter(Boolean);
+
+  let lastError: unknown = null;
+
+  for (const directory of candidateDirectories) {
+    try {
+      const downloadResult = await filesystemPlugin.downloadFile({
+        url: fallbackUrl,
+        path: targetFileName,
+        directory,
+        recursive: true,
+      });
+
+      const resolvedUri =
+        String(downloadResult?.path || downloadResult?.uri || '').trim() ||
+        String((await filesystemPlugin.getUri?.({ path: targetFileName, directory }))?.uri || '').trim();
+
+      if (!resolvedUri) {
+        throw new Error('Downloaded update file could not be resolved.');
+      }
+
+      if (fileOpenerPlugin.openFile) {
+        await fileOpenerPlugin.openFile({
+          path: resolvedUri,
+          mimeType: 'application/vnd.android.package-archive',
+        });
+      } else {
+        await fileOpenerPlugin.open({
+          filePath: resolvedUri,
+          contentType: 'application/vnd.android.package-archive',
+          openWithDefault: true,
+        });
+      }
+
+      return { mode: 'native-installer' as const };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Unable to prepare the Android update installer.');
+};
+
 const extractLatLng = (location?: { lat?: unknown; lng?: unknown } | null) => {
   const lat = Number(location?.lat);
   const lng = Number(location?.lng);
@@ -3001,8 +3069,11 @@ const Navbar = ({
     }
   };
 
-  const handleTravelerAvatarClick = () => {
+  const handleTravelerAvatarClick = (event?: React.MouseEvent<HTMLButtonElement> | React.TouchEvent<HTMLButtonElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
     if (!isTravelerProfile || isUploadingTravelerAvatar) return;
+    setIsOpen(false);
     setShowTravelerAvatarOptions(true);
   };
 
@@ -3172,11 +3243,12 @@ const Navbar = ({
               <button
                 type="button"
                 onClick={handleTravelerAvatarClick}
+                onTouchEnd={handleTravelerAvatarClick}
                 disabled={!isTravelerProfile || isUploadingTravelerAvatar}
                 aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
                 title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
                 className={cn(
-                  "relative overflow-hidden rounded-full border border-mairide-secondary",
+                  "relative z-10 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation",
                   isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03]" : "cursor-default",
                   isUploadingTravelerAvatar && "opacity-75",
                   isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10"
@@ -17444,6 +17516,7 @@ const App = () => {
     apkUrl: LIVE_ANDROID_APK_URL,
   });
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
+  const [isApplyingAndroidUpdate, setIsApplyingAndroidUpdate] = useState(false);
   const [remoteAppVersion, setRemoteAppVersion] = useState('');
   const [buildStamp, setBuildStamp] = useState<BuildStampInfo | null>(null);
   const [installedAndroidVersion, setInstalledAndroidVersion] = useState(APP_VERSION);
@@ -17957,7 +18030,37 @@ const App = () => {
   };
 
   const handleApplyAndroidUpdate = () => {
-    window.location.href = `${LIVE_ANDROID_APK_URL}?t=${Date.now()}`;
+    const runUpdate = async () => {
+      if (isApplyingAndroidUpdate) return;
+      setIsApplyingAndroidUpdate(true);
+      try {
+        const result = await downloadAndOpenAndroidApk(androidUpdateState.apkUrl || LIVE_ANDROID_APK_URL);
+        if (result.mode === 'browser-fallback') {
+          showAppDialog(
+            'The update is downloading through your browser because native install handoff is not available in this build yet.',
+            'warning',
+            'Downloading update'
+          );
+        } else {
+          showAppDialog(
+            'The update package is ready. Android should open the installer now.',
+            'success',
+            'Preparing update'
+          );
+        }
+      } catch (error: any) {
+        const message = String(error?.message || error || '').trim();
+        showAppDialog(
+          message || 'We could not prepare the Android update automatically. Please try again.',
+          'error',
+          'Update failed'
+        );
+      } finally {
+        setIsApplyingAndroidUpdate(false);
+      }
+    };
+
+    void runUpdate();
   };
 
   const androidUpdatePrompt = showAndroidUpdatePrompt && androidUpdateState.available ? (
@@ -17985,9 +18088,10 @@ const App = () => {
           <button
             type="button"
             onClick={handleApplyAndroidUpdate}
-            className="flex-1 rounded-xl bg-mairide-accent px-3 py-2 text-sm font-bold text-white hover:opacity-90 transition"
+            disabled={isApplyingAndroidUpdate}
+            className="flex-1 rounded-xl bg-mairide-accent px-3 py-2 text-sm font-bold text-white hover:opacity-90 transition disabled:cursor-not-allowed disabled:opacity-70"
           >
-            Update now
+            {isApplyingAndroidUpdate ? 'Preparing…' : 'Update now'}
           </button>
         </div>
       </div>
