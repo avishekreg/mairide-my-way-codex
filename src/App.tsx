@@ -57,6 +57,11 @@ import { auth, db, storage } from './lib/firebase';
 import { supabase } from './lib/supabase';
 import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
+import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Camera as CapacitorCamera, CameraResultType } from '@capacitor/camera';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { FileOpener } from '@capawesome-team/capacitor-file-opener';
 import Webcam from 'react-webcam';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -1147,21 +1152,14 @@ const normalizeVersionTag = (version?: unknown) =>
     .replace(/\+.*$/, '');
 
 const ANDROID_APP_ID = 'in.mairide.app';
-const getCapacitorPlugin = <T = any,>(pluginName: string): T | undefined => {
-  if (typeof window === 'undefined') return undefined;
-  return (window as any)?.Capacitor?.Plugins?.[pluginName] as T | undefined;
-};
 
 const resolveInstalledAndroidVersion = async () => {
   if (typeof window === 'undefined' || !isAndroidAppRuntime()) return APP_VERSION;
 
   try {
-    const appPlugin = getCapacitorPlugin<any>('App');
-    if (appPlugin?.getInfo) {
-      const info = await appPlugin.getInfo();
-      const nativeVersion = String(info?.version || '').trim();
-      if (nativeVersion) return nativeVersion;
-    }
+    const info = await CapacitorApp.getInfo();
+    const nativeVersion = String(info?.version || '').trim();
+    if (nativeVersion) return nativeVersion;
   } catch {
     // Fall back to bundled app version when native app info is unavailable.
   }
@@ -1173,9 +1171,8 @@ const openAndroidAppSettings = async () => {
   if (typeof window === 'undefined') return false;
 
   try {
-    const appPlugin = getCapacitorPlugin<any>('App');
-    if (appPlugin?.openSettings) {
-      await appPlugin.openSettings();
+    if (Capacitor.isNativePlatform()) {
+      await CapacitorApp.openSettings();
       return true;
     }
   } catch {
@@ -1206,26 +1203,23 @@ const downloadAndOpenAndroidApk = async (apkUrl: string) => {
     return { mode: 'browser-fallback' as const };
   }
 
-  const filesystemPlugin = getCapacitorPlugin<any>('Filesystem');
-  const fileOpenerPlugin = getCapacitorPlugin<any>('FileOpener');
-
-  if (!filesystemPlugin?.downloadFile || !(fileOpenerPlugin?.openFile || fileOpenerPlugin?.open)) {
+  if (!Capacitor.isNativePlatform()) {
     window.location.href = fallbackUrl;
     return { mode: 'browser-fallback' as const };
   }
 
   const targetFileName = `mairide-update-${Date.now()}.apk`;
   const candidateDirectories = [
-    filesystemPlugin.Directory?.Documents || 'DOCUMENTS',
-    filesystemPlugin.Directory?.Cache || 'CACHE',
-    filesystemPlugin.Directory?.External || 'EXTERNAL',
-  ].filter(Boolean);
+    Directory.Cache,
+    Directory.Documents,
+    Directory.External,
+  ];
 
   let lastError: unknown = null;
 
   for (const directory of candidateDirectories) {
     try {
-      const downloadResult = await filesystemPlugin.downloadFile({
+      const downloadResult = await Filesystem.downloadFile({
         url: fallbackUrl,
         path: targetFileName,
         directory,
@@ -1234,24 +1228,16 @@ const downloadAndOpenAndroidApk = async (apkUrl: string) => {
 
       const resolvedUri =
         String(downloadResult?.path || downloadResult?.uri || '').trim() ||
-        String((await filesystemPlugin.getUri?.({ path: targetFileName, directory }))?.uri || '').trim();
+        String((await Filesystem.getUri({ path: targetFileName, directory }))?.uri || '').trim();
 
       if (!resolvedUri) {
         throw new Error('Downloaded update file could not be resolved.');
       }
 
-      if (fileOpenerPlugin.openFile) {
-        await fileOpenerPlugin.openFile({
-          path: resolvedUri,
-          mimeType: 'application/vnd.android.package-archive',
-        });
-      } else {
-        await fileOpenerPlugin.open({
-          filePath: resolvedUri,
-          contentType: 'application/vnd.android.package-archive',
-          openWithDefault: true,
-        });
-      }
+      await FileOpener.openFile({
+        path: resolvedUri,
+        mimeType: 'application/vnd.android.package-archive',
+      });
 
       return { mode: 'native-installer' as const };
     } catch (error) {
@@ -3106,61 +3092,47 @@ const Navbar = ({
     setShowTravelerAvatarOptions(false);
 
     if (shouldUseNativeTravelerCamera) {
-      const nativeCameraPlugin = getCapacitorPlugin<any>('Camera');
+      try {
+        let cameraPermission = '';
+        const currentPermissions = await CapacitorCamera.checkPermissions();
+        cameraPermission = String(currentPermissions?.camera || currentPermissions?.photos || '');
 
-      if (nativeCameraPlugin?.getPhoto) {
-        try {
-          let cameraPermission = '';
-          if (nativeCameraPlugin.checkPermissions) {
-            const currentPermissions = await nativeCameraPlugin.checkPermissions();
-            cameraPermission = String(currentPermissions?.camera || currentPermissions?.photos || '');
-          }
+        if (!cameraPermission || cameraPermission === 'prompt' || cameraPermission === 'prompt-with-rationale') {
+          const requestedPermissions = await CapacitorCamera.requestPermissions({ permissions: ['camera'] }).catch(() => null);
+          cameraPermission = String(requestedPermissions?.camera || requestedPermissions?.photos || cameraPermission || '');
+        }
 
-          if (!cameraPermission || cameraPermission === 'prompt' || cameraPermission === 'prompt-with-rationale') {
-            if (nativeCameraPlugin.requestPermissions) {
-              const requestedPermissions = await nativeCameraPlugin.requestPermissions().catch(() => null);
-              cameraPermission = String(requestedPermissions?.camera || requestedPermissions?.photos || cameraPermission || '');
-            }
-          }
-
-          if (cameraPermission && !['granted', 'limited'].includes(cameraPermission)) {
-            promptTravelerCameraSettings();
-            return;
-          }
-
-          const photo = await nativeCameraPlugin.getPhoto({
-            quality: 85,
-            allowEditing: false,
-            resultType: 'dataUrl',
-            source: 'CAMERA',
-            promptLabelHeader: 'Traveler profile photo',
-            promptLabelPicture: 'Take Photo',
-            promptLabelPhoto: 'Upload Photo',
-          });
-
-          const imagePayload =
-            String(photo?.dataUrl || '').trim() ||
-            (photo?.base64String ? `data:image/jpeg;base64,${photo.base64String}` : '');
-
-          if (imagePayload) {
-            await updateTravelerAvatar(imagePayload);
-          }
-          return;
-        } catch (error: any) {
-          const nativeMessage = String(error?.message || error || '');
-          if (/permission|denied|not authorized|forbidden/i.test(nativeMessage)) {
-            promptTravelerCameraSettings();
-            return;
-          }
-          if (!/cancel|user cancelled|user canceled/i.test(nativeMessage)) {
-            showAppDialog(nativeMessage || 'We could not open the camera right now. Please try again.', 'error', 'Camera unavailable');
-          }
+        if (cameraPermission && !['granted', 'limited'].includes(cameraPermission)) {
+          promptTravelerCameraSettings();
           return;
         }
-      }
 
-      travelerCameraInputRef.current?.click();
-      return;
+        const photo = await CapacitorCamera.getPhoto({
+          quality: 85,
+          allowEditing: false,
+          resultType: CameraResultType.DataUrl,
+          saveToGallery: false,
+        });
+
+        const imagePayload =
+          String(photo?.dataUrl || '').trim() ||
+          (photo?.base64String ? `data:image/jpeg;base64,${photo.base64String}` : '');
+
+        if (imagePayload) {
+          await updateTravelerAvatar(imagePayload);
+        }
+        return;
+      } catch (error: any) {
+        const nativeMessage = String(error?.message || error || '');
+        if (/permission|denied|not authorized|forbidden/i.test(nativeMessage)) {
+          promptTravelerCameraSettings();
+          return;
+        }
+        if (!/cancel|user cancelled|user canceled/i.test(nativeMessage)) {
+          showAppDialog(nativeMessage || 'We could not open the camera right now. Please try again.', 'error', 'Camera unavailable');
+        }
+        return;
+      }
     }
 
     setShowTravelerCameraCapture(true);
