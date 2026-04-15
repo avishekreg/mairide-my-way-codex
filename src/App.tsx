@@ -3132,10 +3132,15 @@ const Navbar = ({
     setShowTravelerAvatarOptions(true);
   };
 
-  const handleTravelerAvatarClick = (event?: React.MouseEvent<HTMLButtonElement> | React.PointerEvent<HTMLButtonElement>) => {
-    event?.preventDefault();
-    event?.stopPropagation();
+  const handleTravelerAvatarTrigger = () => {
     openTravelerAvatarOptions();
+  };
+
+  const handleTravelerAvatarKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openTravelerAvatarOptions();
+    }
   };
 
   const promptTravelerCameraSettings = () => {
@@ -3269,21 +3274,17 @@ const Navbar = ({
                   <p className={cn("font-semibold text-mairide-primary", isAndroidShell ? "text-sm" : "text-base leading-tight")}>{profile?.displayName}</p>
                   <p className={cn("text-mairide-secondary capitalize", isAndroidShell ? "text-xs" : "text-sm leading-tight mt-0.5")}>{profile?.role}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleTravelerAvatarClick}
-                  onPointerUp={handleTravelerAvatarClick}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      handleTravelerAvatarClick(event);
-                    }
-                  }}
-                  disabled={!isTravelerProfile || isUploadingTravelerAvatar}
+                <div
+                  role={isTravelerProfile ? 'button' : undefined}
+                  tabIndex={isTravelerProfile ? 0 : -1}
+                  onClick={isTravelerProfile ? handleTravelerAvatarTrigger : undefined}
+                  onPointerUp={isTravelerProfile ? handleTravelerAvatarTrigger : undefined}
+                  onKeyDown={isTravelerProfile ? handleTravelerAvatarKeyDown : undefined}
                   aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
                   title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
                   className={cn(
                     "relative z-10 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none",
-                    isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03]" : "cursor-default",
+                    isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03] active:scale-[0.98]" : "cursor-default",
                     isUploadingTravelerAvatar && "opacity-75",
                     isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10"
                   )}
@@ -3312,7 +3313,7 @@ const Navbar = ({
                       <Camera className="h-2.5 w-2.5" />
                     </div>
                   )}
-                </button>
+                </div>
                 <button onClick={onLogout} className={cn("rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600", !isAndroidShell && "sm:p-2.5")}>
                   <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
                 </button>
@@ -3346,21 +3347,17 @@ const Navbar = ({
                 <p className="text-base font-semibold leading-tight text-mairide-primary">{profile?.displayName}</p>
                 <p className="mt-0.5 text-sm capitalize leading-tight text-mairide-secondary">{profile?.role}</p>
               </div>
-              <button
-                type="button"
-                onClick={handleTravelerAvatarClick}
-                onPointerUp={handleTravelerAvatarClick}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    handleTravelerAvatarClick(event);
-                  }
-                }}
-                disabled={!isTravelerProfile || isUploadingTravelerAvatar}
+              <div
+                role={isTravelerProfile ? 'button' : undefined}
+                tabIndex={isTravelerProfile ? 0 : -1}
+                onClick={isTravelerProfile ? handleTravelerAvatarTrigger : undefined}
+                onPointerUp={isTravelerProfile ? handleTravelerAvatarTrigger : undefined}
+                onKeyDown={isTravelerProfile ? handleTravelerAvatarKeyDown : undefined}
                 aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
                 title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
                 className={cn(
                   "relative z-10 h-11 w-11 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none sm:h-10 sm:w-10",
-                  isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03]" : "cursor-default",
+                  isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03] active:scale-[0.98]" : "cursor-default",
                   isUploadingTravelerAvatar && "opacity-75"
                 )}
                 style={{ WebkitTapHighlightColor: 'transparent' }}
@@ -3386,7 +3383,7 @@ const Navbar = ({
                     <Camera className="h-2.5 w-2.5" />
                   </div>
                 )}
-              </button>
+              </div>
               <button onClick={onLogout} className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600 sm:p-2.5">
                 <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
               </button>
