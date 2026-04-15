@@ -1269,6 +1269,30 @@ const extractLatLng = (location?: { lat?: unknown; lng?: unknown } | null) => {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   return { lat, lng };
 };
+const DASHBOARD_MATCH_RADIUS_KM = 50;
+const getFeedViewerLocation = (
+  liveLocation?: { lat: number; lng: number } | null,
+  profileLocation?: { lat?: unknown; lng?: unknown } | null
+) => liveLocation || extractLatLng(profileLocation);
+const getFeedItemOriginLocation = (item?: {
+  originLocation?: { lat?: unknown; lng?: unknown } | null;
+  location?: { lat?: unknown; lng?: unknown } | null;
+} | null) => extractLatLng(item?.originLocation) || extractLatLng(item?.location);
+const isWithinDashboardMatchRadius = (
+  viewerLocation?: { lat: number; lng: number } | null,
+  itemOriginLocation?: { lat: number; lng: number } | null,
+  radiusKm: number = DASHBOARD_MATCH_RADIUS_KM
+) => {
+  if (!viewerLocation || !itemOriginLocation) return false;
+  return (
+    getDistance(
+      viewerLocation.lat,
+      viewerLocation.lng,
+      itemOriginLocation.lat,
+      itemOriginLocation.lng
+    ) <= radiusKm
+  );
+};
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
 const isRazorpayEnabled = (config?: Partial<AppConfig> | null) => Boolean(getConfiguredRazorpayKeyId(config));
@@ -8947,6 +8971,10 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   );
   const seenDriverCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedDriverCountersRef = useRef(false);
+  const travelerFeedLocation = useMemo(
+    () => getFeedViewerLocation(userLocation, profile.location),
+    [profile.location?.lat, profile.location?.lng, userLocation]
+  );
 
   useEffect(() => {
     const handleHomeNavigation = () => setActiveTab('search');
@@ -9290,28 +9318,19 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, [tripSessions]);
 
   useEffect(() => {
-    // Listen for online drivers within 100km radius
+    // Listen for online drivers within the local dashboard radius only.
     const q = query(collection(db, 'users'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const driverList: UserProfile[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data() as UserProfile;
-        if (data.role === 'driver' && data.driverDetails?.isOnline && data.location) {
-          // If consumer location is available, filter by 100km radius
-          if (userLocation) {
-            const distance = getDistance(
-              userLocation.lat, 
-              userLocation.lng, 
-              data.location.lat, 
-              data.location.lng
-            );
-            if (distance <= 100) {
-              driverList.push(data);
-            }
-          } else {
-            // Fallback: show all online drivers if location not yet available
-            driverList.push(data);
-          }
+        const driverOriginLocation = getFeedItemOriginLocation(data);
+        if (
+          data.role === 'driver' &&
+          data.driverDetails?.isOnline &&
+          isWithinDashboardMatchRadius(travelerFeedLocation, driverOriginLocation)
+        ) {
+          driverList.push(data);
         }
       });
       setDrivers(driverList);
@@ -9319,7 +9338,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       handleFirestoreError(error, OperationType.GET, 'users');
     });
     return () => unsubscribe();
-  }, [userLocation]);
+  }, [travelerFeedLocation]);
 
   const geocodeAddress = async (address: string) => {
     if (!window.google || !window.google.maps) return null;
@@ -9508,7 +9527,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   useEffect(() => {
     if (activeTab !== 'search') return;
     void handleSearch();
-  }, [activeTab, userLocation, dashboardBookings.length, travelerRequests.length]);
+  }, [activeTab, dashboardBookings.length, travelerFeedLocation, travelerRequests.length]);
 
   const handleSearch = async () => {
     setIsLoading(true);
@@ -9598,24 +9617,17 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
             ? destinationDistance <= 120
             : routeTextMatches(normalizedDestination, normalizedSearchTo));
 
-        const nearbyToTraveler =
-          !userLocation ||
-          !data.originLocation ||
-          getDistance(
-            userLocation.lat,
-            userLocation.lng,
-            data.originLocation.lat,
-            data.originLocation.lng
-          ) <= 500;
+        const nearbyToTraveler = isWithinDashboardMatchRadius(
+          travelerFeedLocation,
+          getFeedItemOriginLocation(data)
+        );
 
         const withinPlanningWindow = isRideWithinPlanningWindow(data);
-        const isAdvancePlanningSearch = Boolean(search.from || search.to || searchLocationFrom || searchLocationTo);
-
         if (
           originMatches &&
           destinationMatches &&
           withinPlanningWindow &&
-          (isAdvancePlanningSearch ? true : nearbyToTraveler)
+          nearbyToTraveler
         ) {
           const nextRide = { ...data };
           const dedupeKey = getRideDuplicateKey(nextRide);
@@ -10782,6 +10794,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   } | null>(null);
   const seenTravelerCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedTravelerCountersRef = useRef(false);
+  const driverFeedLocation = useMemo(
+    () => getFeedViewerLocation(userLocation, profile.location),
+    [profile.location?.lat, profile.location?.lng, userLocation]
+  );
   const activeDashboardRequests = useMemo(
     () => requests.filter((request) => !retiredRideIds.includes(request.rideId)),
     [requests, retiredRideIds]
@@ -10798,8 +10814,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     () =>
       travelerRideRequests
         .filter((request) => request.status === 'open')
-        .filter((request) => request.consumerId !== profile.uid),
-    [travelerRideRequests, profile.uid]
+        .filter((request) => request.consumerId !== profile.uid)
+        .filter((request) => isWithinDashboardMatchRadius(driverFeedLocation, getFeedItemOriginLocation(request))),
+    [driverFeedLocation, travelerRideRequests, profile.uid]
   );
 
   useEffect(() => {
