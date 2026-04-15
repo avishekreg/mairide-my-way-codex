@@ -3222,6 +3222,78 @@ const Navbar = ({
     }
   };
 
+  const renderTravelerAvatarContent = (sizeClasses: string, initialsClasses: string) => (
+    <>
+      {resolvedUserPhoto ? (
+        <img
+          src={resolvedUserPhoto}
+          alt="Profile"
+          className="pointer-events-none h-full w-full object-cover"
+          draggable={false}
+        />
+      ) : isTravelerProfile ? (
+        <div className="pointer-events-none flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
+          <span className={cn("font-black tracking-[0.08em]", initialsClasses)}>
+            {getUserAvatarInitials(profile)}
+          </span>
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.28),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.14),transparent_42%)]" />
+        </div>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-mairide-bg">
+          <UserIcon className="h-5 w-5 text-mairide-secondary" />
+        </div>
+      )}
+      {isTravelerProfile && !resolvedUserPhoto && (
+        <div className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-white text-mairide-primary shadow-sm">
+          <Camera className="h-2.5 w-2.5" />
+        </div>
+      )}
+    </>
+  );
+
+  const renderProfileAvatar = (
+    sizeClasses: string,
+    initialsClasses: string,
+    extraClasses = '',
+  ) => {
+    const baseClasses = cn(
+      "relative z-10 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none",
+      sizeClasses,
+      extraClasses,
+      isUploadingTravelerAvatar && "opacity-75",
+    );
+
+    if (isTravelerProfile) {
+      return (
+        <button
+          type="button"
+          title={travelerAvatarLabel}
+          aria-label={travelerAvatarLabel}
+          onClick={handleTravelerAvatarTrigger}
+          onKeyDown={handleTravelerAvatarKeyDown}
+          disabled={isUploadingTravelerAvatar}
+          className={cn(
+            baseClasses,
+            "cursor-pointer transition-transform hover:scale-[1.03] active:scale-[0.98]"
+          )}
+          style={{ WebkitTapHighlightColor: 'transparent' }}
+        >
+          {renderTravelerAvatarContent(sizeClasses, initialsClasses)}
+        </button>
+      );
+    }
+
+    return (
+      <div
+        title={profile?.displayName || 'Profile'}
+        className={cn(baseClasses, "cursor-default")}
+        style={{ WebkitTapHighlightColor: 'transparent' }}
+      >
+        {renderTravelerAvatarContent(sizeClasses, initialsClasses)}
+      </div>
+    );
+  };
+
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       {isTravelerProfile && (
@@ -3277,51 +3349,10 @@ const Navbar = ({
                   <p className={cn("font-semibold text-mairide-primary", isAndroidShell ? "text-sm" : "text-base leading-tight")}>{profile?.displayName}</p>
                   <p className={cn("text-mairide-secondary capitalize", isAndroidShell ? "text-xs" : "text-sm leading-tight mt-0.5")}>{profile?.role}</p>
                 </div>
-                <div
-                  className={cn(
-                    "relative z-10 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none",
-                    isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03] active:scale-[0.98]" : "cursor-default",
-                    isUploadingTravelerAvatar && "opacity-75",
-                    isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10"
-                  )}
-                  title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
-                  style={{ WebkitTapHighlightColor: 'transparent' }}
-                >
-                  {isTravelerProfile && (
-                    <button
-                      type="button"
-                      aria-label={travelerAvatarLabel}
-                      onClick={handleTravelerAvatarTrigger}
-                      onKeyDown={handleTravelerAvatarKeyDown}
-                      disabled={isUploadingTravelerAvatar}
-                      className="absolute inset-0 z-20 rounded-full bg-transparent"
-                    />
-                  )}
-                  {resolvedUserPhoto ? (
-                    <img
-                      src={resolvedUserPhoto}
-                      alt="Profile"
-                      className="pointer-events-none h-full w-full object-cover"
-                      draggable={false}
-                    />
-                  ) : isTravelerProfile ? (
-                    <div className="pointer-events-none flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
-                      <span className={cn("font-black tracking-[0.08em]", isAndroidShell ? "text-sm sm:text-[10px]" : "text-sm sm:text-xs")}>
-                        {getUserAvatarInitials(profile)}
-                      </span>
-                      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.28),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.14),transparent_42%)]" />
-                    </div>
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-mairide-bg">
-                      <UserIcon className="h-5 w-5 text-mairide-secondary" />
-                    </div>
-                  )}
-                  {isTravelerProfile && !resolvedUserPhoto && (
-                    <div className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-white text-mairide-primary shadow-sm">
-                      <Camera className="h-2.5 w-2.5" />
-                    </div>
-                  )}
-                </div>
+                {renderProfileAvatar(
+                  isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10",
+                  isAndroidShell ? "text-sm sm:text-[10px]" : "text-sm sm:text-xs",
+                )}
                 <button onClick={onLogout} className={cn("rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600", !isAndroidShell && "sm:p-2.5")}>
                   <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
                 </button>
@@ -3355,48 +3386,7 @@ const Navbar = ({
                 <p className="text-base font-semibold leading-tight text-mairide-primary">{profile?.displayName}</p>
                 <p className="mt-0.5 text-sm capitalize leading-tight text-mairide-secondary">{profile?.role}</p>
               </div>
-              <div
-                title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
-                className={cn(
-                  "relative z-10 h-11 w-11 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none sm:h-10 sm:w-10",
-                  isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03] active:scale-[0.98]" : "cursor-default",
-                  isUploadingTravelerAvatar && "opacity-75"
-                )}
-                style={{ WebkitTapHighlightColor: 'transparent' }}
-              >
-                {isTravelerProfile && (
-                  <button
-                    type="button"
-                    aria-label={travelerAvatarLabel}
-                    onClick={handleTravelerAvatarTrigger}
-                    onKeyDown={handleTravelerAvatarKeyDown}
-                    disabled={isUploadingTravelerAvatar}
-                    className="absolute inset-0 z-20 rounded-full bg-transparent"
-                  />
-                )}
-                {resolvedUserPhoto ? (
-                  <img
-                    src={resolvedUserPhoto}
-                    alt="Profile"
-                    className="pointer-events-none h-full w-full object-cover"
-                    draggable={false}
-                  />
-                ) : isTravelerProfile ? (
-                  <div className="pointer-events-none flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
-                    <span className="text-sm font-black tracking-[0.08em] sm:text-xs">{getUserAvatarInitials(profile)}</span>
-                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.28),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.14),transparent_42%)]" />
-                  </div>
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-mairide-bg">
-                    <UserIcon className="h-5 w-5 text-mairide-secondary" />
-                  </div>
-                )}
-                {isTravelerProfile && !resolvedUserPhoto && (
-                  <div className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-white text-mairide-primary shadow-sm">
-                    <Camera className="h-2.5 w-2.5" />
-                  </div>
-                )}
-              </div>
+              {renderProfileAvatar("h-11 w-11 sm:h-10 sm:w-10", "text-sm sm:text-xs")}
               <button onClick={onLogout} className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600 sm:p-2.5">
                 <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
               </button>
