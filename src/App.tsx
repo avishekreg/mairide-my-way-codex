@@ -206,13 +206,28 @@ const isAndroidWebViewLikeRuntime = () => {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
   const ua = String(navigator.userAgent || '').toLowerCase();
   const protocol = String(window.location.protocol || '').toLowerCase();
-  const hasCapacitor = typeof (window as any).Capacitor !== 'undefined';
+  const capacitorPlatform = (() => {
+    try {
+      return typeof Capacitor?.getPlatform === 'function' ? String(Capacitor.getPlatform() || '').toLowerCase() : '';
+    } catch {
+      return '';
+    }
+  })();
+  const isNativeCapacitorAndroid = (() => {
+    try {
+      return capacitorPlatform === 'android' && typeof Capacitor?.isNativePlatform === 'function'
+        ? Capacitor.isNativePlatform()
+        : capacitorPlatform === 'android';
+    } catch {
+      return capacitorPlatform === 'android';
+    }
+  })();
   const hasCordova = typeof (window as any).cordova !== 'undefined';
   const hasReactNative = typeof (window as any).ReactNativeWebView !== 'undefined';
   return (
     /android/.test(ua) &&
     (/ wv|; wv|version\/\d+\.\d+ mobile/.test(ua) || protocol === 'capacitor:' || protocol === 'ionic:')
-  ) || hasCapacitor || hasCordova || hasReactNative;
+  ) || isNativeCapacitorAndroid || (/android/.test(ua) && (hasCordova || hasReactNative));
 };
 
 const buildOriginCandidates = (path?: string) => {
