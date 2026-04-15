@@ -3182,52 +3182,57 @@ const Navbar = ({
     );
   };
 
+  const renderAndroidHeader = () => (
+    <div className="grid min-h-[92px] grid-cols-[64px_minmax(0,1fr)_76px] items-center gap-3 py-3">
+      <div className="flex items-center justify-start">
+        <button
+          onClick={() => setIsOpen(true)}
+          className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg"
+          aria-label="Open menu"
+        >
+          <Menu className="h-6 w-6" />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleHomeNavigation}
+        className="flex min-w-0 items-center justify-start rounded-2xl px-1 text-left"
+        aria-label="Go to home"
+      >
+        <img
+          src={LOGO_URL}
+          className="mr-3 h-[72px] w-[72px] shrink-0 rounded-[24px] object-contain"
+          alt="MaiRide Logo"
+        />
+        <div className="flex min-w-0 flex-col justify-center overflow-visible leading-none">
+          <span className="truncate text-[2.2rem] font-black tracking-tighter text-mairide-primary">
+            MaiRide
+          </span>
+          <span className="mt-1 text-[1.2rem] font-black tracking-[0.04em] text-mairide-primary">
+            my way
+          </span>
+        </div>
+      </button>
+
+      <div className="flex items-center justify-end gap-2">
+        {renderProfileAvatar("h-10 w-10", "text-xs")}
+        <button
+          onClick={onLogout}
+          className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600"
+          aria-label="Logout"
+        >
+          <LogOut className="h-6 w-6" />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       <div className={cn("px-4 sm:px-6 lg:px-8", isAndroidShell ? "mx-auto max-w-7xl" : "w-full")}>
         {isAndroidShell ? (
-          <div className="grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0">
-            <div className="flex items-center">
-              <button
-                onClick={() => setIsOpen(true)}
-                className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
-                aria-label="Open menu"
-              >
-                <Menu className="h-6 w-6 sm:h-5 sm:w-5" />
-              </button>
-            </div>
-
-            <div className="min-w-0">
-              <div className="mx-auto flex min-w-0 max-w-[220px] cursor-pointer items-center justify-center sm:mx-0 sm:max-w-none sm:justify-start" onClick={handleHomeNavigation}>
-                <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:h-12 sm:w-12" alt="MaiRide Logo" />
-                <div className="flex min-w-0 flex-col justify-center leading-[0.9]">
-                  <span className="truncate text-[1.9rem] font-black tracking-tighter text-mairide-primary sm:text-3xl">MaiRide</span>
-                  <span className="truncate text-[1.05rem] font-black tracking-[0.02em] text-mairide-primary sm:-mt-1 sm:text-xl sm:tracking-wide">my way</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center justify-end">
-              <div
-                className={cn(
-                  "flex items-center gap-1.5",
-                  isAndroidShell ? "sm:space-x-3 sm:border-l sm:border-mairide-secondary sm:pl-3" : "sm:gap-3 sm:border-l sm:border-mairide-secondary sm:pl-5"
-                )}
-              >
-                <div className={cn("hidden text-right sm:block", !isAndroidShell && "sm:min-w-[120px]")}>
-                  <p className={cn("font-semibold text-mairide-primary", isAndroidShell ? "text-sm" : "text-base leading-tight")}>{profile?.displayName}</p>
-                  <p className={cn("text-mairide-secondary capitalize", isAndroidShell ? "text-xs" : "text-sm leading-tight mt-0.5")}>{profile?.role}</p>
-                </div>
-                {renderProfileAvatar(
-                  isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10",
-                  isAndroidShell ? "text-sm sm:text-[10px]" : "text-sm sm:text-xs",
-                )}
-                <button onClick={onLogout} className={cn("rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600", !isAndroidShell && "sm:p-2.5")}>
-                  <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
-                </button>
-              </div>
-            </div>
-          </div>
+          renderAndroidHeader()
         ) : (
           <div className="flex min-h-[92px] items-center justify-between gap-4 py-3">
             <div className="flex min-w-0 items-center gap-3 sm:gap-4">
