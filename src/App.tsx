@@ -3204,7 +3204,7 @@ const Navbar = ({
             "grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3",
             isAndroidShell
               ? "sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0"
-              : "sm:flex sm:min-h-[88px] sm:items-center sm:justify-between sm:gap-8 sm:py-3"
+              : "sm:flex sm:min-h-[88px] sm:items-center sm:gap-8 sm:py-3"
           )}
         >
           <div className={cn("flex items-center", !isAndroidShell && "sm:min-w-0 sm:flex-none sm:gap-3 sm:justify-start sm:self-center")}>
@@ -3239,7 +3239,7 @@ const Navbar = ({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center justify-end">
+          <div className={cn("flex shrink-0 items-center justify-end", !isAndroidShell && "sm:ml-auto")}>
             <div
               className={cn(
                 "flex items-center gap-1.5",
