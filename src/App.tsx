@@ -3198,7 +3198,7 @@ const Navbar = ({
           />
         </>
       )}
-      <div className={cn("mx-auto px-4 sm:px-6 lg:px-8", isAndroidShell ? "max-w-7xl" : "max-w-[1440px]")}>
+      <div className={cn("px-4 sm:px-6 lg:px-8", isAndroidShell ? "mx-auto max-w-7xl" : "w-full")}>
         {isAndroidShell ? (
           <div className="grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0">
             <div className="flex items-center">
@@ -3355,8 +3355,8 @@ const Navbar = ({
               </div>
             </div>
 
-            <div className="hidden min-h-[88px] items-center justify-between gap-10 py-3 sm:flex">
-              <div className="flex min-w-0 items-center gap-3 self-center">
+            <div className="hidden min-h-[88px] grid-cols-[auto_1fr_auto] items-center gap-8 py-3 sm:grid">
+              <div className="flex min-w-0 items-center gap-3 justify-self-start self-center">
                 <button
                   onClick={() => setIsOpen(true)}
                   className="inline-flex shrink-0 items-center justify-center rounded-xl border border-mairide-secondary bg-white p-2.5 text-mairide-primary transition-colors hover:bg-mairide-bg"
@@ -3376,7 +3376,9 @@ const Navbar = ({
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center justify-end">
+              <div />
+
+              <div className="flex shrink-0 items-center justify-end justify-self-end">
                 <div className="flex items-center gap-3 border-l border-mairide-secondary pl-5">
                   <div className="hidden min-w-[120px] text-right sm:block">
                     <p className="text-base font-semibold leading-tight text-mairide-primary">{profile?.displayName}</p>
