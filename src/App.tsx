@@ -1270,6 +1270,7 @@ const extractLatLng = (location?: { lat?: unknown; lng?: unknown } | null) => {
   return { lat, lng };
 };
 const DASHBOARD_MATCH_RADIUS_KM = 50;
+const DASHBOARD_PARTIAL_DROP_RADIUS_KM = 150;
 const getFeedViewerLocation = (
   liveLocation?: { lat: number; lng: number } | null,
   profileLocation?: { lat?: unknown; lng?: unknown } | null
@@ -1327,6 +1328,53 @@ const isWithinAnyDashboardCorridor = (
       dropDetourKm: radiusKm,
     })
   );
+};
+const isWithinAnyPartialDashboardCorridor = (
+  candidateRoute: { originLocation: { lat: number; lng: number }; destinationLocation: { lat: number; lng: number } } | null,
+  referenceRoutes: Array<{ originLocation: { lat: number; lng: number }; destinationLocation: { lat: number; lng: number } }>,
+  pickupRadiusKm: number = DASHBOARD_MATCH_RADIUS_KM,
+  dropRadiusKm: number = DASHBOARD_PARTIAL_DROP_RADIUS_KM
+) => {
+  if (!candidateRoute || !referenceRoutes.length) return false;
+
+  return referenceRoutes.some((referenceRoute) => {
+    const strictForward = routeCorridorMatch({
+      rideOriginLocation: candidateRoute.originLocation,
+      rideDestinationLocation: candidateRoute.destinationLocation,
+      travelerOriginLocation: referenceRoute.originLocation,
+      travelerDestinationLocation: referenceRoute.destinationLocation,
+      pickupDetourKm: pickupRadiusKm,
+      dropDetourKm: pickupRadiusKm,
+    });
+    const strictReverse = routeCorridorMatch({
+      rideOriginLocation: referenceRoute.originLocation,
+      rideDestinationLocation: referenceRoute.destinationLocation,
+      travelerOriginLocation: candidateRoute.originLocation,
+      travelerDestinationLocation: candidateRoute.destinationLocation,
+      pickupDetourKm: pickupRadiusKm,
+      dropDetourKm: pickupRadiusKm,
+    });
+    if (strictForward || strictReverse) return false;
+
+    return (
+      routeCorridorMatch({
+        rideOriginLocation: candidateRoute.originLocation,
+        rideDestinationLocation: candidateRoute.destinationLocation,
+        travelerOriginLocation: referenceRoute.originLocation,
+        travelerDestinationLocation: referenceRoute.destinationLocation,
+        pickupDetourKm: pickupRadiusKm,
+        dropDetourKm: dropRadiusKm,
+      }) ||
+      routeCorridorMatch({
+        rideOriginLocation: referenceRoute.originLocation,
+        rideDestinationLocation: referenceRoute.destinationLocation,
+        travelerOriginLocation: candidateRoute.originLocation,
+        travelerDestinationLocation: candidateRoute.destinationLocation,
+        pickupDetourKm: pickupRadiusKm,
+        dropDetourKm: dropRadiusKm,
+      })
+    );
+  });
 };
 const getConfiguredRazorpayKeyId = (config?: Partial<AppConfig> | null) =>
   String(config?.razorpayKeyId || RAZORPAY_KEY_ID || '').trim();
@@ -8953,6 +9001,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const firstName = String(profile.displayName || profile.email || 'Traveler').split(' ')[0] || 'Traveler';
   const [search, setSearch] = useState({ from: '', to: '' });
   const [rides, setRides] = useState<any[]>([]);
+  const [partialRides, setPartialRides] = useState<any[]>([]);
   const [dashboardBookings, setDashboardBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'search' | 'history' | 'wallet' | 'support' | 'profile'>('search');
@@ -9599,6 +9648,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
       const lockedRideIds = getLockedRideIds(allBookings);
       const rideMap = new Map<string, any>();
+      const partialRideMap = new Map<string, any>();
       availableRides.forEach((data) => {
         if (!data?.id || lockedRideIds.has(data.id)) {
           return;
@@ -9674,20 +9724,28 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           getFeedItemRoute(data),
           activeTravelerRequestRoutes
         );
+        const matchesTravelerPartialCorridor = isWithinAnyPartialDashboardCorridor(
+          getFeedItemRoute(data),
+          activeTravelerRequestRoutes
+        );
 
         const withinPlanningWindow = isRideWithinPlanningWindow(data);
-        if (
-          originMatches &&
-          destinationMatches &&
-          withinPlanningWindow &&
-          nearbyToTraveler &&
-          matchesActiveTravelerCorridor
-        ) {
+        if (originMatches && destinationMatches && withinPlanningWindow && nearbyToTraveler) {
           const nextRide = { ...data };
           const dedupeKey = getRideDuplicateKey(nextRide);
-          const existingRide = rideMap.get(dedupeKey);
-          if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {
-            rideMap.set(dedupeKey, nextRide);
+          if (matchesActiveTravelerCorridor) {
+            const existingRide = rideMap.get(dedupeKey);
+            if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {
+              rideMap.set(dedupeKey, nextRide);
+            }
+            partialRideMap.delete(dedupeKey);
+            return;
+          }
+          if (matchesTravelerPartialCorridor) {
+            const existingRide = partialRideMap.get(dedupeKey);
+            if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {
+              partialRideMap.set(dedupeKey, { ...nextRide, matchTier: 'partial' });
+            }
           }
         }
       });
@@ -9696,8 +9754,14 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
         )
       );
+      setPartialRides(
+        Array.from(partialRideMap.values()).sort(
+          (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
+        )
+      );
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, 'rides');
+      setPartialRides([]);
     } finally {
       setIsLoading(false);
     }
@@ -10395,6 +10459,11 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                   </div>
                 </motion.div>
               ))
+            ) : partialRides.length > 0 ? (
+              <div className="text-center py-12 bg-mairide-bg rounded-3xl border border-dashed border-mairide-secondary">
+                <Search className="w-12 h-12 text-mairide-secondary mx-auto mb-4" />
+                <p className="text-mairide-secondary">No full matches right now. Nearby corridor-based partial matches are available below.</p>
+              </div>
             ) : (
               <div className="text-center py-12 bg-mairide-bg rounded-3xl border border-dashed border-mairide-secondary">
                 <Search className="w-12 h-12 text-mairide-secondary mx-auto mb-4" />
@@ -10402,6 +10471,88 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               </div>
             )}
           </div>
+
+          {partialRides.length > 0 && (
+            <div className="mt-10 space-y-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-mairide-primary flex items-center">
+                    <MapPin className="w-5 h-5 mr-2 text-mairide-accent" />
+                    Partial Matches
+                  </h2>
+                  <p className="mt-1 text-sm text-mairide-secondary">
+                    Similar corridor options that may involve a detour or destination adjustment.
+                  </p>
+                </div>
+                <span className="rounded-full bg-orange-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-orange-700 border border-orange-200">
+                  Optional
+                </span>
+              </div>
+
+              <div className="space-y-4">
+                {partialRides.map((ride) => (
+                  <motion.div
+                    key={`partial-${ride.id}`}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="bg-white p-6 rounded-3xl border border-orange-200 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row md:items-center justify-between gap-6"
+                  >
+                    <div className="flex items-start space-x-4">
+                      <div className="w-14 h-14 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center">
+                        {ride.driverPhotoUrl ? (
+                          <img src={ride.driverPhotoUrl} alt={ride.driverName} className="w-full h-full object-cover" />
+                        ) : (
+                          <Car className="w-8 h-8 text-mairide-accent" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2 mb-1">
+                          <h3 className="font-bold text-mairide-primary">{ride.driverName}</h3>
+                          <div className="flex items-center text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-bold">
+                            <Star className="w-3 h-3 mr-1 fill-current" />
+                            {Number(ride.driverRating ?? ride.rating ?? 5).toFixed(1)}
+                          </div>
+                          <div className="flex items-center text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">
+                            Partial match
+                          </div>
+                        </div>
+                        <div className="flex items-center text-sm text-mairide-secondary space-x-2">
+                          <span>{ride.origin}</span>
+                          <ChevronRight className="w-4 h-4" />
+                          <span>{ride.destination}</span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <div className={cn(
+                            "inline-flex items-center rounded-full px-3 py-1 text-xs font-bold",
+                            isFutureRide(ride)
+                              ? "bg-orange-50 text-orange-700 border border-orange-200"
+                              : "bg-mairide-bg text-mairide-primary border border-mairide-secondary"
+                          )}>
+                            <Clock className="w-3.5 h-3.5 mr-2" />
+                            Departure: {formatRideDeparture(ride)}
+                          </div>
+                          <div className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-bold text-orange-700">
+                            Detour may apply
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between md:flex-col md:items-end gap-2">
+                      <div className="text-2xl font-black text-mairide-accent">
+                        {formatCurrency(ride.price)}
+                      </div>
+                      <button
+                        onClick={() => setSelectedRide(ride)}
+                        className="bg-mairide-primary text-white px-6 py-2 rounded-xl font-bold text-sm hover:bg-mairide-accent transition-colors"
+                      >
+                        Explore Option
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <AnimatePresence>
             {showRequestForm && (
@@ -10874,6 +11025,16 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         .filter((request) => request.consumerId !== profile.uid)
         .filter((request) => isWithinDashboardMatchRadius(driverFeedLocation, getFeedItemOriginLocation(request)))
         .filter((request) => isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
+    [driverAvailableRideRoutes, driverFeedLocation, travelerRideRequests, profile.uid]
+  );
+  const partialTravelerRideRequests = useMemo(
+    () =>
+      travelerRideRequests
+        .filter((request) => request.status === 'open')
+        .filter((request) => request.consumerId !== profile.uid)
+        .filter((request) => isWithinDashboardMatchRadius(driverFeedLocation, getFeedItemOriginLocation(request)))
+        .filter((request) => !isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes))
+        .filter((request) => isWithinAnyPartialDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
     [driverAvailableRideRoutes, driverFeedLocation, travelerRideRequests, profile.uid]
   );
 
@@ -12156,6 +12317,59 @@ const finalizeDriverDashboardRazorpayPayment = async (
                           className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white", primaryActionButtonClass)}
                         >
                           Match & Offer Ride
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {partialTravelerRideRequests.length > 0 && (
+            <div className="mb-8">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-mairide-primary">Partial Match Requests</h2>
+                  <p className="mt-1 text-sm text-mairide-secondary">
+                    Similar corridor opportunities that may require a negotiated detour or destination adjustment.
+                  </p>
+                </div>
+                <span className="rounded-full bg-orange-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-orange-700 border border-orange-200">
+                  Optional
+                </span>
+              </div>
+              <div className="space-y-4">
+                {partialTravelerRideRequests.map((request) => (
+                  <div key={`partial-${request.id}`} className="rounded-[28px] border border-orange-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <p className="text-lg font-bold text-mairide-primary">{request.origin} → {request.destination}</p>
+                          <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-700">
+                            Partial match
+                          </span>
+                        </div>
+                        <p className="text-sm text-mairide-secondary">
+                          Traveler: {request.consumerName} • Seats: {request.seatsNeeded}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <div className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-bold text-orange-700">
+                            <Clock className="mr-2 h-3.5 w-3.5" />
+                            Departure: {formatRideDeparture(request)}
+                          </div>
+                          <div className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-bold text-orange-700">
+                            Detour may apply
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-start gap-2 md:items-end">
+                        <p className="text-2xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
+                        <button
+                          onClick={() => prefillRideOfferFromTravelerRequest(request)}
+                          className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white", primaryActionButtonClass)}
+                        >
+                          Explore & Offer
                         </button>
                       </div>
                     </div>
