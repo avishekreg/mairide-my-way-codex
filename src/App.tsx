@@ -3128,14 +3128,21 @@ const Navbar = ({
     setShowTravelerAvatarOptions(true);
   };
 
-  const handleTravelerAvatarTrigger = () => {
+  const handleTravelerAvatarTrigger = (event?: React.SyntheticEvent<HTMLElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (typeof window !== 'undefined') {
+      window.setTimeout(() => {
+        openTravelerAvatarOptions();
+      }, 0);
+      return;
+    }
     openTravelerAvatarOptions();
   };
 
   const handleTravelerAvatarKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      openTravelerAvatarOptions();
+      handleTravelerAvatarTrigger(event);
     }
   };
 
