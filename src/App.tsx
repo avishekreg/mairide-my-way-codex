@@ -3183,9 +3183,9 @@ const Navbar = ({
   };
 
   const renderCompactHeader = ({
-    logoSize = "h-[64px] w-[64px] rounded-[22px]",
-    brandClassName = "text-[1.95rem]",
-    subBrandClassName = "text-[1.02rem] tracking-[0.06em]",
+    logoSize = "h-[58px] w-[58px] rounded-[20px]",
+    brandClassName = "text-[1.72rem]",
+    subBrandClassName = "text-[0.92rem] tracking-[0.05em]",
     containerClassName = "",
     rightLaneClassName = "",
   }: {
@@ -3197,7 +3197,7 @@ const Navbar = ({
   }) => (
     <div
       className={cn(
-        "grid min-h-[88px] grid-cols-[58px_minmax(0,1fr)_70px] items-center gap-3 py-3",
+        "grid min-h-[84px] grid-cols-[58px_minmax(0,1fr)_52px] items-center gap-3 py-3",
         containerClassName
       )}
     >
@@ -3214,54 +3214,45 @@ const Navbar = ({
       <button
         type="button"
         onClick={handleHomeNavigation}
-        className="flex min-w-0 items-center justify-start rounded-2xl px-1 text-left"
+        className="flex min-w-0 items-center justify-start rounded-2xl pr-1 text-left"
         aria-label="Go to home"
       >
         <img
           src={LOGO_URL}
-          className={cn("mr-3 shrink-0 object-contain", logoSize)}
+          className={cn("mr-2.5 shrink-0 object-contain", logoSize)}
           alt="MaiRide Logo"
         />
-        <div className="flex min-w-0 flex-col justify-center overflow-visible leading-none">
-          <span className={cn("truncate font-black tracking-tighter text-mairide-primary", brandClassName)}>
+        <div className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden leading-none">
+          <span className={cn("block overflow-hidden text-ellipsis whitespace-nowrap font-black tracking-tighter text-mairide-primary", brandClassName)}>
             MaiRide
           </span>
-          <span className={cn("mt-1 truncate font-black text-mairide-primary", subBrandClassName)}>
+          <span className={cn("mt-1 block overflow-hidden text-ellipsis whitespace-nowrap font-black text-mairide-primary", subBrandClassName)}>
             my way
           </span>
         </div>
       </button>
 
-      <div className={cn("flex items-center justify-end gap-2", rightLaneClassName)}>
+      <div className={cn("flex items-center justify-end", rightLaneClassName)}>
         {renderProfileAvatar("h-10 w-10", "text-xs")}
-        <button
-          onClick={onLogout}
-          className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600"
-          aria-label="Logout"
-        >
-          <LogOut className="h-6 w-6" />
-        </button>
       </div>
     </div>
   );
 
   const renderAndroidHeader = () => (
     renderCompactHeader({
-      logoSize: "h-[68px] w-[68px] rounded-[24px]",
-      brandClassName: "text-[2.05rem]",
-      subBrandClassName: "text-[1.08rem] tracking-[0.05em]",
-      containerClassName: "grid-cols-[60px_minmax(0,1fr)_74px]",
-      rightLaneClassName: "gap-1.5",
+      logoSize: "h-[62px] w-[62px] rounded-[22px]",
+      brandClassName: "text-[1.82rem]",
+      subBrandClassName: "text-[0.98rem] tracking-[0.05em]",
+      containerClassName: "grid-cols-[58px_minmax(0,1fr)_52px] gap-2.5",
     })
   );
 
   const renderCompactWebHeader = () => (
     renderCompactHeader({
-      logoSize: "h-[62px] w-[62px] rounded-[22px]",
-      brandClassName: "text-[1.85rem]",
-      subBrandClassName: "text-[0.98rem] tracking-[0.05em]",
-      containerClassName: "grid-cols-[58px_minmax(0,1fr)_70px]",
-      rightLaneClassName: "gap-1.5",
+      logoSize: "h-[56px] w-[56px] rounded-[20px]",
+      brandClassName: "text-[1.68rem]",
+      subBrandClassName: "text-[0.9rem] tracking-[0.05em]",
+      containerClassName: "grid-cols-[56px_minmax(0,1fr)_50px] gap-2",
     })
   );
 
