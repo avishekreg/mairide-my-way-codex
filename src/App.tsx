@@ -2909,6 +2909,8 @@ const Navbar = ({
   const [isOpen, setIsOpen] = useState(false);
   const isAndroidShell = isAndroidAppRuntime();
   const [isUploadingTravelerAvatar, setIsUploadingTravelerAvatar] = useState(false);
+  const [showTravelerAvatarOptions, setShowTravelerAvatarOptions] = useState(false);
+  const [showTravelerCameraCapture, setShowTravelerCameraCapture] = useState(false);
   const travelerAvatarInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
   const handleHomeNavigation = () => {
@@ -2944,9 +2946,28 @@ const Navbar = ({
   const resolvedUserPhoto = getResolvedUserPhoto(profile);
   const travelerAvatarLabel = isUploadingTravelerAvatar ? 'Uploading profile photo' : 'Upload profile photo';
 
+  const updateTravelerAvatar = async (dataUrl: string) => {
+    if (!profile || !isTravelerProfile) return;
+    setIsUploadingTravelerAvatar(true);
+    try {
+      const avatarRef = storageRef(storage, `users/${profile.uid}/avatar-${Date.now()}.jpg`);
+      await uploadString(avatarRef, dataUrl, 'data_url');
+      const avatarUrl = await getDownloadURL(avatarRef);
+      await updateDoc(doc(db, 'users', profile.uid), {
+        photoURL: avatarUrl,
+      });
+      setShowTravelerAvatarOptions(false);
+      setShowTravelerCameraCapture(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`);
+    } finally {
+      setIsUploadingTravelerAvatar(false);
+    }
+  };
+
   const handleTravelerAvatarClick = () => {
     if (!isTravelerProfile || isUploadingTravelerAvatar) return;
-    travelerAvatarInputRef.current?.click();
+    setShowTravelerAvatarOptions(true);
   };
 
   const handleTravelerAvatarSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -2959,19 +2980,11 @@ const Navbar = ({
       return;
     }
 
-    setIsUploadingTravelerAvatar(true);
     try {
-      const base64 = await fileToBase64(file);
-      const avatarRef = storageRef(storage, `users/${profile.uid}/avatar-${Date.now()}.jpg`);
-      await uploadString(avatarRef, base64, 'data_url');
-      const avatarUrl = await getDownloadURL(avatarRef);
-      await updateDoc(doc(db, 'users', profile.uid), {
-        photoURL: avatarUrl,
-      });
+      const base64 = await fileToDataUrl(file);
+      await updateTravelerAvatar(base64);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`);
-    } finally {
-      setIsUploadingTravelerAvatar(false);
     }
   };
 
@@ -2982,7 +2995,6 @@ const Navbar = ({
           ref={travelerAvatarInputRef}
           type="file"
           accept="image/*"
-          capture="user"
           className="hidden"
           onChange={handleTravelerAvatarSelected}
         />
@@ -3085,6 +3097,61 @@ const Navbar = ({
       </div>
 
       <AnimatePresence>
+        {showTravelerAvatarOptions && isTravelerProfile && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40 bg-mairide-primary/40 backdrop-blur-sm"
+              onClick={() => setShowTravelerAvatarOptions(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 16 }}
+              className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-md rounded-t-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+            >
+              <div className="mx-auto mb-4 h-1.5 w-16 rounded-full bg-mairide-secondary/40" />
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler Avatar</p>
+              <h3 className="mt-2 text-2xl font-black text-mairide-primary">Choose profile photo</h3>
+              <p className="mt-2 text-sm text-mairide-secondary">
+                Add a clean profile image for your traveler account.
+              </p>
+              <div className="mt-6 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTravelerAvatarOptions(false);
+                    setShowTravelerCameraCapture(true);
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-mairide-primary px-4 py-4 font-bold text-white"
+                >
+                  <Camera className="h-5 w-5" />
+                  <span>Take Photo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => travelerAvatarInputRef.current?.click()}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-4 py-4 font-bold text-mairide-primary"
+                >
+                  <Upload className="h-5 w-5" />
+                  <span>Upload Photo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTravelerAvatarOptions(false)}
+                  className="w-full rounded-2xl px-4 py-3 text-sm font-semibold text-mairide-secondary"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {isOpen && (
           <>
             <motion.div
@@ -3158,6 +3225,16 @@ const Navbar = ({
           </>
         )}
       </AnimatePresence>
+
+      {showTravelerCameraCapture && isTravelerProfile && (
+        <CameraCapture
+          title="Capture traveler profile photo"
+          onCancel={() => setShowTravelerCameraCapture(false)}
+          onCapture={async (image) => {
+            await updateTravelerAvatar(image);
+          }}
+        />
+      )}
     </nav>
   );
 };
