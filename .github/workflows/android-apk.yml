@@ -23,6 +23,7 @@ jobs:
       VITE_APP_VERSION: v3.0.1-beta
       PROD_SUPABASE_REF: jcgoccsdlrjnratpaeje
       STAGING_SUPABASE_REF: qnmetkbiuxwzmlwpxpuz
+      MAIRIDE_UPLOAD_STORE_FILE: mairide-release.keystore
 
     steps:
       - name: Checkout
@@ -89,6 +90,32 @@ jobs:
 
       - name: Sync Android platform
         run: npx cap sync android
+
+      - name: Prepare Android release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "Missing Android signing secrets."
+            echo "Required repository secrets:"
+            echo "  - ANDROID_KEYSTORE_BASE64"
+            echo "  - ANDROID_KEYSTORE_PASSWORD"
+            echo "  - ANDROID_KEY_ALIAS"
+            echo "  - ANDROID_KEY_PASSWORD"
+            exit 1
+          fi
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "android/app/${MAIRIDE_UPLOAD_STORE_FILE}"
+
+          cat >> android/gradle.properties <<EOF
+          MAIRIDE_UPLOAD_STORE_FILE=${MAIRIDE_UPLOAD_STORE_FILE}
+          MAIRIDE_UPLOAD_STORE_PASSWORD=${ANDROID_KEYSTORE_PASSWORD}
+          MAIRIDE_UPLOAD_KEY_ALIAS=${ANDROID_KEY_ALIAS}
+          MAIRIDE_UPLOAD_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}
+          EOF
 
       - name: Apply MaiRide launcher icon
         run: |
@@ -157,6 +184,25 @@ jobs:
 
           cat >> android/app/build.gradle <<'EOF'
 
+          android {
+            signingConfigs {
+              release {
+                storeFile file(project.findProperty("MAIRIDE_UPLOAD_STORE_FILE") ?: "mairide-release.keystore")
+                storePassword project.findProperty("MAIRIDE_UPLOAD_STORE_PASSWORD")
+                keyAlias project.findProperty("MAIRIDE_UPLOAD_KEY_ALIAS")
+                keyPassword project.findProperty("MAIRIDE_UPLOAD_KEY_PASSWORD")
+              }
+            }
+
+            buildTypes {
+              release {
+                minifyEnabled false
+                shrinkResources false
+                signingConfig signingConfigs.release
+              }
+            }
+          }
+
           configurations.configureEach {
             exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7"
             exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"
@@ -167,13 +213,13 @@ jobs:
           }
           EOF
 
-      - name: Build debug APK
+      - name: Build signed release APK
         id: build_apk
         run: |
           set -o pipefail
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
+          ./gradlew assembleRelease --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
 
       - name: Print Gradle failure context
         if: always()
@@ -210,7 +256,7 @@ jobs:
 
       - name: Prepare artifact
         run: |
-          APK_PATH="$(find android/app/build/outputs -type f -name '*.apk' | head -n 1)"
+          APK_PATH="$(find android/app/build/outputs/apk/release -type f -name '*.apk' | head -n 1)"
           mkdir -p release public/downloads
           if [ -z "$APK_PATH" ]; then
             echo "No APK produced. Failing workflow to surface real build issue."
