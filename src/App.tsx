@@ -2255,8 +2255,20 @@ const getResolvedUserRating = (user?: UserProfile | null) => {
   return 5.0;
 };
 
-const getResolvedUserPhoto = (user?: UserProfile | null) =>
-  user?.photoURL || user?.driverDetails?.selfiePhoto || '';
+const isTravelerCustomPhoto = (user?: UserProfile | null) => {
+  if (!user || user.role !== 'consumer') return false;
+  if (user.travelerAvatarCustomized) return true;
+  const photoUrl = String(user.photoURL || '');
+  return /\/avatar-\d+\.jpg/i.test(photoUrl) || /users%2F[^/]+%2Favatar-\d+\.jpg/i.test(photoUrl);
+};
+
+const getResolvedUserPhoto = (user?: UserProfile | null) => {
+  if (!user) return '';
+  if (user.role === 'consumer') {
+    return isTravelerCustomPhoto(user) ? String(user.photoURL || '') : '';
+  }
+  return user.photoURL || user.driverDetails?.selfiePhoto || '';
+};
 
 const getUserAvatarInitials = (user?: UserProfile | null) => {
   const source = String(user?.displayName || user?.email || user?.phoneNumber || 'MR').trim();
@@ -3088,6 +3100,7 @@ const Navbar = ({
       const avatarUrl = await getDownloadURL(avatarRef);
       await updateDoc(doc(db, 'users', profile.uid), {
         photoURL: avatarUrl,
+        travelerAvatarCustomized: true,
       });
       setShowTravelerAvatarOptions(false);
       setShowTravelerCameraCapture(false);
@@ -4655,7 +4668,8 @@ const findUserProfileByPhone = async (value: string) => {
           displayName: name || user.displayName || phone || 'User',
           role: isAdminEmail ? 'admin' : selectedOAuthRole,
           status: 'active',
-          photoURL: user.photoURL || '',
+          photoURL: isAdminEmail || selectedOAuthRole === 'driver' ? (user.photoURL || '') : '',
+          travelerAvatarCustomized: selectedOAuthRole === 'consumer' ? false : undefined,
           phoneNumber: targetPhone,
           onboardingComplete: isAdminEmail,
           createdAt: new Date().toISOString(),

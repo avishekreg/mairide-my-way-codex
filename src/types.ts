@@ -6,6 +6,7 @@ export interface UserProfile {
   status: 'active' | 'inactive';
   phoneNumber?: string;
   photoURL?: string;
+  travelerAvatarCustomized?: boolean;
   onboardingComplete: boolean;
   createdAt?: string;
   adminRole?: 'super_admin' | 'support' | 'finance' | 'compliance';
