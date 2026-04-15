@@ -3275,29 +3275,35 @@ const Navbar = ({
                   <p className={cn("text-mairide-secondary capitalize", isAndroidShell ? "text-xs" : "text-sm leading-tight mt-0.5")}>{profile?.role}</p>
                 </div>
                 <div
-                  role={isTravelerProfile ? 'button' : undefined}
-                  tabIndex={isTravelerProfile ? 0 : -1}
-                  onClick={isTravelerProfile ? handleTravelerAvatarTrigger : undefined}
-                  onPointerUp={isTravelerProfile ? handleTravelerAvatarTrigger : undefined}
-                  onKeyDown={isTravelerProfile ? handleTravelerAvatarKeyDown : undefined}
-                  aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
-                  title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
                   className={cn(
                     "relative z-10 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none",
                     isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03] active:scale-[0.98]" : "cursor-default",
                     isUploadingTravelerAvatar && "opacity-75",
                     isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10"
                   )}
+                  title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
                   style={{ WebkitTapHighlightColor: 'transparent' }}
                 >
+                  {isTravelerProfile && (
+                    <button
+                      type="button"
+                      aria-label={travelerAvatarLabel}
+                      onClick={handleTravelerAvatarTrigger}
+                      onPointerUp={handleTravelerAvatarTrigger}
+                      onKeyDown={handleTravelerAvatarKeyDown}
+                      disabled={isUploadingTravelerAvatar}
+                      className="absolute inset-0 z-20 rounded-full bg-transparent"
+                    />
+                  )}
                   {resolvedUserPhoto ? (
                     <img
                       src={resolvedUserPhoto}
                       alt="Profile"
-                      className="h-full w-full object-cover"
+                      className="pointer-events-none h-full w-full object-cover"
+                      draggable={false}
                     />
                   ) : isTravelerProfile ? (
-                    <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
+                    <div className="pointer-events-none flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
                       <span className={cn("font-black tracking-[0.08em]", isAndroidShell ? "text-sm sm:text-[10px]" : "text-sm sm:text-xs")}>
                         {getUserAvatarInitials(profile)}
                       </span>
@@ -3348,12 +3354,6 @@ const Navbar = ({
                 <p className="mt-0.5 text-sm capitalize leading-tight text-mairide-secondary">{profile?.role}</p>
               </div>
               <div
-                role={isTravelerProfile ? 'button' : undefined}
-                tabIndex={isTravelerProfile ? 0 : -1}
-                onClick={isTravelerProfile ? handleTravelerAvatarTrigger : undefined}
-                onPointerUp={isTravelerProfile ? handleTravelerAvatarTrigger : undefined}
-                onKeyDown={isTravelerProfile ? handleTravelerAvatarKeyDown : undefined}
-                aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
                 title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
                 className={cn(
                   "relative z-10 h-11 w-11 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none sm:h-10 sm:w-10",
@@ -3362,14 +3362,26 @@ const Navbar = ({
                 )}
                 style={{ WebkitTapHighlightColor: 'transparent' }}
               >
+                {isTravelerProfile && (
+                  <button
+                    type="button"
+                    aria-label={travelerAvatarLabel}
+                    onClick={handleTravelerAvatarTrigger}
+                    onPointerUp={handleTravelerAvatarTrigger}
+                    onKeyDown={handleTravelerAvatarKeyDown}
+                    disabled={isUploadingTravelerAvatar}
+                    className="absolute inset-0 z-20 rounded-full bg-transparent"
+                  />
+                )}
                 {resolvedUserPhoto ? (
                   <img
                     src={resolvedUserPhoto}
                     alt="Profile"
-                    className="h-full w-full object-cover"
+                    className="pointer-events-none h-full w-full object-cover"
+                    draggable={false}
                   />
                 ) : isTravelerProfile ? (
-                  <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
+                  <div className="pointer-events-none flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#1f2d38_0%,#314656_55%,#f68b1f_150%)] text-white">
                     <span className="text-sm font-black tracking-[0.08em] sm:text-xs">{getUserAvatarInitials(profile)}</span>
                     <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.28),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.14),transparent_42%)]" />
                   </div>
