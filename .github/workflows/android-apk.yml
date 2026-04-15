@@ -271,8 +271,8 @@ jobs:
           APP_VERSION_BASE="${VITE_APP_VERSION}"
           APP_VERSION="${APP_VERSION_BASE}+build.${GITHUB_RUN_NUMBER}"
           NOW_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          # Publish a stable direct-download URL on R2 custom domain.
-          APK_PUBLIC_URL="https://downloads.mairide.in/mairide-android.apk"
+          # Publish a versioned direct-download URL so app updates always target the exact new build.
+          APK_PUBLIC_URL="https://downloads.mairide.in/${VERSIONED_APK}"
           cat > public/downloads/android-update.json <<EOF
           {
             "appVersion": "${APP_VERSION}",

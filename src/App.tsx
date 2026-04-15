@@ -2755,8 +2755,23 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
   const [androidUpdateMessage, setAndroidUpdateMessage] = useState('');
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
   const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
+  const [androidDownloadUrl, setAndroidDownloadUrl] = useState(LIVE_ANDROID_APK_URL);
+
   const openAndroidDownload = () => {
-    window.location.href = `${LIVE_ANDROID_APK_URL}?t=${Date.now()}`;
+    const runDownload = async () => {
+      const latestUrl = androidDownloadUrl || LIVE_ANDROID_APK_URL;
+      if (isAndroidAppRuntime()) {
+        try {
+          await downloadAndOpenAndroidApk(latestUrl);
+          return;
+        } catch {
+          // Fall through to browser download fallback below.
+        }
+      }
+      window.location.href = withCacheBust(latestUrl);
+    };
+
+    void runDownload();
   };
 
   useEffect(() => {
@@ -2775,6 +2790,8 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
       }
       const data = await response.json();
       const latestVersion = String(data?.appVersion || '').trim();
+      const nextApkUrl = String(data?.apkUrl || LIVE_ANDROID_APK_URL).trim() || LIVE_ANDROID_APK_URL;
+      setAndroidDownloadUrl(nextApkUrl);
       if (!latestVersion) {
         setAndroidUpdateMessage('Update metadata unavailable. Please try again.');
         return;
