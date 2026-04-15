@@ -420,6 +420,90 @@ const routeCorridorMatch = ({
   return true;
 };
 
+const getRouteMidpoint = (route: {
+  originLocation: { lat: number; lng: number };
+  destinationLocation: { lat: number; lng: number };
+}) => ({
+  lat: (route.originLocation.lat + route.destinationLocation.lat) / 2,
+  lng: (route.originLocation.lng + route.destinationLocation.lng) / 2,
+});
+
+const getRouteBearingDegrees = (
+  start: { lat: number; lng: number },
+  end: { lat: number; lng: number }
+) => {
+  const lat1 = deg2rad(start.lat);
+  const lat2 = deg2rad(end.lat);
+  const dLon = deg2rad(end.lng - start.lng);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  return (bearing + 360) % 360;
+};
+
+const getBearingDifferenceDegrees = (a: number, b: number) => {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+};
+
+const routesSharePartialCorridor = (
+  candidateRoute: {
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+  },
+  referenceRoute: {
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+  },
+  pickupRadiusKm: number,
+  dropRadiusKm: number
+) => {
+  const originDistanceKm = getDistance(
+    candidateRoute.originLocation.lat,
+    candidateRoute.originLocation.lng,
+    referenceRoute.originLocation.lat,
+    referenceRoute.originLocation.lng
+  );
+  if (originDistanceKm > pickupRadiusKm) return false;
+
+  const candidateBearing = getRouteBearingDegrees(
+    candidateRoute.originLocation,
+    candidateRoute.destinationLocation
+  );
+  const referenceBearing = getRouteBearingDegrees(
+    referenceRoute.originLocation,
+    referenceRoute.destinationLocation
+  );
+  if (getBearingDifferenceDegrees(candidateBearing, referenceBearing) > 35) return false;
+
+  const candidateMidpoint = getRouteMidpoint(candidateRoute);
+  const referenceMidpoint = getRouteMidpoint(referenceRoute);
+  const candidateMidpointToReference = pointToRouteDistanceKm(
+    candidateMidpoint,
+    referenceRoute.originLocation,
+    referenceRoute.destinationLocation
+  );
+  const referenceMidpointToCandidate = pointToRouteDistanceKm(
+    referenceMidpoint,
+    candidateRoute.originLocation,
+    candidateRoute.destinationLocation
+  );
+  const midpointCorridorValid =
+    candidateMidpointToReference.distanceKm <= pickupRadiusKm ||
+    referenceMidpointToCandidate.distanceKm <= pickupRadiusKm;
+  if (!midpointCorridorValid) return false;
+
+  const destinationDistanceKm = getDistance(
+    candidateRoute.destinationLocation.lat,
+    candidateRoute.destinationLocation.lng,
+    referenceRoute.destinationLocation.lat,
+    referenceRoute.destinationLocation.lng
+  );
+  return destinationDistanceKm <= dropRadiusKm;
+};
+
 const getAdaptiveDetourToleranceKm = (routeDistanceKm: number) => {
   // Keep short-city routes strict, allow moderate flexibility for longer highway journeys.
   if (routeDistanceKm <= 40) {
@@ -1270,7 +1354,7 @@ const extractLatLng = (location?: { lat?: unknown; lng?: unknown } | null) => {
   return { lat, lng };
 };
 const DASHBOARD_MATCH_RADIUS_KM = 50;
-const DASHBOARD_PARTIAL_DROP_RADIUS_KM = 150;
+const DASHBOARD_PARTIAL_DROP_RADIUS_KM = 200;
 const getFeedViewerLocation = (
   liveLocation?: { lat: number; lng: number } | null,
   profileLocation?: { lat?: unknown; lng?: unknown } | null
@@ -1357,22 +1441,18 @@ const isWithinAnyPartialDashboardCorridor = (
     if (strictForward || strictReverse) return false;
 
     return (
-      routeCorridorMatch({
-        rideOriginLocation: candidateRoute.originLocation,
-        rideDestinationLocation: candidateRoute.destinationLocation,
-        travelerOriginLocation: referenceRoute.originLocation,
-        travelerDestinationLocation: referenceRoute.destinationLocation,
-        pickupDetourKm: pickupRadiusKm,
-        dropDetourKm: dropRadiusKm,
-      }) ||
-      routeCorridorMatch({
-        rideOriginLocation: referenceRoute.originLocation,
-        rideDestinationLocation: referenceRoute.destinationLocation,
-        travelerOriginLocation: candidateRoute.originLocation,
-        travelerDestinationLocation: candidateRoute.destinationLocation,
-        pickupDetourKm: pickupRadiusKm,
-        dropDetourKm: dropRadiusKm,
-      })
+      routesSharePartialCorridor(
+        candidateRoute,
+        referenceRoute,
+        pickupRadiusKm,
+        dropRadiusKm
+      ) ||
+      routesSharePartialCorridor(
+        referenceRoute,
+        candidateRoute,
+        pickupRadiusKm,
+        dropRadiusKm
+      )
     );
   });
 };
