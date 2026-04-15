@@ -3240,10 +3240,10 @@ const Navbar = ({
 
   const renderAndroidHeader = () => (
     renderCompactHeader({
-      logoSize: "h-[62px] w-[62px] rounded-[22px]",
-      brandClassName: "text-[1.82rem]",
-      subBrandClassName: "text-[0.98rem] tracking-[0.05em]",
-      containerClassName: "grid-cols-[58px_minmax(0,1fr)_52px] gap-2.5",
+      logoSize: "h-[54px] w-[54px] rounded-[18px]",
+      brandClassName: "text-[1.54rem]",
+      subBrandClassName: "text-[0.84rem] tracking-[0.04em]",
+      containerClassName: "grid-cols-[58px_minmax(0,1fr)_52px] gap-2",
     })
   );
 
