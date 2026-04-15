@@ -119,7 +119,8 @@ import {
   ArrowDownLeft,
   Wallet,
   Globe2,
-  Download
+  Download,
+  Upload
 } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
 
