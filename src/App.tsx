@@ -3312,9 +3312,9 @@ const Navbar = ({
                 onClick={handleHomeNavigation}
               >
                 <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:mr-3 sm:h-[74px] sm:w-[74px]" alt="MaiRide Logo" />
-                <div className="flex min-w-0 flex-col justify-center overflow-visible py-1 leading-[0.92]">
-                  <span className="truncate text-[1.9rem] font-black tracking-tighter text-mairide-primary sm:text-[2rem]">MaiRide</span>
-                  <span className="mt-0.5 truncate text-[1.05rem] font-black tracking-[0.02em] text-mairide-primary sm:mt-1 sm:text-[0.95rem] sm:tracking-[0.08em]">my way</span>
+                <div className="flex min-w-0 flex-col justify-center overflow-visible py-2 leading-[1.02]">
+                  <span className="truncate text-[1.9rem] font-black leading-[1.02] tracking-tighter text-mairide-primary sm:text-[2rem]">MaiRide</span>
+                  <span className="mt-1 truncate text-[1.05rem] font-black leading-[1.02] tracking-[0.02em] text-mairide-primary sm:text-[0.95rem] sm:tracking-[0.08em]">my way</span>
                 </div>
               </div>
             </div>
