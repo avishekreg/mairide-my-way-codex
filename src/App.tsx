@@ -1401,6 +1401,19 @@ const IN_STATE_LANGUAGE_MAP: Record<string, string> = {
   'west bengal': 'bn',
 };
 
+const LOCATION_LANGUAGE_HINTS: Array<{ keywords: string[]; language: string }> = [
+  { keywords: ['kolkata', 'calcutta', 'howrah', 'hooghly', 'north 24 parganas', 'south 24 parganas', 'nabadwip', 'siliguri'], language: 'bn' },
+  { keywords: ['darjeeling', 'kalimpong', 'kurseong', 'gangtok', 'namchi', 'gyalshing', 'mangan', 'soreng', 'pakyong'], language: 'ne' },
+  { keywords: ['mumbai', 'pune', 'nagpur', 'nashik', 'thane', 'kolhapur'], language: 'mr' },
+];
+
+const getRegionalLanguageOptions = (suggested: string) => {
+  const base = new Set<string>([suggested, 'hi', 'en']);
+  if (suggested === 'ne') base.add('bn');
+  if (suggested === 'bn') base.add('as');
+  return Array.from(base).filter((lang) => SUPPORTED_UI_LANGUAGES.some((option) => option.value === lang));
+};
+
 const getSupportedUiLanguage = (value: string) =>
   SUPPORTED_UI_LANGUAGES.find((item) => item.value === value) || SUPPORTED_UI_LANGUAGES[0];
 
@@ -1474,18 +1487,6 @@ const detectLanguageFromGeolocation = async (): Promise<string | null> => {
 
   const lat = position.coords.latitude;
   const lon = position.coords.longitude;
-  const siliguriLat = 26.7271;
-  const siliguriLng = 88.3953;
-  const nearSiliguri = getDistance(lat, lon, siliguriLat, siliguriLng) <= 100;
-  const nearSikkimBounding =
-    lat >= 27.05 &&
-    lat <= 28.25 &&
-    lon >= 87.05 &&
-    lon <= 88.95;
-
-  // GPS-first handling for Siliguri + Sikkim belt so Android webviews don't
-  // silently fall back to en/hi when reverse-geocode APIs fail.
-  if (nearSiliguri || nearSikkimBounding) return 'ne';
 
   const response = await fetch(
     `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
@@ -1493,8 +1494,18 @@ const detectLanguageFromGeolocation = async (): Promise<string | null> => {
   if (!response || !response.ok) return null;
   const payload = await response.json().catch(() => null);
   const address = payload?.address || {};
-  const state = String(address.state || address.state_district || '').trim().toLowerCase();
-  if (nearSiliguri || state === 'sikkim') return 'ne';
+  const state = String(address.state || address.region || '').trim().toLowerCase();
+  const district = String(address.state_district || address.county || address.city_district || '').trim().toLowerCase();
+  const city = String(address.city || address.town || address.village || address.municipality || '').trim().toLowerCase();
+  const locationTokens = [city, district, state].filter(Boolean);
+
+  for (const hint of LOCATION_LANGUAGE_HINTS) {
+    if (hint.keywords.some((keyword) => locationTokens.some((token) => token.includes(keyword)))) {
+      return hint.language;
+    }
+  }
+
+  if (state === 'sikkim') return 'ne';
   if (!state) return null;
   return IN_STATE_LANGUAGE_MAP[state] || null;
 };
@@ -3193,10 +3204,10 @@ const Navbar = ({
             "grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3",
             isAndroidShell
               ? "sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0"
-              : "sm:grid sm:min-h-[88px] sm:grid-cols-[minmax(0,max-content)_1fr_auto] sm:gap-8 sm:py-3"
+              : "sm:flex sm:min-h-[88px] sm:items-center sm:justify-between sm:gap-8 sm:py-3"
           )}
         >
-          <div className={cn("flex items-center", !isAndroidShell && "sm:gap-3 sm:justify-start sm:self-center")}>
+          <div className={cn("flex items-center", !isAndroidShell && "sm:min-w-0 sm:flex-1 sm:gap-3 sm:justify-start sm:self-center")}>
             <button
               onClick={() => setIsOpen(true)}
               className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
@@ -3209,10 +3220,10 @@ const Navbar = ({
                 className="ml-3 hidden min-w-0 cursor-pointer items-center justify-start sm:flex"
                 onClick={handleHomeNavigation}
               >
-                <img src={LOGO_URL} className="mr-3 h-16 w-16 shrink-0 object-contain rounded-[22%]" alt="MaiRide Logo" />
-                <div className="flex min-w-0 flex-col justify-center overflow-visible leading-[0.98] py-1">
-                  <span className="truncate text-[2.05rem] font-black tracking-tighter text-mairide-primary">MaiRide</span>
-                  <span className="mt-1 truncate text-[0.98rem] font-black tracking-[0.08em] text-mairide-primary">my way</span>
+                <img src={LOGO_URL} className="mr-3 h-[74px] w-[74px] shrink-0 object-contain rounded-[22%]" alt="MaiRide Logo" />
+                <div className="flex min-w-0 flex-col justify-center overflow-visible leading-[0.95] py-1">
+                  <span className="truncate text-[2rem] font-black tracking-tighter text-mairide-primary">MaiRide</span>
+                  <span className="mt-1 truncate text-[0.95rem] font-black tracking-[0.08em] text-mairide-primary">my way</span>
                 </div>
               </div>
             )}
@@ -17926,25 +17937,18 @@ const App = () => {
 
     const runDetection = async () => {
       let detected = safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || detectBrowserPreferredLanguage();
-      let nearNepaliRegion = false;
       try {
         const geoDetected = await detectLanguageFromGeolocation();
         if (geoDetected) {
           detected = geoDetected;
-          nearNepaliRegion = geoDetected === 'ne';
         }
       } catch {
         // fallback remains detected
       }
       if (!cancelled) {
         const normalizedSuggested = getSupportedUiLanguage(detected).value;
-        const options = new Set<string>([normalizedSuggested, 'hi', 'en', 'bn', 'ne']);
-        if (nearNepaliRegion) {
-          options.add('bn');
-          options.add('ne');
-        }
         setSuggestedLanguage(normalizedSuggested);
-        setLanguagePromptOptions(Array.from(options));
+        setLanguagePromptOptions(getRegionalLanguageOptions(normalizedSuggested));
         setShowLanguagePrompt(true);
       }
     };
