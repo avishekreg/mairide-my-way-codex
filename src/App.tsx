@@ -11908,11 +11908,9 @@ const finalizeDriverDashboardRazorpayPayment = async (
         <>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
             <div className="flex flex-col gap-2">
-              {showDashboardHeroLogo ? (
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
-                  {firstName}
-                </p>
-              ) : null}
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
+                {firstName}
+              </p>
               <div>
                 <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Driver Dashboard</h1>
                 <p className="text-mairide-secondary italic serif">Manage your empty leg journeys and earnings.</p>
