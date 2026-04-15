@@ -3182,8 +3182,25 @@ const Navbar = ({
     );
   };
 
-  const renderAndroidHeader = () => (
-    <div className="grid min-h-[92px] grid-cols-[64px_minmax(0,1fr)_76px] items-center gap-3 py-3">
+  const renderCompactHeader = ({
+    logoSize = "h-[64px] w-[64px] rounded-[22px]",
+    brandClassName = "text-[1.95rem]",
+    subBrandClassName = "text-[1.02rem] tracking-[0.06em]",
+    containerClassName = "",
+    rightLaneClassName = "",
+  }: {
+    logoSize?: string;
+    brandClassName?: string;
+    subBrandClassName?: string;
+    containerClassName?: string;
+    rightLaneClassName?: string;
+  }) => (
+    <div
+      className={cn(
+        "grid min-h-[88px] grid-cols-[58px_minmax(0,1fr)_70px] items-center gap-3 py-3",
+        containerClassName
+      )}
+    >
       <div className="flex items-center justify-start">
         <button
           onClick={() => setIsOpen(true)}
@@ -3202,20 +3219,20 @@ const Navbar = ({
       >
         <img
           src={LOGO_URL}
-          className="mr-3 h-[72px] w-[72px] shrink-0 rounded-[24px] object-contain"
+          className={cn("mr-3 shrink-0 object-contain", logoSize)}
           alt="MaiRide Logo"
         />
         <div className="flex min-w-0 flex-col justify-center overflow-visible leading-none">
-          <span className="truncate text-[2.2rem] font-black tracking-tighter text-mairide-primary">
+          <span className={cn("truncate font-black tracking-tighter text-mairide-primary", brandClassName)}>
             MaiRide
           </span>
-          <span className="mt-1 text-[1.2rem] font-black tracking-[0.04em] text-mairide-primary">
+          <span className={cn("mt-1 truncate font-black text-mairide-primary", subBrandClassName)}>
             my way
           </span>
         </div>
       </button>
 
-      <div className="flex items-center justify-end gap-2">
+      <div className={cn("flex items-center justify-end gap-2", rightLaneClassName)}>
         {renderProfileAvatar("h-10 w-10", "text-xs")}
         <button
           onClick={onLogout}
@@ -3228,44 +3245,70 @@ const Navbar = ({
     </div>
   );
 
+  const renderAndroidHeader = () => (
+    renderCompactHeader({
+      logoSize: "h-[68px] w-[68px] rounded-[24px]",
+      brandClassName: "text-[2.05rem]",
+      subBrandClassName: "text-[1.08rem] tracking-[0.05em]",
+      containerClassName: "grid-cols-[60px_minmax(0,1fr)_74px]",
+      rightLaneClassName: "gap-1.5",
+    })
+  );
+
+  const renderCompactWebHeader = () => (
+    renderCompactHeader({
+      logoSize: "h-[62px] w-[62px] rounded-[22px]",
+      brandClassName: "text-[1.85rem]",
+      subBrandClassName: "text-[0.98rem] tracking-[0.05em]",
+      containerClassName: "grid-cols-[58px_minmax(0,1fr)_70px]",
+      rightLaneClassName: "gap-1.5",
+    })
+  );
+
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       <div className={cn("px-4 sm:px-6 lg:px-8", isAndroidShell ? "mx-auto max-w-7xl" : "w-full")}>
         {isAndroidShell ? (
           renderAndroidHeader()
         ) : (
-          <div className="flex min-h-[92px] items-center justify-between gap-4 py-3">
-            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-              <button
-                onClick={() => setIsOpen(true)}
-                className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
-                aria-label="Open menu"
-              >
-                <Menu className="h-6 w-6 sm:h-5 sm:w-5" />
-              </button>
-              <div
-                className="flex min-w-0 cursor-pointer items-center justify-start"
-                onClick={handleHomeNavigation}
-              >
-                <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:mr-4 sm:h-[84px] sm:w-[84px]" alt="MaiRide Logo" />
-                <div className="flex min-w-0 flex-col justify-center overflow-visible py-2.5 leading-[1.04]">
-                  <span className="truncate text-[1.9rem] font-black leading-[1.02] tracking-tighter text-mairide-primary sm:text-[2.55rem]">MaiRide</span>
-                  <span className="mt-1 truncate text-[1.05rem] font-black leading-[1.04] tracking-[0.02em] text-mairide-primary sm:mt-1.5 sm:text-[1.2rem] sm:tracking-[0.1em]">my way</span>
-                </div>
-              </div>
+          <>
+            <div className="lg:hidden">
+              {renderCompactWebHeader()}
             </div>
 
-            <div className="flex shrink-0 items-center gap-1.5 border-l border-mairide-secondary pl-3 sm:gap-3 sm:pl-5">
-              <div className="hidden min-w-[120px] text-right sm:block">
-                <p className="text-base font-semibold leading-tight text-mairide-primary">{profile?.displayName}</p>
-                <p className="mt-0.5 text-sm capitalize leading-tight text-mairide-secondary">{profile?.role}</p>
+            <div className="hidden min-h-[92px] items-center justify-between gap-4 py-3 lg:flex">
+              <div className="flex min-w-0 items-center gap-4">
+                <button
+                  onClick={() => setIsOpen(true)}
+                  className="inline-flex shrink-0 items-center justify-center rounded-xl border border-mairide-secondary bg-white p-2.5 text-mairide-primary transition-colors hover:bg-mairide-bg"
+                  aria-label="Open menu"
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+                <div
+                  className="flex min-w-0 cursor-pointer items-center justify-start"
+                  onClick={handleHomeNavigation}
+                >
+                  <img src={LOGO_URL} className="mr-4 h-[84px] w-[84px] shrink-0 rounded-[22%] object-contain" alt="MaiRide Logo" />
+                  <div className="flex min-w-0 flex-col justify-center overflow-visible py-2.5 leading-[1.04]">
+                    <span className="truncate text-[2.55rem] font-black leading-[1.02] tracking-tighter text-mairide-primary">MaiRide</span>
+                    <span className="mt-1.5 truncate text-[1.2rem] font-black leading-[1.04] tracking-[0.1em] text-mairide-primary">my way</span>
+                  </div>
+                </div>
               </div>
-              {renderProfileAvatar("h-11 w-11 sm:h-10 sm:w-10", "text-sm sm:text-xs")}
-              <button onClick={onLogout} className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600 sm:p-2.5">
-                <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
-              </button>
+
+              <div className="flex shrink-0 items-center gap-3 border-l border-mairide-secondary pl-5">
+                <div className="min-w-[120px] text-right">
+                  <p className="text-base font-semibold leading-tight text-mairide-primary">{profile?.displayName}</p>
+                  <p className="mt-0.5 text-sm capitalize leading-tight text-mairide-secondary">{profile?.role}</p>
+                </div>
+                {renderProfileAvatar("h-10 w-10", "text-xs")}
+                <button onClick={onLogout} className="rounded-xl p-2.5 text-mairide-secondary transition-colors hover:text-red-600">
+                  <LogOut className="h-5 w-5" />
+                </button>
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 
