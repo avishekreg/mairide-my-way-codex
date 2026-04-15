@@ -3204,10 +3204,10 @@ const Navbar = ({
             "grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3",
             isAndroidShell
               ? "sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0"
-              : "sm:grid sm:min-h-[88px] sm:grid-cols-[max-content_1fr_max-content] sm:items-center sm:gap-8 sm:py-3"
+              : "sm:flex sm:min-h-[88px] sm:items-center sm:justify-between sm:gap-8 sm:py-3"
           )}
         >
-          <div className={cn("flex items-center", !isAndroidShell && "sm:min-w-0 sm:w-fit sm:gap-3 sm:justify-start sm:self-center")}>
+          <div className={cn("flex items-center", !isAndroidShell && "sm:min-w-0 sm:flex-none sm:gap-3 sm:justify-start sm:self-center")}>
             <button
               onClick={() => setIsOpen(true)}
               className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
@@ -3229,7 +3229,7 @@ const Navbar = ({
             )}
           </div>
 
-          <div className={cn("min-w-0", !isAndroidShell && "sm:hidden")}>
+          <div className={cn("min-w-0", !isAndroidShell && "hidden sm:hidden")}>
             <div className="mx-auto flex min-w-0 max-w-[220px] items-center justify-center cursor-pointer sm:mx-0 sm:max-w-none sm:justify-start" onClick={handleHomeNavigation}>
               <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:h-12 sm:w-12" alt="MaiRide Logo" />
               <div className="flex min-w-0 flex-col justify-center leading-[0.9]">
