@@ -3072,12 +3072,22 @@ const Navbar = ({
     }
   };
 
-  const handleTravelerAvatarClick = (event?: React.MouseEvent<HTMLButtonElement> | React.TouchEvent<HTMLButtonElement>) => {
-    event?.preventDefault();
-    event?.stopPropagation();
+  const openTravelerAvatarOptions = () => {
     if (!isTravelerProfile || isUploadingTravelerAvatar) return;
     setIsOpen(false);
+    setShowTravelerCameraCapture(false);
+    setShowTravelerCameraSettingsPrompt(false);
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => setShowTravelerAvatarOptions(true));
+      return;
+    }
     setShowTravelerAvatarOptions(true);
+  };
+
+  const handleTravelerAvatarClick = (event?: React.MouseEvent<HTMLButtonElement> | React.PointerEvent<HTMLButtonElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    openTravelerAvatarOptions();
   };
 
   const promptTravelerCameraSettings = () => {
@@ -3177,16 +3187,16 @@ const Navbar = ({
           />
         </>
       )}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className={cn("mx-auto px-4 sm:px-6 lg:px-8", isAndroidShell ? "max-w-7xl" : "max-w-[1440px]")}>
         <div
           className={cn(
             "grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3",
             isAndroidShell
               ? "sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0"
-              : "sm:grid sm:min-h-[94px] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-6 sm:py-4"
+              : "sm:grid sm:min-h-[88px] sm:grid-cols-[minmax(0,max-content)_1fr_auto] sm:gap-8 sm:py-3"
           )}
         >
-          <div className={cn("flex items-center", !isAndroidShell && "sm:gap-4")}>
+          <div className={cn("flex items-center", !isAndroidShell && "sm:gap-3 sm:justify-start sm:self-center")}>
             <button
               onClick={() => setIsOpen(true)}
               className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
@@ -3196,13 +3206,13 @@ const Navbar = ({
             </button>
             {!isAndroidShell && (
               <div
-                className="ml-4 hidden min-w-0 cursor-pointer items-center justify-start sm:flex"
+                className="ml-3 hidden min-w-0 cursor-pointer items-center justify-start sm:flex"
                 onClick={handleHomeNavigation}
               >
-                <img src={LOGO_URL} className="mr-3 h-14 w-14 shrink-0 object-contain rounded-[22%]" alt="MaiRide Logo" />
-                <div className="flex min-w-0 flex-col justify-center overflow-visible leading-[1.08] pt-1 pb-1.5">
-                  <span className="truncate text-[2.15rem] font-black tracking-tighter text-mairide-primary">MaiRide</span>
-                  <span className="mt-1 truncate text-[1.24rem] font-black tracking-[0.08em] text-mairide-primary">my way</span>
+                <img src={LOGO_URL} className="mr-3 h-16 w-16 shrink-0 object-contain rounded-[22%]" alt="MaiRide Logo" />
+                <div className="flex min-w-0 flex-col justify-center overflow-visible leading-[0.98] py-1">
+                  <span className="truncate text-[2.05rem] font-black tracking-tighter text-mairide-primary">MaiRide</span>
+                  <span className="mt-1 truncate text-[0.98rem] font-black tracking-[0.08em] text-mairide-primary">my way</span>
                 </div>
               </div>
             )}
@@ -3232,16 +3242,22 @@ const Navbar = ({
               <button
                 type="button"
                 onClick={handleTravelerAvatarClick}
-                onTouchEnd={handleTravelerAvatarClick}
+                onPointerUp={handleTravelerAvatarClick}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    handleTravelerAvatarClick(event);
+                  }
+                }}
                 disabled={!isTravelerProfile || isUploadingTravelerAvatar}
                 aria-label={isTravelerProfile ? travelerAvatarLabel : 'Profile photo'}
                 title={isTravelerProfile ? travelerAvatarLabel : profile?.displayName || 'Profile'}
                 className={cn(
-                  "relative z-10 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation",
+                  "relative z-10 overflow-hidden rounded-full border border-mairide-secondary touch-manipulation select-none",
                   isTravelerProfile ? "cursor-pointer transition-transform hover:scale-[1.03]" : "cursor-default",
                   isUploadingTravelerAvatar && "opacity-75",
                   isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10"
                 )}
+                style={{ WebkitTapHighlightColor: 'transparent' }}
               >
                 {resolvedUserPhoto ? (
                   <img
@@ -3286,13 +3302,13 @@ const Navbar = ({
                 className="fixed inset-0 z-[90] bg-mairide-primary/40 backdrop-blur-sm"
                 onClick={() => setShowTravelerAvatarOptions(false)}
               />
-              <div className="fixed inset-0 z-[100] p-4 sm:p-6">
+              <div className="fixed inset-0 z-[100] grid place-items-center p-4 sm:p-6">
                 <motion.div
-                  initial={{ opacity: 0, y: 16, scale: 0.98, x: '-50%' }}
-                  animate={{ opacity: 1, y: '-50%', scale: 1, x: '-50%' }}
-                  exit={{ opacity: 0, y: 16, scale: 0.98, x: '-50%' }}
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 16, scale: 0.98 }}
                   transition={{ type: 'spring', damping: 24, stiffness: 280 }}
-                  className="absolute left-1/2 top-1/2 w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                  className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
                 >
                   <div className="mx-auto mb-4 h-1.5 w-16 rounded-full bg-mairide-secondary/40" />
                   <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler Avatar</p>
@@ -3346,13 +3362,13 @@ const Navbar = ({
                 className="fixed inset-0 z-[90] bg-mairide-primary/40 backdrop-blur-sm"
                 onClick={() => setShowTravelerCameraSettingsPrompt(false)}
               />
-              <div className="fixed inset-0 z-[100] p-4 sm:p-6">
+              <div className="fixed inset-0 z-[100] grid place-items-center p-4 sm:p-6">
                 <motion.div
-                  initial={{ opacity: 0, y: 16, scale: 0.98, x: '-50%' }}
-                  animate={{ opacity: 1, y: '-50%', scale: 1, x: '-50%' }}
-                  exit={{ opacity: 0, y: 16, scale: 0.98, x: '-50%' }}
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 16, scale: 0.98 }}
                   transition={{ type: 'spring', damping: 24, stiffness: 280 }}
-                  className="absolute left-1/2 top-1/2 w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                  className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
                 >
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-mairide-bg text-mairide-primary">
                     <Settings className="h-7 w-7" />
@@ -8948,7 +8964,6 @@ const finalizeDriverRazorpayPayment = async (
 
 const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
-  const showDashboardHeroLogo = !isAppDisplayMode();
   const firstName = String(profile.displayName || profile.email || 'Traveler').split(' ')[0] || 'Traveler';
   const [search, setSearch] = useState({ from: '', to: '' });
   const [rides, setRides] = useState<any[]>([]);
@@ -10143,11 +10158,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
         <>
           <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-col gap-2">
-              {showDashboardHeroLogo ? (
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
-                  {firstName}
-                </p>
-              ) : null}
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
+                {firstName}
+              </p>
               <div>
                 <h1 className="mb-2 text-4xl font-bold uppercase tracking-tight text-mairide-primary">Where to?</h1>
                 <p className="italic serif text-mairide-secondary">Find discounted intercity rides on empty leg journeys.</p>
