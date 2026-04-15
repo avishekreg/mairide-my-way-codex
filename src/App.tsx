@@ -2898,6 +2898,7 @@ const Navbar = ({
   onChangeLanguage: (next: string) => void,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const isAndroidShell = isAndroidAppRuntime();
   const navigate = useNavigate();
   const handleHomeNavigation = () => {
     window.dispatchEvent(new CustomEvent(APP_NAV_HOME_EVENT, { detail: { role: profile?.role } }));
@@ -2931,8 +2932,15 @@ const Navbar = ({
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0">
-          <div className="flex items-center">
+        <div
+          className={cn(
+            "grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3",
+            isAndroidShell
+              ? "sm:flex sm:h-16 sm:min-h-0 sm:justify-between sm:py-0"
+              : "sm:grid sm:min-h-[86px] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-6 sm:py-4"
+          )}
+        >
+          <div className={cn("flex items-center", !isAndroidShell && "sm:gap-4")}>
             <button
               onClick={() => setIsOpen(true)}
               className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] border border-mairide-secondary bg-white text-mairide-primary transition-colors hover:bg-mairide-bg sm:h-auto sm:w-auto sm:rounded-xl sm:p-2.5"
@@ -2940,9 +2948,21 @@ const Navbar = ({
             >
               <Menu className="h-6 w-6 sm:h-5 sm:w-5" />
             </button>
+            {!isAndroidShell && (
+              <div
+                className="ml-4 hidden min-w-0 cursor-pointer items-center justify-start sm:flex"
+                onClick={handleHomeNavigation}
+              >
+                <img src={LOGO_URL} className="mr-3 h-14 w-14 shrink-0 object-contain rounded-[22%]" alt="MaiRide Logo" />
+                <div className="flex min-w-0 flex-col justify-center leading-[0.92]">
+                  <span className="truncate text-[2.15rem] font-black tracking-tighter text-mairide-primary">MaiRide</span>
+                  <span className="-mt-1 truncate text-[1.24rem] font-black tracking-[0.08em] text-mairide-primary">my way</span>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="min-w-0">
+          <div className={cn("min-w-0", !isAndroidShell && "sm:hidden")}>
             <div className="mx-auto flex min-w-0 max-w-[220px] items-center justify-center cursor-pointer sm:mx-0 sm:max-w-none sm:justify-start" onClick={handleHomeNavigation}>
               <img src={LOGO_URL} className="mr-2 h-12 w-12 shrink-0 object-contain rounded-[22%] sm:h-12 sm:w-12" alt="MaiRide Logo" />
               <div className="flex min-w-0 flex-col justify-center leading-[0.9]">
@@ -2953,13 +2973,25 @@ const Navbar = ({
           </div>
 
           <div className="flex shrink-0 items-center justify-end">
-            <div className="flex items-center gap-1.5 sm:space-x-3 sm:border-l sm:border-mairide-secondary sm:pl-3">
-              <div className="hidden text-right sm:block">
-                <p className="text-sm font-semibold text-mairide-primary">{profile?.displayName}</p>
-                <p className="text-xs text-mairide-secondary capitalize">{profile?.role}</p>
+            <div
+              className={cn(
+                "flex items-center gap-1.5",
+                isAndroidShell ? "sm:space-x-3 sm:border-l sm:border-mairide-secondary sm:pl-3" : "sm:gap-3 sm:border-l sm:border-mairide-secondary sm:pl-5"
+              )}
+            >
+              <div className={cn("hidden text-right sm:block", !isAndroidShell && "sm:min-w-[120px]")}>
+                <p className={cn("font-semibold text-mairide-primary", isAndroidShell ? "text-sm" : "text-base leading-tight")}>{profile?.displayName}</p>
+                <p className={cn("text-mairide-secondary capitalize", isAndroidShell ? "text-xs" : "text-sm leading-tight mt-0.5")}>{profile?.role}</p>
               </div>
-              <img src={getResolvedUserPhoto(profile) || undefined} alt="Profile" className="h-11 w-11 rounded-full border border-mairide-secondary object-cover sm:h-8 sm:w-8" />
-              <button onClick={onLogout} className="rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600">
+              <img
+                src={getResolvedUserPhoto(profile) || undefined}
+                alt="Profile"
+                className={cn(
+                  "rounded-full border border-mairide-secondary object-cover",
+                  isAndroidShell ? "h-11 w-11 sm:h-8 sm:w-8" : "h-11 w-11 sm:h-10 sm:w-10"
+                )}
+              />
+              <button onClick={onLogout} className={cn("rounded-xl p-2 text-mairide-secondary transition-colors hover:text-red-600", !isAndroidShell && "sm:p-2.5")}>
                 <LogOut className="h-6 w-6 sm:h-5 sm:w-5" />
               </button>
             </div>
