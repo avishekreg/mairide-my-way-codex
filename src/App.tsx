@@ -1416,17 +1416,69 @@ const IN_STATE_LANGUAGE_MAP: Record<string, string> = {
   'west bengal': 'bn',
 };
 
-const LOCATION_LANGUAGE_HINTS: Array<{ keywords: string[]; language: string }> = [
-  { keywords: ['kolkata', 'calcutta', 'howrah', 'hooghly', 'north 24 parganas', 'south 24 parganas', 'nabadwip'], language: 'bn' },
-  { keywords: ['siliguri', 'darjeeling', 'kalimpong', 'kurseong', 'gangtok', 'namchi', 'gyalshing', 'mangan', 'soreng', 'pakyong'], language: 'ne' },
-  { keywords: ['mumbai', 'pune', 'nagpur', 'nashik', 'thane', 'kolhapur'], language: 'mr' },
+const NORTH_BENGAL_NEPALI_KEYWORDS = [
+  'siliguri',
+  'darjeeling',
+  'kalimpong',
+  'kurseong',
+  'mirik',
+  'jalpaiguri',
 ];
 
-const getRegionalLanguageOptions = (suggested: string) => {
-  const base = new Set<string>([suggested, 'hi', 'en']);
-  if (suggested === 'ne') base.add('bn');
-  if (suggested === 'bn') base.add('as');
-  return Array.from(base).filter((lang) => SUPPORTED_UI_LANGUAGES.some((option) => option.value === lang));
+type LanguagePromptResolution = {
+  suggested: string;
+  options: string[];
+};
+
+const isSupportedUiLanguage = (value: string) =>
+  SUPPORTED_UI_LANGUAGES.some((option) => option.value === value);
+
+const buildLanguagePromptOptions = (...languages: Array<string | null | undefined>) => {
+  const ordered = languages
+    .map((language) => String(language || '').trim().toLowerCase())
+    .filter(Boolean);
+  const deduped = Array.from(new Set(ordered));
+  return deduped.filter(isSupportedUiLanguage);
+};
+
+const isNorthBengalNepaliBelt = (tokens: string[]) =>
+  tokens.some((token) => NORTH_BENGAL_NEPALI_KEYWORDS.some((keyword) => token.includes(keyword)));
+
+const resolveLanguagePromptFromAddress = (
+  address: Record<string, unknown>,
+  browserPreferredLanguage: string
+): LanguagePromptResolution | null => {
+  const state = String(address.state || address.region || '').trim().toLowerCase();
+  if (!state) return null;
+
+  const district = String(address.state_district || address.county || address.city_district || '').trim().toLowerCase();
+  const city = String(address.city || address.town || address.village || address.municipality || '').trim().toLowerCase();
+  const suburb = String(address.suburb || address.hamlet || address.neighbourhood || '').trim().toLowerCase();
+  const tokens = [city, suburb, district, state].filter(Boolean);
+
+  const stateRegionalLanguage = IN_STATE_LANGUAGE_MAP[state];
+  if (!stateRegionalLanguage) {
+    return {
+      suggested: ['en', 'hi'].includes(browserPreferredLanguage) ? browserPreferredLanguage : 'en',
+      options: ['en', 'hi'],
+    };
+  }
+
+  const options = buildLanguagePromptOptions('en', 'hi', stateRegionalLanguage);
+  if (state === 'west bengal' && isNorthBengalNepaliBelt(tokens)) {
+    options.push('ne');
+  }
+
+  const uniqueOptions = Array.from(new Set(options));
+  const suggested =
+    uniqueOptions.includes(browserPreferredLanguage) && !['en', 'hi'].includes(browserPreferredLanguage)
+      ? browserPreferredLanguage
+      : stateRegionalLanguage;
+
+  return {
+    suggested,
+    options: uniqueOptions,
+  };
 };
 
 const getSupportedUiLanguage = (value: string) =>
@@ -1488,7 +1540,7 @@ const detectBrowserPreferredLanguage = () => {
   return matched?.value || 'en';
 };
 
-const detectLanguageFromGeolocation = async (): Promise<string | null> => {
+const detectLanguagePromptFromGeolocation = async (): Promise<LanguagePromptResolution | null> => {
   if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return null;
   const position = await new Promise<GeolocationPosition>((resolve, reject) =>
     navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -1509,20 +1561,7 @@ const detectLanguageFromGeolocation = async (): Promise<string | null> => {
   if (!response || !response.ok) return null;
   const payload = await response.json().catch(() => null);
   const address = payload?.address || {};
-  const state = String(address.state || address.region || '').trim().toLowerCase();
-  const district = String(address.state_district || address.county || address.city_district || '').trim().toLowerCase();
-  const city = String(address.city || address.town || address.village || address.municipality || '').trim().toLowerCase();
-  const locationTokens = [city, district, state].filter(Boolean);
-
-  for (const hint of LOCATION_LANGUAGE_HINTS) {
-    if (hint.keywords.some((keyword) => locationTokens.some((token) => token.includes(keyword)))) {
-      return hint.language;
-    }
-  }
-
-  if (state === 'sikkim') return 'ne';
-  if (!state) return null;
-  return IN_STATE_LANGUAGE_MAP[state] || null;
+  return resolveLanguagePromptFromAddress(address, detectBrowserPreferredLanguage());
 };
 
 const LanguageSwitcher = ({
@@ -17926,11 +17965,14 @@ const App = () => {
     safeStorageSet('session', UI_LANGUAGE_PROMPT_SESSION_KEY, '1');
 
     const runDetection = async () => {
-      let detected = safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || detectBrowserPreferredLanguage();
+      const browserPreferred = detectBrowserPreferredLanguage();
+      let detected = safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || browserPreferred;
+      let promptOptions = buildLanguagePromptOptions('en', 'hi', detected);
       try {
-        const geoDetected = await detectLanguageFromGeolocation();
+        const geoDetected = await detectLanguagePromptFromGeolocation();
         if (geoDetected) {
-          detected = geoDetected;
+          detected = geoDetected.suggested;
+          promptOptions = geoDetected.options;
         }
       } catch {
         // fallback remains detected
@@ -17938,7 +17980,9 @@ const App = () => {
       if (!cancelled) {
         const normalizedSuggested = getSupportedUiLanguage(detected).value;
         setSuggestedLanguage(normalizedSuggested);
-        setLanguagePromptOptions(getRegionalLanguageOptions(normalizedSuggested));
+        setLanguagePromptOptions(
+          buildLanguagePromptOptions(...promptOptions, normalizedSuggested)
+        );
         setShowLanguagePrompt(true);
       }
     };
