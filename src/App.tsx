@@ -3125,10 +3125,6 @@ const Navbar = ({
     setIsOpen(false);
     setShowTravelerCameraCapture(false);
     setShowTravelerCameraSettingsPrompt(false);
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => setShowTravelerAvatarOptions(true));
-      return;
-    }
     setShowTravelerAvatarOptions(true);
   };
 
@@ -3289,7 +3285,6 @@ const Navbar = ({
                       type="button"
                       aria-label={travelerAvatarLabel}
                       onClick={handleTravelerAvatarTrigger}
-                      onPointerUp={handleTravelerAvatarTrigger}
                       onKeyDown={handleTravelerAvatarKeyDown}
                       disabled={isUploadingTravelerAvatar}
                       className="absolute inset-0 z-20 rounded-full bg-transparent"
@@ -3367,7 +3362,6 @@ const Navbar = ({
                     type="button"
                     aria-label={travelerAvatarLabel}
                     onClick={handleTravelerAvatarTrigger}
-                    onPointerUp={handleTravelerAvatarTrigger}
                     onKeyDown={handleTravelerAvatarKeyDown}
                     disabled={isUploadingTravelerAvatar}
                     className="absolute inset-0 z-20 rounded-full bg-transparent"
@@ -3422,6 +3416,7 @@ const Navbar = ({
                   exit={{ opacity: 0, y: 16, scale: 0.98 }}
                   transition={{ type: 'spring', damping: 24, stiffness: 280 }}
                   className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
                 >
                   <div className="mx-auto mb-4 h-1.5 w-16 rounded-full bg-mairide-secondary/40" />
                   <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Traveler Avatar</p>
@@ -3482,6 +3477,7 @@ const Navbar = ({
                   exit={{ opacity: 0, y: 16, scale: 0.98 }}
                   transition={{ type: 'spring', damping: 24, stiffness: 280 }}
                   className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
                 >
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-mairide-bg text-mairide-primary">
                     <Settings className="h-7 w-7" />
