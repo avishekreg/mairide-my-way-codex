@@ -944,6 +944,81 @@ const PaymentAuditTrail = ({
   );
 };
 
+const ADMIN_PAGE_SIZE_OPTIONS = [10, 15] as const;
+
+const normalizeAdminSearchValue = (value: unknown) => String(value ?? '').toLowerCase().trim();
+
+const matchesAdminSearch = (query: string, fields: unknown[]) => {
+  const normalizedQuery = normalizeAdminSearchValue(query);
+  if (!normalizedQuery) return true;
+  return fields.some((field) => normalizeAdminSearchValue(field).includes(normalizedQuery));
+};
+
+const getAdminPageCount = (total: number, pageSize: number) => Math.max(1, Math.ceil(total / pageSize));
+
+const getAdminPageItems = <T,>(items: T[], page: number, pageSize: number) => {
+  const start = (page - 1) * pageSize;
+  return items.slice(start, start + pageSize);
+};
+
+const AdminListPagination = ({
+  page,
+  pageCount,
+  pageSize,
+  totalCount,
+  filteredCount,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  totalCount: number;
+  filteredCount: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}) => (
+  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-6 md:px-8 py-5 border-t border-mairide-secondary bg-white">
+    <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">
+      Showing {filteredCount ? ((page - 1) * pageSize) + 1 : 0}-{Math.min(page * pageSize, filteredCount)} of {filteredCount}
+      {filteredCount !== totalCount ? ` filtered from ${totalCount}` : ''}
+    </p>
+    <div className="flex flex-wrap items-center gap-3">
+      <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-mairide-secondary">
+        Per page
+        <select
+          value={pageSize}
+          onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          className="rounded-xl border border-mairide-secondary bg-mairide-bg px-3 py-2 text-sm font-bold text-mairide-primary outline-none"
+        >
+          {ADMIN_PAGE_SIZE_OPTIONS.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.max(1, page - 1))}
+        disabled={page <= 1}
+        className="rounded-xl border border-mairide-secondary px-4 py-2 text-xs font-bold uppercase tracking-widest text-mairide-primary disabled:opacity-40"
+      >
+        Prev
+      </button>
+      <span className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">
+        Page {page} / {pageCount}
+      </span>
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.min(pageCount, page + 1))}
+        disabled={page >= pageCount}
+        className="rounded-xl border border-mairide-secondary px-4 py-2 text-xs font-bold uppercase tracking-widest text-mairide-primary disabled:opacity-40"
+      >
+        Next
+      </button>
+    </div>
+  </div>
+);
+
 const AdminTransactionsView = ({
   transactions,
   bookings,
@@ -953,9 +1028,57 @@ const AdminTransactionsView = ({
   bookings: Booking[];
   users: UserProfile[];
 }) => {
+  const [transactionSearch, setTransactionSearch] = useState('');
+  const [transactionStatusFilter, setTransactionStatusFilter] = useState<'all' | Transaction['status']>('all');
+  const [transactionPayerFilter, setTransactionPayerFilter] = useState<'all' | 'driver' | 'consumer'>('all');
+  const [transactionPage, setTransactionPage] = useState(1);
+  const [transactionPageSize, setTransactionPageSize] = useState<number>(10);
   const paymentTransactions = transactions
     .filter((tx) => tx.type === 'maintenance_fee_payment')
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const filteredPaymentTransactions = useMemo(() => {
+    return paymentTransactions.filter((tx) => {
+      const booking = bookings.find((item) => item.id === (tx.relatedId || tx.metadata?.bookingId));
+      const user = users.find((item) => item.uid === tx.userId);
+      const payer = tx.metadata?.payer === 'driver' ? 'driver' : 'consumer';
+      const matchesStatus = transactionStatusFilter === 'all' || tx.status === transactionStatusFilter;
+      const matchesPayer = transactionPayerFilter === 'all' || payer === transactionPayerFilter;
+      const matchesSearch = matchesAdminSearch(transactionSearch, [
+        tx.id,
+        tx.description,
+        tx.status,
+        tx.currency,
+        tx.amount,
+        tx.userId,
+        user?.displayName,
+        user?.email,
+        tx.relatedId,
+        tx.metadata?.bookingId,
+        tx.metadata?.rideId,
+        tx.metadata?.transactionId,
+        tx.metadata?.orderId,
+        tx.metadata?.gateway,
+        tx.metadata?.paymentMode,
+        booking?.origin,
+        booking?.destination,
+        booking?.consumerName,
+        booking?.driverName,
+        tx.createdAt,
+      ]);
+      return matchesStatus && matchesPayer && matchesSearch;
+    });
+  }, [paymentTransactions, bookings, users, transactionSearch, transactionStatusFilter, transactionPayerFilter]);
+  const transactionPageCount = getAdminPageCount(filteredPaymentTransactions.length, transactionPageSize);
+  const pagedPaymentTransactions = useMemo(
+    () => getAdminPageItems(filteredPaymentTransactions, transactionPage, transactionPageSize),
+    [filteredPaymentTransactions, transactionPage, transactionPageSize]
+  );
+  useEffect(() => {
+    setTransactionPage(1);
+  }, [transactionSearch, transactionStatusFilter, transactionPayerFilter, transactionPageSize]);
+  useEffect(() => {
+    if (transactionPage > transactionPageCount) setTransactionPage(transactionPageCount);
+  }, [transactionPage, transactionPageCount]);
   const totalRevenue = paymentTransactions
     .filter((tx) => tx.currency === 'INR' && tx.status === 'completed')
     .reduce((sum, tx) => sum + (tx.metadata?.serviceFee || 0), 0);
@@ -981,12 +1104,43 @@ const AdminTransactionsView = ({
       </div>
 
       <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-sm overflow-hidden">
-        <div className="p-8 border-b border-mairide-secondary">
+        <div className="p-8 border-b border-mairide-secondary space-y-5">
           <h2 className="text-xl font-bold text-mairide-primary">Payment Transactions</h2>
           <p className="mt-2 text-sm text-mairide-secondary">Support and finance can review every platform-fee payment event here.</p>
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_auto] gap-3">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-mairide-secondary" />
+              <input
+                type="text"
+                value={transactionSearch}
+                onChange={(event) => setTransactionSearch(event.target.value)}
+                placeholder="Search txn, order, booking, ride, user, route, gateway..."
+                className="w-full rounded-2xl bg-mairide-bg py-3 pl-11 pr-4 text-sm font-bold text-mairide-primary outline-none placeholder:font-medium placeholder:text-mairide-secondary"
+              />
+            </div>
+            <select
+              value={transactionStatusFilter}
+              onChange={(event) => setTransactionStatusFilter(event.target.value as any)}
+              className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
+            >
+              <option value="all">All statuses</option>
+              <option value="completed">Completed</option>
+              <option value="pending">Pending</option>
+              <option value="failed">Failed</option>
+            </select>
+            <select
+              value={transactionPayerFilter}
+              onChange={(event) => setTransactionPayerFilter(event.target.value as any)}
+              className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
+            >
+              <option value="all">All payers</option>
+              <option value="consumer">Traveler payments</option>
+              <option value="driver">Driver payments</option>
+            </select>
+          </div>
         </div>
         <div className="divide-y divide-mairide-secondary">
-          {paymentTransactions.length ? paymentTransactions.map((tx) => {
+          {pagedPaymentTransactions.length ? pagedPaymentTransactions.map((tx) => {
             const booking = bookings.find((item) => item.id === (tx.relatedId || tx.metadata?.bookingId));
             const user = users.find((item) => item.uid === tx.userId);
             return (
@@ -1050,9 +1204,18 @@ const AdminTransactionsView = ({
               </div>
             );
           }) : (
-            <div className="p-12 text-center text-mairide-secondary italic">No payment transactions recorded yet.</div>
+            <div className="p-12 text-center text-mairide-secondary italic">No payment transactions match the current search.</div>
           )}
         </div>
+        <AdminListPagination
+          page={transactionPage}
+          pageCount={transactionPageCount}
+          pageSize={transactionPageSize}
+          totalCount={paymentTransactions.length}
+          filteredCount={filteredPaymentTransactions.length}
+          onPageChange={setTransactionPage}
+          onPageSizeChange={setTransactionPageSize}
+        />
       </div>
     </div>
   );
@@ -13542,7 +13705,62 @@ const DriverRejected = ({ profile }: { profile: UserProfile }) => {
 
 // --- Admin Revenue Analysis ---
 
-const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: UserProfile[] }) => {
+const getAdminTractionAreas = (bookings: any[]) => {
+  const areas: { [key: string]: number } = {};
+  bookings.forEach((booking) => {
+    areas[booking.destination] = (areas[booking.destination] || 0) + 1;
+  });
+  return Object.entries(areas)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+};
+
+const AdminMarketingInsightsCard = ({ bookings }: { bookings: any[] }) => {
+  const tractionAreas = useMemo(() => getAdminTractionAreas(bookings), [bookings]);
+
+  return (
+    <div className="bg-mairide-primary p-10 rounded-[40px] text-white overflow-hidden relative">
+      <div className="relative z-10">
+        <div className="flex items-center space-x-3 mb-6">
+          <Bot className="w-8 h-8 text-mairide-accent" />
+          <h3 className="text-2xl font-bold">Marketing Insights & Recommendations</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="bg-white/10 backdrop-blur-md p-6 rounded-3xl border border-white/10">
+            <h4 className="font-bold text-mairide-accent mb-4 flex items-center space-x-2">
+              <MapPin className="w-4 h-4" />
+              <span>Top Growth Sector</span>
+            </h4>
+            <p className="text-sm opacity-80 leading-relaxed">
+              Based on recent trends, <span className="text-white font-bold">{tractionAreas[0]?.name || 'Guwahati City'}</span> is showing {Math.floor(Math.random() * 20) + 10}% higher demand. We recommend launching a localized referral campaign in this area.
+            </p>
+          </div>
+          <div className="bg-white/10 backdrop-blur-md p-6 rounded-3xl border border-white/10">
+            <h4 className="font-bold text-mairide-accent mb-4 flex items-center space-x-2">
+              <Users className="w-4 h-4" />
+              <span>User Retention</span>
+            </h4>
+            <p className="text-sm opacity-80 leading-relaxed">
+              Users with more than 50 Maicoins have a 3x higher retention rate. Consider a "Maicoin Multiplier" weekend to boost wallet balances and long-term engagement.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-mairide-accent/20 rounded-full blur-3xl" />
+    </div>
+  );
+};
+
+const AdminRevenueAnalysis = ({
+  bookings,
+  users,
+  afterAlertsSlot,
+}: {
+  bookings: any[];
+  users: UserProfile[];
+  afterAlertsSlot?: React.ReactNode;
+}) => {
   const [timeframe, setTimeframe] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const paymentEvents = useMemo(() => getPlatformFeePaymentEvents(bookings as Booking[]), [bookings]);
   
@@ -13613,19 +13831,7 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
 
   const chartData = useMemo(() => getChartData(), [timeframe, paymentEvents]);
   
-  // High traction areas
-  const getTractionAreas = () => {
-    const areas: { [key: string]: number } = {};
-    bookings.forEach(b => {
-      areas[b.destination] = (areas[b.destination] || 0) + 1;
-    });
-    return Object.entries(areas)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-  };
-
-  const tractionAreas = useMemo(() => getTractionAreas(), [bookings]);
+  const tractionAreas = useMemo(() => getAdminTractionAreas(bookings), [bookings]);
 
   // Cash flow alert
   const isNegativeCashFlow = totalMaiCoinsIssued > totalRevenue * 2; // Simple heuristic
@@ -13648,6 +13854,8 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
           </div>
         </motion.div>
       )}
+
+      {afterAlertsSlot}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -13737,36 +13945,6 @@ const AdminRevenueAnalysis = ({ bookings, users }: { bookings: any[], users: Use
         </div>
       </div>
 
-      {/* Marketing Insights */}
-      <div className="bg-mairide-primary p-10 rounded-[40px] text-white overflow-hidden relative">
-        <div className="relative z-10">
-          <div className="flex items-center space-x-3 mb-6">
-            <Bot className="w-8 h-8 text-mairide-accent" />
-            <h3 className="text-2xl font-bold">Marketing Insights & Recommendations</h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="bg-white/10 backdrop-blur-md p-6 rounded-3xl border border-white/10">
-              <h4 className="font-bold text-mairide-accent mb-4 flex items-center space-x-2">
-                <MapPin className="w-4 h-4" />
-                <span>Top Growth Sector</span>
-              </h4>
-              <p className="text-sm opacity-80 leading-relaxed">
-                Based on recent trends, <span className="text-white font-bold">{tractionAreas[0]?.name || 'Guwahati City'}</span> is showing {Math.floor(Math.random() * 20) + 10}% higher demand. We recommend launching a localized referral campaign in this area.
-              </p>
-            </div>
-            <div className="bg-white/10 backdrop-blur-md p-6 rounded-3xl border border-white/10">
-              <h4 className="font-bold text-mairide-accent mb-4 flex items-center space-x-2">
-                <Users className="w-4 h-4" />
-                <span>User Retention</span>
-              </h4>
-              <p className="text-sm opacity-80 leading-relaxed">
-                Users with more than 50 Maicoins have a 3x higher retention rate. Consider a "Maicoin Multiplier" weekend to boost wallet balances and long-term engagement.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-mairide-accent/20 rounded-full blur-3xl" />
-      </div>
     </div>
   );
 };
@@ -15380,6 +15558,13 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'consumer' | 'driver' | 'admin'>('all');
+  const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersPageSize, setUsersPageSize] = useState<number>(10);
+  const [rideSearchTerm, setRideSearchTerm] = useState('');
+  const [rideStatusFilter, setRideStatusFilter] = useState<'all' | Booking['status'] | 'completed_lifecycle'>('all');
+  const [ridesPage, setRidesPage] = useState(1);
+  const [ridesPageSize, setRidesPageSize] = useState<number>(10);
   const [usersInsightView, setUsersInsightView] = useState<UsersInsightView>(null);
   const [adminNotice, setAdminNotice] = useState<{
     title: string;
@@ -15629,13 +15814,36 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const filteredUsers = users.filter(user => {
     if (user.uid === profile.uid) return false;
     if (user.role === 'driver' && (!user.onboardingComplete || user.verificationStatus === 'pending')) return false;
-    const normalizedSearch = String(searchTerm || '').toLowerCase();
-    const displayName = String(user.displayName || '').toLowerCase();
-    const email = String(user.email || '').toLowerCase();
-    const matchesSearch = displayName.includes(normalizedSearch) || email.includes(normalizedSearch);
+    const matchesSearch = matchesAdminSearch(searchTerm, [
+      user.uid,
+      user.displayName,
+      user.email,
+      user.phoneNumber,
+      user.role,
+      user.status,
+      user.verificationStatus,
+      user.adminRole,
+      user.referralCode,
+      user.createdAt,
+      user.driverDetails?.vehicleRegNumber,
+      user.driverDetails?.vehicleMake,
+      user.driverDetails?.vehicleModel,
+    ]);
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
-    return matchesSearch && matchesRole;
+    const matchesStatus = userStatusFilter === 'all' || user.status === userStatusFilter;
+    return matchesSearch && matchesRole && matchesStatus;
   });
+  const usersPageCount = getAdminPageCount(filteredUsers.length, usersPageSize);
+  const pagedFilteredUsers = useMemo(
+    () => getAdminPageItems(filteredUsers, usersPage, usersPageSize),
+    [filteredUsers, usersPage, usersPageSize]
+  );
+  useEffect(() => {
+    setUsersPage(1);
+  }, [searchTerm, roleFilter, userStatusFilter, usersPageSize]);
+  useEffect(() => {
+    if (usersPage > usersPageCount) setUsersPage(usersPageCount);
+  }, [usersPage, usersPageCount]);
   const pendingVerificationDrivers = users.filter((u) => {
     if (u.role !== 'driver') return false;
     const verificationStatus = (u.verificationStatus || 'pending') as string;
@@ -15692,6 +15900,53 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 6);
   }, [tripSessions]);
+  const filteredAdminBookings = useMemo(() => {
+    return (bookings as Booking[]).filter((booking) => {
+      const matchesStatus =
+        rideStatusFilter === 'all'
+        || (rideStatusFilter === 'completed_lifecycle'
+          ? booking.rideLifecycleStatus === 'completed'
+          : booking.status === rideStatusFilter);
+      const matchesSearch = matchesAdminSearch(rideSearchTerm, [
+        booking.id,
+        booking.rideId,
+        booking.consumerId,
+        booking.consumerName,
+        booking.consumerPhone,
+        booking.driverId,
+        booking.driverName,
+        booking.driverPhone,
+        booking.origin,
+        booking.destination,
+        booking.listedOrigin,
+        booking.listedDestination,
+        booking.requestedOrigin,
+        booking.requestedDestination,
+        booking.status,
+        booking.paymentStatus,
+        booking.rideLifecycleStatus,
+        booking.consumerPaymentMode,
+        booking.driverPaymentMode,
+        booking.consumerPaymentTransactionId,
+        booking.driverPaymentTransactionId,
+        booking.createdAt,
+        booking.totalPrice,
+        booking.serviceFee,
+      ]);
+      return matchesStatus && matchesSearch;
+    });
+  }, [bookings, rideSearchTerm, rideStatusFilter]);
+  const ridesPageCount = getAdminPageCount(filteredAdminBookings.length, ridesPageSize);
+  const pagedAdminBookings = useMemo(
+    () => getAdminPageItems(filteredAdminBookings, ridesPage, ridesPageSize),
+    [filteredAdminBookings, ridesPage, ridesPageSize]
+  );
+  useEffect(() => {
+    setRidesPage(1);
+  }, [rideSearchTerm, rideStatusFilter, ridesPageSize]);
+  useEffect(() => {
+    if (ridesPage > ridesPageCount) setRidesPage(ridesPageCount);
+  }, [ridesPage, ridesPageCount]);
   const getUserRideOffers = (userId: string) =>
     rides.filter((ride) => ride.driverId === userId);
   const getActiveRideOffers = (userId: string) =>
@@ -16432,7 +16687,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-mairide-secondary" />
                     <input 
                       type="text"
-                      placeholder="Search by name or email..."
+                      placeholder="Search name, email, phone, UID, role, status, vehicle..."
                       className="w-full pl-12 pr-6 py-3 bg-mairide-bg border-none rounded-xl outline-none text-sm"
                       value={searchTerm}
                       onChange={e => setSearchTerm(e.target.value)}
@@ -16452,6 +16707,15 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                       </button>
                     ))}
                   </div>
+                  <select
+                    value={userStatusFilter}
+                    onChange={(event) => setUserStatusFilter(event.target.value as any)}
+                    className="rounded-xl bg-mairide-bg px-4 py-3 text-xs font-bold uppercase tracking-widest text-mairide-primary outline-none"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
                 </div>
               </div>
               <div className="divide-y divide-mairide-secondary">
@@ -16464,7 +16728,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   <div>Actions</div>
                 </div>
                 <div className="divide-y divide-mairide-secondary">
-                  {filteredUsers.map(user => (
+                  {pagedFilteredUsers.map(user => (
                     <div key={user.uid} className="px-6 md:px-8 py-6 hover:bg-mairide-bg/50 transition-colors">
                       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_160px_minmax(0,1.2fr)_160px_130px_180px] gap-6 items-start">
                         <button
@@ -16592,16 +16856,56 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                       </div>
                     </div>
                   ))}
+                  {!pagedFilteredUsers.length && (
+                    <div className="px-8 py-12 text-center text-mairide-secondary italic">
+                      No users match the current search and filters.
+                    </div>
+                  )}
                 </div>
               </div>
+              <AdminListPagination
+                page={usersPage}
+                pageCount={usersPageCount}
+                pageSize={usersPageSize}
+                totalCount={users.filter((user) => user.uid !== profile.uid).length}
+                filteredCount={filteredUsers.length}
+                onPageChange={setUsersPage}
+                onPageSizeChange={setUsersPageSize}
+              />
             </div>
           </div>
         )}
 
         {activeTab === 'rides' && (
           <div className="bg-white rounded-[40px] border border-mairide-secondary shadow-sm overflow-hidden">
-            <div className="p-8 border-b border-mairide-secondary">
+            <div className="p-8 border-b border-mairide-secondary space-y-5">
               <h2 className="text-xl font-bold text-mairide-primary">All Ride Bookings</h2>
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-mairide-secondary" />
+                  <input
+                    type="text"
+                    value={rideSearchTerm}
+                    onChange={(event) => setRideSearchTerm(event.target.value)}
+                    placeholder="Search route, traveler, driver, phone, booking ID, ride ID, payment..."
+                    className="w-full rounded-2xl bg-mairide-bg py-3 pl-11 pr-4 text-sm font-bold text-mairide-primary outline-none placeholder:font-medium placeholder:text-mairide-secondary"
+                  />
+                </div>
+                <select
+                  value={rideStatusFilter}
+                  onChange={(event) => setRideStatusFilter(event.target.value as any)}
+                  className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
+                >
+                  <option value="all">All ride statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="completed">Completed bookings</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="negotiating">Negotiating</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="completed_lifecycle">Completed trips</option>
+                </select>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left">
@@ -16617,7 +16921,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-mairide-secondary">
-                  {bookings.map(booking => (
+                  {pagedAdminBookings.map(booking => (
                     <tr key={booking.id} className="hover:bg-mairide-bg/50 transition-colors">
                       <td className="px-8 py-6">
                         <p className="font-bold text-sm text-mairide-primary">{booking.origin}</p>
@@ -16664,63 +16968,85 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                       </td>
                     </tr>
                   ))}
+                  {!pagedAdminBookings.length && (
+                    <tr>
+                      <td colSpan={7} className="px-8 py-12 text-center text-mairide-secondary italic">
+                        No ride bookings match the current search and filters.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
+            <AdminListPagination
+              page={ridesPage}
+              pageCount={ridesPageCount}
+              pageSize={ridesPageSize}
+              totalCount={bookings.length}
+              filteredCount={filteredAdminBookings.length}
+              onPageChange={setRidesPage}
+              onPageSizeChange={setRidesPageSize}
+            />
           </div>
         )}
 
         {activeTab === 'revenue' && (
           <div className="space-y-6">
-            <AdminRevenueAnalysis bookings={bookings} users={users} />
-            <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Live Ops Monitor</p>
-                  <h3 className="mt-2 text-2xl font-black text-mairide-primary">Trip session trust and reliability</h3>
-                  <p className="mt-1 text-sm text-mairide-secondary">Real-time health snapshot across active tracking sessions.</p>
-                </div>
-                <div className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
-                  {tripSessions.length} sessions observed
-                </div>
-              </div>
-              <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Live sessions</p>
-                  <p className="mt-2 text-3xl font-black text-mairide-primary">{liveTripSessions.length}</p>
-                </div>
-                <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Stale sessions</p>
-                  <p className="mt-2 text-3xl font-black text-mairide-accent">{staleTripSessions.length}</p>
-                </div>
-                <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Offline links</p>
-                  <p className="mt-2 text-3xl font-black text-mairide-primary">{offlineTripSessions.length}</p>
-                </div>
-                <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Anti-spoof alerts</p>
-                  <p className="mt-2 text-3xl font-black text-red-600">{antiSpoofAlerts}</p>
-                </div>
-              </div>
-              <div className="mt-5 rounded-2xl border border-mairide-secondary/40 bg-mairide-bg p-4">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Recent Trust Alerts</p>
-                {liveOpsAlerts.length ? (
-                  <div className="mt-3 space-y-2">
-                    {liveOpsAlerts.map((alert, index) => (
-                      <div key={`${alert.bookingId}-${alert.createdAt}-${index}`} className="rounded-xl bg-white px-3 py-2">
-                        <p className="text-xs font-bold text-mairide-primary">Booking {alert.bookingId.slice(0, 8).toUpperCase()} • {alert.action}</p>
-                        <p className="text-xs text-mairide-secondary">{alert.details}</p>
-                        <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
-                          {new Date(alert.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                    ))}
+            <AdminRevenueAnalysis
+              bookings={bookings}
+              users={users}
+              afterAlertsSlot={(
+                <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Live Ops Monitor</p>
+                      <h3 className="mt-2 text-2xl font-black text-mairide-primary">Trip session trust and reliability</h3>
+                      <p className="mt-1 text-sm text-mairide-secondary">Real-time health snapshot across active tracking sessions.</p>
+                    </div>
+                    <div className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                      {tripSessions.length} sessions observed
+                    </div>
                   </div>
-                ) : (
-                  <p className="mt-3 text-sm text-mairide-secondary">No active trust alerts right now.</p>
-                )}
-              </div>
-            </div>
+                  <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                    <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Live sessions</p>
+                      <p className="mt-2 text-3xl font-black text-mairide-primary">{liveTripSessions.length}</p>
+                    </div>
+                    <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Stale sessions</p>
+                      <p className="mt-2 text-3xl font-black text-mairide-accent">{staleTripSessions.length}</p>
+                    </div>
+                    <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Offline links</p>
+                      <p className="mt-2 text-3xl font-black text-mairide-primary">{offlineTripSessions.length}</p>
+                    </div>
+                    <div className="rounded-2xl bg-mairide-bg p-4 border border-mairide-secondary/40">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Anti-spoof alerts</p>
+                      <p className="mt-2 text-3xl font-black text-red-600">{antiSpoofAlerts}</p>
+                    </div>
+                  </div>
+                  <div className="mt-5 rounded-2xl border border-mairide-secondary/40 bg-mairide-bg p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Recent Trust Alerts</p>
+                    {liveOpsAlerts.length ? (
+                      <div className="mt-3 space-y-2">
+                        {liveOpsAlerts.map((alert, index) => (
+                          <div key={`${alert.bookingId}-${alert.createdAt}-${index}`} className="rounded-xl bg-white px-3 py-2">
+                            <p className="text-xs font-bold text-mairide-primary">Booking {alert.bookingId.slice(0, 8).toUpperCase()} • {alert.action}</p>
+                            <p className="text-xs text-mairide-secondary">{alert.details}</p>
+                            <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                              {new Date(alert.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-mairide-secondary">No active trust alerts right now.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            />
+            <AdminMarketingInsightsCard bookings={bookings} />
           </div>
         )}
 
