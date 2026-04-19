@@ -169,10 +169,19 @@ export async function signInWithPopup(
   _provider: GoogleAuthProvider
 ) {
   sessionStorage.setItem('mairide_oauth_started', 'google');
+  const oauthMode = sessionStorage.getItem('mairide_oauth_mode') || '';
+  const oauthRole = sessionStorage.getItem('mairide_oauth_role') || '';
+  const redirectUrl = new URL('/', window.location.origin);
+  if (oauthMode === 'login' || oauthMode === 'signup') {
+    redirectUrl.searchParams.set('oauthMode', oauthMode);
+  }
+  if (oauthRole === 'driver' || oauthRole === 'consumer') {
+    redirectUrl.searchParams.set('oauthRole', oauthRole);
+  }
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: window.location.origin,
+      redirectTo: redirectUrl.toString(),
     },
   });
 

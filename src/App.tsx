@@ -3671,11 +3671,33 @@ const sanitizeDisplayName = (value: string) =>
     .slice(0, 80);
 
 const normalizeEmailValue = (value: string) => String(value || '').trim().toLowerCase();
+const getOAuthUrlParam = (key: string) => {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get(key);
+};
+const getStoredOAuthMode = (): 'login' | 'signup' | null => {
+  const urlMode = getOAuthUrlParam('oauthMode');
+  const storedMode = safeStorageGet('session', OAUTH_MODE_KEY);
+  if (urlMode === 'login' || urlMode === 'signup') return urlMode;
+  if (storedMode === 'login' || storedMode === 'signup') return storedMode;
+  return null;
+};
 const getStoredOAuthRole = (): 'consumer' | 'driver' =>
-  safeStorageGet('session', OAUTH_ROLE_KEY) === 'driver' ? 'driver' : 'consumer';
+  getOAuthUrlParam('oauthRole') === 'driver' || safeStorageGet('session', OAUTH_ROLE_KEY) === 'driver'
+    ? 'driver'
+    : 'consumer';
 const clearStoredOAuthIntent = () => {
   safeStorageRemove('session', OAUTH_MODE_KEY);
   safeStorageRemove('session', OAUTH_ROLE_KEY);
+  if (typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+    const hadOAuthParams = url.searchParams.has('oauthMode') || url.searchParams.has('oauthRole');
+    url.searchParams.delete('oauthMode');
+    url.searchParams.delete('oauthRole');
+    if (hadOAuthParams) {
+      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+  }
 };
 
 const isValidEmailValue = (value: string) =>
@@ -17979,7 +18001,7 @@ const App = () => {
                 clearStoredOAuthIntent();
                 setLoading(false);
               } else {
-                const oauthMode = safeStorageGet('session', OAUTH_MODE_KEY);
+                const oauthMode = getStoredOAuthMode();
                 if (oauthMode === 'signup') {
                   const isAdminEmail = normalizedEmail === SUPER_ADMIN_EMAIL;
                   const selectedOAuthRole = getStoredOAuthRole();
