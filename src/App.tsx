@@ -13805,6 +13805,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     appVersion: APP_VERSION,
     supabaseProjectUrl: import.meta.env.VITE_SUPABASE_URL || '',
     storageBucket: import.meta.env.VITE_SUPABASE_STORAGE_BUCKET || '',
+    capacitySupabaseEgressGbMonthly: 5,
     googleMapsApiKey: GOOGLE_MAPS_API_KEY || '',
     supportEmail: '',
     supportPhone: '',
@@ -14512,6 +14513,35 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
                   onChange={e => setFormData({ ...formData, storageBucket: e.target.value })}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Supabase Egress Limit (GB/month)</label>
+                <input 
+                  type="number"
+                  min="1"
+                  step="0.1"
+                  value={formData.capacitySupabaseEgressGbMonthly ?? 5}
+                  onChange={e => setFormData({ ...formData, capacitySupabaseEgressGbMonthly: Number(e.target.value) })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Current Supabase Egress Used (GB)</label>
+                <input 
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.capacitySupabaseEgressUsedGbMonthly ?? ''}
+                  onChange={e => setFormData({
+                    ...formData,
+                    capacitySupabaseEgressUsedGbMonthly: e.target.value === '' ? undefined : Number(e.target.value),
+                  })}
+                  placeholder="Copy from Supabase Usage, e.g. 6.6"
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+                <p className="text-[10px] text-mairide-secondary ml-1">
+                  Supabase does not come from our app estimate here. Copy the billing Usage value until automated quota sync is connected.
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Google Maps API Key</label>

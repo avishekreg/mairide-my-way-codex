@@ -764,6 +764,7 @@ async function handleCapacity(req: any, res: any) {
     supabaseMau: safeNumber(configData.capacitySupabaseMau, 50000),
     supabaseRealtimeMessagesMonthly: safeNumber(configData.capacitySupabaseRealtimeMessagesMonthly, 2000000),
     supabaseDbStorageMb: safeNumber(configData.capacitySupabaseDbStorageMb, 500),
+    supabaseEgressGbMonthly: safeNumber(configData.capacitySupabaseEgressGbMonthly, 5),
     supabaseBandwidthGbMonthly: safeNumber(configData.capacitySupabaseBandwidthGbMonthly, 10),
     googleMapsLoadsMonthly: safeNumber(configData.capacityGoogleMapsLoadsMonthly, 10000),
     geminiRequestsDaily: safeNumber(configData.capacityGeminiRequestsDaily, 1500),
@@ -771,6 +772,18 @@ async function handleCapacity(req: any, res: any) {
   };
 
   const capacityNotes: string[] = [];
+  const hasSupabaseEgressUsage =
+    configData.capacitySupabaseEgressUsedGbMonthly !== undefined &&
+    configData.capacitySupabaseEgressUsedGbMonthly !== null &&
+    String(configData.capacitySupabaseEgressUsedGbMonthly).trim() !== "";
+  const supabaseEgressUsedGbMonthly = hasSupabaseEgressUsage
+    ? safeNumber(configData.capacitySupabaseEgressUsedGbMonthly, 0)
+    : 0;
+  if (!hasSupabaseEgressUsage) {
+    capacityNotes.push(
+      "Supabase billing egress is not connected to live usage yet. Copy the current Supabase Usage egress value into Config until billing API sync is wired."
+    );
+  }
 
   const [usersResult, ridesResult, bookingsResult, transactionsResult, ticketsResult] = await Promise.all([
     auth.supabaseAdmin
@@ -1057,6 +1070,17 @@ async function handleCapacity(req: any, res: any) {
       notes: "Approx from users table activity.",
     }),
     makeMetric({
+      key: "supabase_egress_billing",
+      label: "Supabase egress (billing)",
+      category: "Supabase",
+      used: supabaseEgressUsedGbMonthly,
+      capacity: limits.supabaseEgressGbMonthly,
+      unit: "GB/month",
+      notes: hasSupabaseEgressUsage
+        ? "Manual value copied from Supabase Usage. This is the quota that can trigger the Supabase grace-period warning."
+        : "Not connected to live Supabase billing usage yet; this dashboard cannot auto-detect billing egress without this value.",
+    }),
+    makeMetric({
       key: "supabase_realtime_monthly_est",
       label: "Realtime messages (monthly estimate)",
       category: "Supabase",
@@ -1112,7 +1136,29 @@ async function handleCapacity(req: any, res: any) {
     }),
   ];
 
-  const alerts = metrics
+  const monitoringGapAlerts = hasSupabaseEgressUsage
+    ? []
+    : [
+        {
+          id: `alert_supabase_egress_monitoring_gap_${todayKey}`,
+          metricKey: "supabase_egress_billing",
+          metricLabel: "Supabase egress (billing)",
+          category: "Supabase",
+          severity: "warning" as CapacityMetricSeverity,
+          utilization: 0,
+          used: 0,
+          capacity: limits.supabaseEgressGbMonthly,
+          unit: "GB/month",
+          threshold: 80,
+          message:
+            "Supabase billing egress monitoring is not live. The admin dashboard cannot warn about Supabase egress quota until this value is supplied or API sync is added.",
+          observedAt: nowIso,
+        },
+      ];
+
+  const alerts = [
+    ...monitoringGapAlerts,
+    ...metrics
     .filter((metric) => metric.utilization >= 80)
     .sort((a, b) => b.utilization - a.utilization)
     .map((metric) => ({
@@ -1131,7 +1177,8 @@ async function handleCapacity(req: any, res: any) {
           ? `${metric.label} is above 95% capacity. Immediate action required.`
           : `${metric.label} has crossed 80% capacity. Plan scaling action now.`,
       observedAt: nowIso,
-    }));
+    })),
+  ];
 
   const daily = daySeries.map((day) => {
     const row = bucket.get(day)!;

@@ -241,6 +241,8 @@ export interface AppConfig {
   appVersion?: string;
   supabaseProjectUrl?: string;
   storageBucket?: string;
+  capacitySupabaseEgressGbMonthly?: number;
+  capacitySupabaseEgressUsedGbMonthly?: number;
   googleMapsApiKey?: string;
   n8nBaseUrl?: string;
   n8nApiKey?: string;
