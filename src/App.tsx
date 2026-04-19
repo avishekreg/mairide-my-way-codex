@@ -16291,11 +16291,16 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         isSidebarOpen ? "w-72 translate-x-0" : "w-20 -translate-x-full lg:translate-x-0"
       )}>
         <div className="p-6 flex items-center justify-between border-b border-mairide-bg">
-          <div className={cn("flex items-center overflow-hidden transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
-            <img src={LOGO_URL} className="w-8 h-8 object-contain rounded-[22%] mr-2" alt="Logo" />
-            <h1 className="text-lg font-black tracking-tighter text-mairide-primary whitespace-nowrap">
-              {BRAND_NAME}
-            </h1>
+          <div className={cn("flex min-w-0 items-center overflow-hidden transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
+            <img src={LOGO_URL} className="mr-3 h-12 w-12 shrink-0 rounded-[18px] object-contain" alt="MaiRide Logo" />
+            <div className="flex min-w-0 flex-col justify-center leading-none">
+              <span className="block truncate text-[1.45rem] font-black leading-[0.95] tracking-tighter text-mairide-primary">
+                MaiRide
+              </span>
+              <span className="mt-1 block truncate text-[0.78rem] font-black leading-none tracking-[0.14em] text-mairide-primary">
+                my way
+              </span>
+            </div>
           </div>
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -16369,11 +16374,16 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Mobile Header */}
         <header className="lg:hidden bg-white border-b border-mairide-secondary p-4 flex justify-between items-center">
-          <div className="flex items-center">
-            <img src={LOGO_URL} className="w-8 h-8 object-contain rounded-[22%] mr-2" alt="Logo" />
-            <h1 className="text-lg font-black tracking-tighter text-mairide-primary leading-none">
-              {BRAND_NAME}
-            </h1>
+          <div className="flex min-w-0 items-center">
+            <img src={LOGO_URL} className="mr-2.5 h-11 w-11 shrink-0 rounded-[16px] object-contain" alt="MaiRide Logo" />
+            <div className="flex min-w-0 flex-col justify-center leading-none">
+              <span className="block truncate text-[1.28rem] font-black leading-[0.95] tracking-tighter text-mairide-primary">
+                MaiRide
+              </span>
+              <span className="mt-1 block truncate text-[0.68rem] font-black leading-none tracking-[0.12em] text-mairide-primary">
+                my way
+              </span>
+            </div>
           </div>
           <button 
             onClick={() => setIsSidebarOpen(true)}
