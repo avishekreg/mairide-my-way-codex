@@ -3008,8 +3008,6 @@ type BuildStampInfo = {
 };
 
 const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; buildStamp?: BuildStampInfo | null }) => {
-  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installStatus, setInstallStatus] = useState('');
   const [isAndroidDevice, setIsAndroidDevice] = useState(false);
   const [androidUpdateMessage, setAndroidUpdateMessage] = useState('');
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
@@ -3082,42 +3080,6 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
     };
   }, [isAndroidDevice, checkAndroidUpdate]);
 
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPromptEvent(event as BeforeInstallPromptEvent);
-      setInstallStatus('Install available for this device.');
-    };
-
-    const handleAppInstalled = () => {
-      setInstallPromptEvent(null);
-      setInstallStatus('MaiRide installed successfully.');
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
-  }, []);
-
-  const triggerInstall = async () => {
-    if (!installPromptEvent) {
-      setInstallStatus('Use your browser menu to Add to Home Screen on this device.');
-      return;
-    }
-    try {
-      await installPromptEvent.prompt();
-      const result = await installPromptEvent.userChoice;
-      setInstallStatus(result.outcome === 'accepted' ? 'Install request accepted.' : 'Install cancelled.');
-      setInstallPromptEvent(null);
-    } catch {
-      setInstallStatus('Install could not be started on this device.');
-    }
-  };
-
   const trimmedSha = buildStamp?.commitSha ? buildStamp.commitSha.slice(0, 7) : '';
   const buildLabel = trimmedSha ? `Build ${trimmedSha}` : 'Build local';
   const buildTime = buildStamp?.builtAt ? new Date(buildStamp.builtAt).toLocaleString() : '';
@@ -3162,20 +3124,12 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
             >
               Get it on iOS
             </a>
-            <button
-              type="button"
-              onClick={triggerInstall}
-              className="inline-flex items-center rounded-xl border border-mairide-primary/40 text-mairide-primary px-4 py-2 text-xs font-bold tracking-wide hover:bg-mairide-primary hover:text-white transition"
-            >
-              Install Web App
-            </button>
           </div>
           {isAndroidDevice && androidUpdateMessage && isAndroidUpdateAvailable ? (
             <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
               {androidUpdateMessage}
             </p>
           ) : null}
-          {installStatus ? <p className="text-[11px] text-mairide-secondary text-center">{installStatus}</p> : null}
           <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-mairide-secondary">
             <a href="/terms-and-conditions.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Terms &amp; Conditions</a>
             <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Privacy Policy</a>
