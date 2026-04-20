@@ -23,7 +23,7 @@
     <section class="card">
       <h1>Get MaiRide on Android</h1>
       <p>Download the Android installer directly from mairide.in.</p>
-      <a id="apk-download" class="btn btn-secondary" href="https://downloads.mairide.in/mairide-android.apk" target="_blank" rel="noopener noreferrer">
+      <a id="apk-download" class="btn btn-secondary" href="/api/analytics?action=android-download" target="_blank" rel="noopener noreferrer">
         Download APK
       </a>
       <a id="apk-chrome" class="btn btn-primary" style="margin-left:10px" href="#">
@@ -41,11 +41,11 @@
   </main>
   <script>
     (function () {
-      var apkPath = 'https://downloads.mairide.in/mairide-android.apk?t=' + Date.now();
+      var SITE_ORIGIN = window.location.origin || 'https://www.mairide.in';
+      var apkPath = SITE_ORIGIN + '/api/analytics?action=android-download&t=' + Date.now();
       var apkDownload = document.getElementById('apk-download');
       var apkChrome = document.getElementById('apk-chrome');
       var status = document.getElementById('apk-status');
-      var SITE_ORIGIN = window.location.origin || 'https://www.mairide.in';
 
       function applyApkUrl(url) {
         if (!url) return;
@@ -62,17 +62,6 @@
         }
       }
       applyApkUrl(apkPath);
-
-      fetch(SITE_ORIGIN + '/downloads/android-update.json?t=' + Date.now(), { cache: 'no-store' })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (data) {
-          if (!data || !data.apkUrl) return;
-          var rawUrl = String(data.apkUrl).trim();
-          if (!rawUrl) return;
-          var resolved = rawUrl.startsWith('http') ? rawUrl : (SITE_ORIGIN + rawUrl);
-          applyApkUrl(resolved);
-        })
-        .catch(function () { /* keep fallback */ });
 
       var params = new URLSearchParams(window.location.search);
       if (params.get('autostart') === '1') {

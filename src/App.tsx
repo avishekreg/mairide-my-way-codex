@@ -1355,6 +1355,7 @@ const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "MaiRide my way";
 const BRAND_TAGLINE = "";
 const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
+const TRACKED_ANDROID_APK_URL = '/api/analytics?action=android-download';
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v3.0.1-beta';
@@ -1588,6 +1589,8 @@ const withCacheBust = (url: string) => {
   const separator = url.includes('?') ? '&' : '?';
   return `${url}${separator}t=${Date.now()}`;
 };
+
+const getTrackedAndroidApkUrl = () => apiPath(TRACKED_ANDROID_APK_URL);
 
 const downloadAndOpenAndroidApk = async (apkUrl: string) => {
   const fallbackUrl = withCacheBust(apkUrl || LIVE_ANDROID_APK_URL);
@@ -2756,6 +2759,50 @@ const getAccessToken = async () => {
   return token;
 };
 
+const getOptionalAccessToken = async () => {
+  try {
+    const session = (await supabase.auth.getSession()).data.session;
+    return session?.access_token || (await auth.currentUser?.getIdToken?.()) || '';
+  } catch {
+    return '';
+  }
+};
+
+const trackPlatformUsageEvent = async (
+  metricKey: string,
+  data: Record<string, unknown> = {},
+  options: { requireAnalyticsConsent?: boolean; units?: string; value?: number } = {}
+) => {
+  const requireConsent = options.requireAnalyticsConsent !== false;
+  if (requireConsent && !hasStoredCookieConsentCategory('analytics')) return;
+  if (typeof window === 'undefined') return;
+
+  try {
+    const token = await getOptionalAccessToken();
+    await fetch(apiPath('/api/analytics?action=event'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        metricKey,
+        units: options.units || 'event',
+        value: options.value ?? 1,
+        data: {
+          appVersion: APP_VERSION,
+          runtime: isAndroidAppRuntime() ? 'android_app' : 'web',
+          path: window.location.pathname,
+          ...data,
+        },
+      }),
+      keepalive: true,
+    });
+  } catch {
+    // Analytics must never block app usage.
+  }
+};
+
 const getSessionUserId = async () => {
   const session = (await supabase.auth.getSession()).data.session;
   return session?.user?.id || '';
@@ -3315,7 +3362,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
 
   const openAndroidDownload = () => {
     const runDownload = async () => {
-      const latestUrl = androidDownloadUrl || LIVE_ANDROID_APK_URL;
+      const latestUrl = getTrackedAndroidApkUrl();
       if (isAndroidAppRuntime()) {
         try {
           await downloadAndOpenAndroidApk(latestUrl);
@@ -3408,7 +3455,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
             <a
-              href="/downloads/android.html?autostart=1"
+              href={getTrackedAndroidApkUrl()}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition shadow-sm"
@@ -10090,6 +10137,13 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           }
         }
       }
+
+      void trackPlatformUsageEvent('ride_requested', {
+        origin,
+        destination,
+        seatsNeeded,
+        departureDay: newRequest.departureDay,
+      });
 
       setNewRequest({
         origin: '',
@@ -18492,6 +18546,22 @@ const App = () => {
   const [showTravelerCameraSettingsPrompt, setShowTravelerCameraSettingsPrompt] = useState(false);
   const travelerAvatarInputRef = useRef<HTMLInputElement | null>(null);
   const releaseVersion = resolveReleaseVersion(appConfigState.config?.appVersion, remoteAppVersion);
+
+  useEffect(() => {
+    void trackPlatformUsageEvent('app_opened', {
+      releaseVersion,
+      installedAndroidVersion,
+    });
+  }, [installedAndroidVersion, releaseVersion]);
+
+  useEffect(() => {
+    if (!profile) return;
+    void trackPlatformUsageEvent('user_logged_in', {
+      role: profile.role,
+      status: profile.status,
+      releaseVersion,
+    });
+  }, [profile?.uid, profile?.role, profile?.status, releaseVersion]);
 
   useEffect(() => {
     let active = true;
