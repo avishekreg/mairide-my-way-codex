@@ -1363,6 +1363,8 @@ const APP_NAV_TAB_EVENT = 'mairide:navigate-tab';
 const APP_DIALOG_EVENT = 'mairide:dialog';
 const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
 const CONSENT_VERSION = 'consent-v1';
+const COOKIE_CONSENT_STORAGE_KEY = 'mairide_cookie_consent_v1';
+const COOKIE_CONSENT_OPEN_EVENT = 'mairide:cookie-consent-open';
 const isAndroidAppRuntime = () => isAppWebViewRuntime() || isAndroidWebViewLikeRuntime();
 const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -1392,6 +1394,135 @@ const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
   } catch {
     // Ignore storage-remove failures in restricted browsers
   }
+};
+type CookieConsentCategory = 'necessary' | 'preferences' | 'analytics' | 'marketing';
+
+type CookieConsentRecord = {
+  version: string;
+  updatedAt: string;
+  choices: Record<CookieConsentCategory, boolean>;
+};
+
+const COOKIE_CONSENT_DEFAULT_CHOICES: Record<CookieConsentCategory, boolean> = {
+  necessary: true,
+  preferences: false,
+  analytics: false,
+  marketing: false,
+};
+
+const COOKIE_CONSENT_CATEGORY_COPY: Array<{
+  key: CookieConsentCategory;
+  title: string;
+  description: string;
+  locked?: boolean;
+}> = [
+  {
+    key: 'necessary',
+    title: 'Strictly necessary',
+    description: 'Required for login, security, ride requests, payments, and core app stability.',
+    locked: true,
+  },
+  {
+    key: 'preferences',
+    title: 'Preferences',
+    description: 'Remembers app language, UI choices, update prompts, and optional personalization.',
+  },
+  {
+    key: 'analytics',
+    title: 'Analytics',
+    description: 'Helps us understand app usage and improve reliability. Disabled unless you allow it.',
+  },
+  {
+    key: 'marketing',
+    title: 'Marketing',
+    description: 'Allows promotional or campaign measurement cookies. Disabled unless you allow it.',
+  },
+];
+
+const normalizeCookieConsent = (value: unknown): CookieConsentRecord | null => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<CookieConsentRecord>;
+  if (candidate.version !== CONSENT_VERSION || !candidate.choices || typeof candidate.choices !== 'object') return null;
+  return {
+    version: CONSENT_VERSION,
+    updatedAt: String(candidate.updatedAt || new Date().toISOString()),
+    choices: {
+      necessary: true,
+      preferences: candidate.choices.preferences === true,
+      analytics: candidate.choices.analytics === true,
+      marketing: candidate.choices.marketing === true,
+    },
+  };
+};
+
+const getStoredCookieConsent = (): CookieConsentRecord | null => {
+  const raw = safeStorageGet('local', COOKIE_CONSENT_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return normalizeCookieConsent(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+};
+
+const canUseCookieCategory = (
+  consent: CookieConsentRecord | null,
+  category: CookieConsentCategory
+) => category === 'necessary' || consent?.choices[category] === true;
+
+const hasStoredCookieConsentCategory = (category: CookieConsentCategory) =>
+  canUseCookieCategory(getStoredCookieConsent(), category);
+
+const expireCookie = (name: string) => {
+  if (typeof document === 'undefined') return;
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+  const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  document.cookie = `${name}=; path=/; ${expires}`;
+  if (hostname.endsWith('mairide.in')) {
+    document.cookie = `${name}=; path=/; domain=.mairide.in; ${expires}`;
+  }
+};
+
+const clearGoogleTranslateArtifacts = () => {
+  expireCookie('googtrans');
+};
+
+const clearOptionalConsentArtifacts = (consent: CookieConsentRecord) => {
+  if (!consent.choices.preferences) {
+    [
+      UI_LANGUAGE_STORAGE_KEY,
+      UI_LANGUAGE_PROMPT_SEEN_KEY,
+      UI_LANGUAGE_PROMPT_APP_SEEN_KEY,
+      'mairide_android_update_dismissed_version',
+    ].forEach((key) => safeStorageRemove('local', key));
+    clearGoogleTranslateArtifacts();
+  }
+
+  if (!consent.choices.analytics) {
+    ['_ga', '_gid', '_gat', '_gat_gtag', 'ajs_anonymous_id', 'ajs_user_id'].forEach(expireCookie);
+  }
+
+  if (!consent.choices.marketing) {
+    ['_fbp', '_fbc', '_gcl_au'].forEach(expireCookie);
+  }
+};
+
+const persistCookieConsent = (choices: Partial<Record<CookieConsentCategory, boolean>>) => {
+  const consent: CookieConsentRecord = {
+    version: CONSENT_VERSION,
+    updatedAt: new Date().toISOString(),
+    choices: {
+      ...COOKIE_CONSENT_DEFAULT_CHOICES,
+      ...choices,
+      necessary: true,
+    },
+  };
+  safeStorageSet('local', COOKIE_CONSENT_STORAGE_KEY, JSON.stringify(consent));
+  clearOptionalConsentArtifacts(consent);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<CookieConsentRecord>('mairide:cookie-consent-updated', { detail: consent }));
+  }
+  return consent;
 };
 const adminApiPath = (action: string) => `/api/admin-api?action=${encodeURIComponent(action)}`;
 const adminConfigPath = adminApiPath("config");
@@ -1838,6 +1969,10 @@ const getGoogleTranslateCode = (value: string) => getSupportedUiLanguage(value).
 
 const setGoogleTranslateCookie = (language: string) => {
   if (typeof document === 'undefined') return;
+  if (!hasStoredCookieConsentCategory('preferences')) {
+    clearGoogleTranslateArtifacts();
+    return;
+  }
   const target = `/en/${getGoogleTranslateCode(language)}`;
   const maxAge = 60 * 60 * 24 * 365;
   document.cookie = `googtrans=${target}; path=/; max-age=${maxAge}`;
@@ -1860,6 +1995,7 @@ const applyGoogleTranslateLanguage = (language: string) => {
 let googleTranslateScriptPromise: Promise<void> | null = null;
 const ensureGoogleTranslateScriptLoaded = (): Promise<void> => {
   if (typeof window === 'undefined' || typeof document === 'undefined') return Promise.resolve();
+  if (!hasStoredCookieConsentCategory('preferences')) return Promise.resolve();
   if ((window as any).google?.translate?.TranslateElement) return Promise.resolve();
   if (googleTranslateScriptPromise) return googleTranslateScriptPromise;
 
@@ -3298,6 +3434,13 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
             <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Privacy Policy</a>
             <a href="/business-model.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Business Model</a>
             <a href="/tutorials/index.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Tutorials</a>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event(COOKIE_CONSENT_OPEN_EVENT))}
+              className="hover:text-mairide-primary transition"
+            >
+              Cookie Preferences
+            </button>
           </div>
         </div>
         <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
@@ -3309,6 +3452,164 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
       </div>
     </footer>
   );
+};
+
+const CookieConsentManager = ({
+  onChange,
+}: {
+  onChange?: (consent: CookieConsentRecord) => void;
+}) => {
+  const [consent, setConsent] = useState<CookieConsentRecord | null>(() => getStoredCookieConsent());
+  const [isOpen, setIsOpen] = useState(() => !getStoredCookieConsent());
+  const [showCustomize, setShowCustomize] = useState(false);
+  const [draftChoices, setDraftChoices] = useState<Record<CookieConsentCategory, boolean>>(() => ({
+    ...COOKIE_CONSENT_DEFAULT_CHOICES,
+    ...(getStoredCookieConsent()?.choices || {}),
+    necessary: true,
+  }));
+
+  useEffect(() => {
+    const openPreferences = () => {
+      const latest = getStoredCookieConsent();
+      setConsent(latest);
+      setDraftChoices({
+        ...COOKIE_CONSENT_DEFAULT_CHOICES,
+        ...(latest?.choices || {}),
+        necessary: true,
+      });
+      setShowCustomize(true);
+      setIsOpen(true);
+    };
+
+    const handleUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<CookieConsentRecord>;
+      const normalized = normalizeCookieConsent(customEvent.detail);
+      if (normalized) {
+        setConsent(normalized);
+        onChange?.(normalized);
+      }
+    };
+
+    window.addEventListener(COOKIE_CONSENT_OPEN_EVENT, openPreferences);
+    window.addEventListener('mairide:cookie-consent-updated', handleUpdated as EventListener);
+    return () => {
+      window.removeEventListener(COOKIE_CONSENT_OPEN_EVENT, openPreferences);
+      window.removeEventListener('mairide:cookie-consent-updated', handleUpdated as EventListener);
+    };
+  }, [onChange]);
+
+  const saveConsent = (choices: Partial<Record<CookieConsentCategory, boolean>>) => {
+    const next = persistCookieConsent(choices);
+    setConsent(next);
+    setDraftChoices(next.choices);
+    setIsOpen(false);
+    setShowCustomize(false);
+    onChange?.(next);
+  };
+
+  if (!isOpen) return null;
+
+  const panel = (
+    <div className="fixed inset-0 z-[130] flex items-end justify-center bg-mairide-primary/35 px-4 py-4 backdrop-blur-sm sm:items-center">
+      <motion.div
+        initial={{ opacity: 0, y: 24, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 24, scale: 0.98 }}
+        className="w-full max-w-3xl overflow-hidden rounded-[32px] border border-mairide-secondary bg-white shadow-2xl"
+      >
+        <div className="grid gap-5 p-5 sm:p-7">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-mairide-primary text-white">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-accent">Privacy control</p>
+              <h2 className="mt-1 text-2xl font-black tracking-tight text-mairide-primary">
+                Manage cookie preferences
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-mairide-secondary">
+                MaiRide uses necessary cookies and local storage for secure login, ride posting, payments, and app stability.
+                Optional choices control saved preferences, analytics, and marketing measurement across web, mobile web, and Android.
+              </p>
+            </div>
+          </div>
+
+          {showCustomize ? (
+            <div className="grid gap-3">
+              {COOKIE_CONSENT_CATEGORY_COPY.map((category) => (
+                <label
+                  key={category.key}
+                  className={cn(
+                    "flex items-start justify-between gap-4 rounded-2xl border p-4",
+                    category.locked ? "border-mairide-secondary/50 bg-mairide-bg" : "border-mairide-secondary bg-white"
+                  )}
+                >
+                  <span>
+                    <span className="block text-sm font-black text-mairide-primary">{category.title}</span>
+                    <span className="mt-1 block text-xs leading-5 text-mairide-secondary">{category.description}</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={draftChoices[category.key]}
+                    disabled={category.locked}
+                    onChange={(event) =>
+                      setDraftChoices((prev) => ({
+                        ...prev,
+                        [category.key]: event.target.checked,
+                        necessary: true,
+                      }))
+                    }
+                    className="mt-1 h-5 w-5 accent-mairide-accent disabled:opacity-60"
+                  />
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-mairide-bg p-4 text-xs leading-6 text-mairide-secondary">
+              Your choice is stored on this device. You can change it anytime from <span className="font-bold text-mairide-primary">Cookie Preferences</span> in the footer.
+              {consent?.updatedAt ? (
+                <span className="block pt-2 text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+                  Current choice saved {new Date(consent.updatedAt).toLocaleString()}
+                </span>
+              ) : null}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => saveConsent({ preferences: false, analytics: false, marketing: false })}
+              className="rounded-2xl border border-mairide-secondary px-4 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg"
+            >
+              Reject optional
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (showCustomize) {
+                  saveConsent(draftChoices);
+                } else {
+                  setShowCustomize(true);
+                }
+              }}
+              className="rounded-2xl border border-mairide-primary px-4 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg"
+            >
+              {showCustomize ? 'Save choices' : 'Customize'}
+            </button>
+            <button
+              type="button"
+              onClick={() => saveConsent({ preferences: true, analytics: true, marketing: true })}
+              className="rounded-2xl bg-mairide-primary px-4 py-3 text-sm font-bold text-white transition hover:opacity-90"
+            >
+              Accept all
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+
+  return createPortal(panel, document.body);
 };
 
 const AppDialogHost = () => {
@@ -18162,8 +18463,11 @@ const App = () => {
   const [role, setRole] = useState<'consumer' | 'driver'>('consumer');
   const [uiLanguage, setUiLanguage] = useState<string>(() => {
     if (typeof window === 'undefined') return 'en';
-    return safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || 'en';
+    return canUseCookieCategory(getStoredCookieConsent(), 'preferences')
+      ? safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || 'en'
+      : 'en';
   });
+  const [cookieConsent, setCookieConsent] = useState<CookieConsentRecord | null>(() => getStoredCookieConsent());
   const [translatorReady, setTranslatorReady] = useState(false);
   const [showLanguagePrompt, setShowLanguagePrompt] = useState(false);
   const [suggestedLanguage, setSuggestedLanguage] = useState<string>('en');
@@ -18671,20 +18975,40 @@ const App = () => {
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
+    if (!cookieConsent) return;
     const lang = getSupportedUiLanguage(uiLanguage).value;
-    safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, lang);
     document.documentElement.lang = lang;
-    setGoogleTranslateCookie(lang);
-    if (lang !== 'en' && !translatorReady) {
-      void ensureGoogleTranslateScriptLoaded();
+
+    if (!canUseCookieCategory(cookieConsent, 'preferences')) {
+      safeStorageRemove('local', UI_LANGUAGE_STORAGE_KEY);
+      clearGoogleTranslateArtifacts();
+      if (lang !== 'en') {
+        setUiLanguage('en');
+      }
+      return;
     }
-    if (translatorReady && lang !== 'en') {
-      window.setTimeout(() => applyGoogleTranslateLanguage(lang), 80);
+
+    safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, lang);
+    if (lang === 'en') {
+      clearGoogleTranslateArtifacts();
+    } else {
+      setGoogleTranslateCookie(lang);
+      if (!translatorReady) {
+        void ensureGoogleTranslateScriptLoaded();
+      }
+      if (translatorReady) {
+        window.setTimeout(() => applyGoogleTranslateLanguage(lang), 80);
+      }
     }
-  }, [translatorReady, uiLanguage]);
+  }, [cookieConsent, translatorReady, uiLanguage]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || user) return;
+    if (!cookieConsent) return;
+    if (!canUseCookieCategory(cookieConsent, 'preferences')) {
+      setShowLanguagePrompt(false);
+      return;
+    }
     const languageSaved = Boolean(safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY));
     const promptSeen = safeStorageGet('local', UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
     const appPromptSeen = safeStorageGet('local', UI_LANGUAGE_PROMPT_APP_SEEN_KEY) === '1';
@@ -18726,7 +19050,7 @@ const App = () => {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [cookieConsent, user]);
 
   useEffect(() => {
     let active = true;
@@ -18783,6 +19107,18 @@ const App = () => {
 
   const commitUiLanguage = (nextLanguage: string) => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
+    if (!canUseCookieCategory(cookieConsent, 'preferences')) {
+      if (normalized !== 'en') {
+        showAppDialog(
+          'Please enable Preferences in Cookie Preferences to save and apply app language translation.',
+          'warning',
+          'Cookie preferences needed'
+        );
+      }
+      setUiLanguage('en');
+      clearGoogleTranslateArtifacts();
+      return;
+    }
     setUiLanguage(normalized);
     safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, normalized);
     safeStorageSet('local', UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
@@ -18873,9 +19209,11 @@ const App = () => {
     </div>
   ) : null;
 
-  if (loading) return <ErrorBoundary><LoadingScreen /></ErrorBoundary>;
+  const cookieConsentManager = <CookieConsentManager onChange={setCookieConsent} />;
 
-  if (user && !profile) return <ErrorBoundary><LoadingScreen /></ErrorBoundary>;
+  if (loading) return <ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>;
+
+  if (user && !profile) return <ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>;
 
   if (!user) return (
     <ErrorBoundary>
@@ -18901,6 +19239,7 @@ const App = () => {
         <div id="google_translate_element" className="hidden" />
         <AppDialogHost />
         {androidUpdatePrompt}
+        {cookieConsentManager}
         <AnimatePresence>
           {showLanguagePrompt && (
             <motion.div
@@ -18949,13 +19288,13 @@ const App = () => {
 
   if (profile && profile.role === 'driver') {
     if (!profile.onboardingComplete) {
-      return <ErrorBoundary><DriverOnboarding profile={profile} onComplete={() => window.location.reload()} isLoaded={isLoaded} /></ErrorBoundary>;
+      return <ErrorBoundary><DriverOnboarding profile={profile} onComplete={() => window.location.reload()} isLoaded={isLoaded} />{cookieConsentManager}</ErrorBoundary>;
     }
     if (profile.verificationStatus === 'pending') {
-      return <ErrorBoundary><DriverPendingApproval profile={profile} /></ErrorBoundary>;
+      return <ErrorBoundary><DriverPendingApproval profile={profile} />{cookieConsentManager}</ErrorBoundary>;
     }
     if (profile.verificationStatus === 'rejected') {
-      return <ErrorBoundary><DriverRejected profile={profile} /></ErrorBoundary>;
+      return <ErrorBoundary><DriverRejected profile={profile} />{cookieConsentManager}</ErrorBoundary>;
     }
   }
 
@@ -18974,6 +19313,7 @@ const App = () => {
           <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
           <AppDialogHost />
           {androidUpdatePrompt}
+          {cookieConsentManager}
         </div>
       </ErrorBoundary>
     );
@@ -19011,6 +19351,7 @@ const App = () => {
           <Chatbot userRole={profile?.role} userId={profile?.uid} />
           <AppDialogHost />
           {androidUpdatePrompt}
+          {cookieConsentManager}
           {isTravelerProfile && (
             <input
               ref={travelerAvatarInputRef}
