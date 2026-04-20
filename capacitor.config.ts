@@ -4,7 +4,11 @@ const config: CapacitorConfig = {
   appId: "in.mairide.app",
   appName: "MaiRide",
   webDir: "dist",
-  bundledWebRuntime: false,
+  plugins: {
+    PushNotifications: {
+      presentationOptions: ["badge", "sound", "alert"],
+    },
+  },
   server: {
     url: "https://www.mairide.in",
     cleartext: false,
@@ -12,4 +16,3 @@ const config: CapacitorConfig = {
 };
 
 export default config;
-

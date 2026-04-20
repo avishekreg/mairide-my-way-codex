@@ -72,7 +72,11 @@ jobs:
             appId: 'in.mairide.app',
             appName: 'MaiRide',
             webDir: 'dist',
-            bundledWebRuntime: false,
+            plugins: {
+              PushNotifications: {
+                presentationOptions: ['badge', 'sound', 'alert'],
+              },
+            },
             server: {
               url: 'https://www.mairide.in',
               cleartext: false
@@ -87,6 +91,18 @@ jobs:
 
       - name: Sync Android platform
         run: npx cap sync android
+
+      - name: Configure Firebase services for Android push
+        env:
+          ANDROID_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "ANDROID_GOOGLE_SERVICES_JSON_BASE64 is not configured."
+            echo "Build will continue, but live Android FCM token registration requires android/app/google-services.json."
+            exit 0
+          fi
+          echo "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
+          echo "Firebase Android google-services.json configured."
 
       - name: Prepare Android release keystore
         env:

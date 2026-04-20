@@ -769,6 +769,9 @@ async function handleCapacity(req: any, res: any) {
     googleMapsLoadsMonthly: safeNumber(configData.capacityGoogleMapsLoadsMonthly, 10000),
     geminiRequestsDaily: safeNumber(configData.capacityGeminiRequestsDaily, 1500),
     vercelDeploymentsDaily: safeNumber(configData.capacityVercelDeploymentsDaily, 100),
+    androidDownloadsMonthly: safeNumber(configData.capacityAndroidDownloadsMonthly, 10000),
+    activeAppUsersMonthly: safeNumber(configData.capacityActiveAppUsersMonthly, 50000),
+    pushNotificationsDaily: safeNumber(configData.capacityPushNotificationsDaily, 10000),
   };
 
   const capacityNotes: string[] = [];
@@ -785,7 +788,7 @@ async function handleCapacity(req: any, res: any) {
     );
   }
 
-  const [usersResult, ridesResult, bookingsResult, transactionsResult, ticketsResult] = await Promise.all([
+  const [usersResult, ridesResult, bookingsResult, transactionsResult, ticketsResult, usageEventsResult] = await Promise.all([
     auth.supabaseAdmin
       .from("users")
       .select("id, role, status, created_at, updated_at, data")
@@ -806,6 +809,10 @@ async function handleCapacity(req: any, res: any) {
       .from("support_tickets")
       .select("id, status, priority, created_at, updated_at, data")
       .gte("created_at", ninetyDaysAgo),
+    auth.supabaseAdmin
+      .from("platform_usage_events")
+      .select("id, metric_key, value, units, observed_at, data")
+      .gte("observed_at", ninetyDaysAgo),
   ]);
 
   let sessions: any[] = [];
@@ -836,12 +843,14 @@ async function handleCapacity(req: any, res: any) {
   const bookings = bookingsResult.data || [];
   const transactions = transactionsResult.data || [];
   const tickets = ticketsResult.data || [];
+  const usageEvents = usageEventsResult.data || [];
 
   if (usersResult.error) capacityNotes.push(`Users feed issue: ${usersResult.error.message}`);
   if (ridesResult.error) capacityNotes.push(`Rides feed issue: ${ridesResult.error.message}`);
   if (bookingsResult.error) capacityNotes.push(`Bookings feed issue: ${bookingsResult.error.message}`);
   if (transactionsResult.error) capacityNotes.push(`Transactions feed issue: ${transactionsResult.error.message}`);
   if (ticketsResult.error) capacityNotes.push(`Support feed issue: ${ticketsResult.error.message}`);
+  if (usageEventsResult.error) capacityNotes.push(`Usage event feed issue: ${usageEventsResult.error.message}`);
 
   const daySeries = buildLastDays(90);
   const bucket = new Map(
@@ -1013,6 +1022,31 @@ async function handleCapacity(req: any, res: any) {
 
   const mapsLoadsMonthlyEstimate = Math.round((mauLast30 || 0) * 24);
   const bandwidthMonthlyEstimateGb = Number(((monthlySignalsEstimate * 0.0012) / 1024).toFixed(3));
+  const usageEvents30d = usageEvents.filter((row: any) => {
+    const observedAt = normalizeToIso(row?.observed_at);
+    return observedAt ? new Date(observedAt).getTime() >= new Date(thirtyDaysAgo).getTime() : false;
+  });
+  const usageEvents24h = usageEvents.filter((row: any) => {
+    const observedAt = normalizeToIso(row?.observed_at);
+    return observedAt ? new Date(observedAt).getTime() >= new Date(twentyFourHoursAgo).getTime() : false;
+  });
+  const sumUsageMetric = (rows: any[], metricKey: string) =>
+    rows
+      .filter((row: any) => row?.metric_key === metricKey)
+      .reduce((total: number, row: any) => total + safeNumber(row?.value, 1), 0);
+  const androidDownloads30d = sumUsageMetric(usageEvents30d, "android_apk_download_started");
+  const pushTokensRegistered30d = sumUsageMetric(usageEvents30d, "push_token_registered");
+  const pushNotifications24h = sumUsageMetric(usageEvents24h, "push_notification_sent");
+  const nearbyPushNotifications24h = usageEvents24h
+    .filter((row: any) => row?.metric_key === "push_notification_sent")
+    .filter((row: any) => String(row?.data?.notificationType || "").startsWith("nearby_"))
+    .reduce((total: number, row: any) => total + safeNumber(row?.value, 1), 0);
+  const activeAppUsers30d = new Set(
+    usageEvents30d
+      .filter((row: any) => ["app_opened", "user_logged_in"].includes(String(row?.metric_key || "")))
+      .map((row: any) => String(row?.data?.userId || "").trim())
+      .filter(Boolean)
+  ).size;
 
   const metrics = [
     makeMetric({
@@ -1134,6 +1168,51 @@ async function handleCapacity(req: any, res: any) {
       unit: "deploys/day",
       notes: "Set by deployment event logging; currently manual fallback.",
     }),
+    makeMetric({
+      key: "android_downloads_30d",
+      label: "Android APK downloads (30d)",
+      category: "Mobile app",
+      used: androidDownloads30d,
+      capacity: limits.androidDownloadsMonthly,
+      unit: "downloads / 30d",
+      notes: "Tracked when the app download endpoint or update action starts an APK download.",
+    }),
+    makeMetric({
+      key: "active_app_users_30d",
+      label: "Active app users (30d)",
+      category: "Mobile app",
+      used: activeAppUsers30d,
+      capacity: limits.activeAppUsersMonthly,
+      unit: "users / 30d",
+      notes: "Distinct signed-in users from app open and login telemetry.",
+    }),
+    makeMetric({
+      key: "push_tokens_registered_30d",
+      label: "Push devices registered (30d)",
+      category: "Notifications",
+      used: pushTokensRegistered30d,
+      capacity: limits.activeAppUsersMonthly,
+      unit: "devices / 30d",
+      notes: "Android devices that granted push permission and registered an FCM token.",
+    }),
+    makeMetric({
+      key: "push_notifications_24h",
+      label: "Push notifications sent (24h)",
+      category: "Notifications",
+      used: pushNotifications24h,
+      capacity: limits.pushNotificationsDaily,
+      unit: "notifications/day",
+      notes: "Successful FCM sends logged by the notification service.",
+    }),
+    makeMetric({
+      key: "nearby_push_notifications_24h",
+      label: "Nearby push notifications (24h)",
+      category: "Notifications",
+      used: nearbyPushNotifications24h,
+      capacity: limits.pushNotificationsDaily,
+      unit: "notifications/day",
+      notes: "Nearby traveler, driver, ride request, and ride offer proximity notifications.",
+    }),
   ];
 
   const monitoringGapAlerts = hasSupabaseEgressUsage
@@ -1210,6 +1289,11 @@ async function handleCapacity(req: any, res: any) {
         completedBookingsToday: today.completedBookings,
         revenueToday: Number(today.revenue.toFixed(2)),
         gstToday: Number(today.gst.toFixed(2)),
+        androidDownloads30d,
+        activeAppUsers30d,
+        pushTokensRegistered30d,
+        pushNotifications24h,
+        nearbyPushNotifications24h,
       },
     },
   };
@@ -1306,6 +1390,11 @@ async function handleCapacity(req: any, res: any) {
       totalBookingsTracked90d: bookings.length,
       totalTransactionsTracked90d: transactions.length,
       totalTicketsTracked90d: tickets.length,
+      androidDownloads30d,
+      activeAppUsers30d,
+      pushTokensRegistered30d,
+      pushNotifications24h,
+      nearbyPushNotifications24h,
     },
     daily,
     alerts,

@@ -1,6 +1,7 @@
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
 import { getRuntimeSupabaseConfig } from "./supabaseRuntime.js";
+import { notifyNearbyRideOffer, notifyNearbyRideRequest } from "./notifications.js";
 
 export type ReqLike = {
   body?: any;
@@ -1060,6 +1061,10 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       }
     }
 
+    void notifyNearbyRideOffer(getSupabaseAdmin(), rideData, actorId).catch((notificationError) => {
+      console.error("Nearby ride offer notification failed:", notificationError);
+    });
+
     return res.status(201).json({
       message: "Ride created successfully",
       id: rideId,
@@ -1252,6 +1257,10 @@ export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike
       data: requestData,
     });
     if (insertRequestError) throw insertRequestError;
+
+    void notifyNearbyRideRequest(getSupabaseAdmin(), requestData, actorId).catch((notificationError) => {
+      console.error("Nearby ride request notification failed:", notificationError);
+    });
 
     return res.status(201).json({
       message: "Traveler ride request created",

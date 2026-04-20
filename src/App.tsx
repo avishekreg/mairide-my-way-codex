@@ -59,6 +59,7 @@ import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConf
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
+import { PushNotifications, type Token } from '@capacitor/push-notifications';
 import { Camera as CapacitorCamera, CameraResultType } from '@capacitor/camera';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { FileOpener } from '@capawesome-team/capacitor-file-opener';
@@ -2801,6 +2802,80 @@ const trackPlatformUsageEvent = async (
   } catch {
     // Analytics must never block app usage.
   }
+};
+
+const registerAndroidPushDevice = async (profile: UserProfile, releaseVersion: string) => {
+  if (!isAndroidAppRuntime() || profile.role === 'admin') return () => {};
+
+  const permission = await PushNotifications.checkPermissions();
+  const nextPermission = permission.receive === 'prompt'
+    ? await PushNotifications.requestPermissions()
+    : permission;
+
+  if (nextPermission.receive !== 'granted') {
+    console.warn('Android push notifications permission not granted.');
+    return () => {};
+  }
+
+  await PushNotifications.createChannel?.({
+    id: 'mairide_nearby',
+    name: 'Nearby rides',
+    description: 'Nearby travelers, drivers, ride requests, and ride offers.',
+    importance: 4,
+    visibility: 1,
+    sound: 'default',
+    vibration: true,
+  }).catch(() => {
+    // Channel creation is Android-only and should never block token registration.
+  });
+
+  const registrationHandle = await PushNotifications.addListener('registration', async (token: Token) => {
+    const accessToken = await getOptionalAccessToken();
+    if (!accessToken || !token?.value) return;
+
+    await fetch(apiPath('/api/notifications?action=register-device'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        token: token.value,
+        platform: 'android',
+        runtime: 'android_app',
+        appVersion: releaseVersion || APP_VERSION,
+        location: profile.location
+          ? { lat: profile.location.lat, lng: profile.location.lng }
+          : undefined,
+      }),
+    }).catch((error) => {
+      console.warn('Android push device registration failed:', error);
+    });
+  });
+
+  const registrationErrorHandle = await PushNotifications.addListener('registrationError', (error) => {
+    console.warn('Android push registration error:', error);
+  });
+
+  const receivedHandle = await PushNotifications.addListener('pushNotificationReceived', (notification) => {
+    console.info('MaiRide push notification received:', notification?.title || notification);
+  });
+
+  const actionHandle = await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+    const path = String(action?.notification?.data?.path || action?.notification?.data?.url || '').trim();
+    if (path.startsWith('/')) {
+      window.location.assign(path);
+    }
+  });
+
+  await PushNotifications.register();
+
+  return () => {
+    void registrationHandle.remove();
+    void registrationErrorHandle.remove();
+    void receivedHandle.remove();
+    void actionHandle.remove();
+  };
 };
 
 const getSessionUserId = async () => {
@@ -18545,6 +18620,7 @@ const App = () => {
   const [showTravelerCameraCapture, setShowTravelerCameraCapture] = useState(false);
   const [showTravelerCameraSettingsPrompt, setShowTravelerCameraSettingsPrompt] = useState(false);
   const travelerAvatarInputRef = useRef<HTMLInputElement | null>(null);
+  const androidPushRegistrationKeyRef = useRef('');
   const releaseVersion = resolveReleaseVersion(appConfigState.config?.appVersion, remoteAppVersion);
 
   useEffect(() => {
@@ -18562,6 +18638,38 @@ const App = () => {
       releaseVersion,
     });
   }, [profile?.uid, profile?.role, profile?.status, releaseVersion]);
+
+  useEffect(() => {
+    if (!profile || profile.role === 'admin' || !isAndroidAppRuntime()) return;
+    const registrationKey = [
+      profile.uid,
+      profile.role,
+      releaseVersion || APP_VERSION,
+      profile.location?.lat ?? '',
+      profile.location?.lng ?? '',
+    ].join(':');
+    if (androidPushRegistrationKeyRef.current === registrationKey) return;
+    androidPushRegistrationKeyRef.current = registrationKey;
+
+    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+    void registerAndroidPushDevice(profile, releaseVersion)
+      .then((removeListeners) => {
+        if (cancelled) {
+          removeListeners();
+          return;
+        }
+        cleanup = removeListeners;
+      })
+      .catch((error) => {
+        console.warn('Android push setup failed:', error);
+      });
+
+    return () => {
+      cancelled = true;
+      if (cleanup) cleanup();
+    };
+  }, [profile?.uid, profile?.role, profile?.location?.lat, profile?.location?.lng, releaseVersion]);
 
   useEffect(() => {
     let active = true;
