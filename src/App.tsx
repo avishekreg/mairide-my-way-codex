@@ -127,7 +127,9 @@ import {
   Wallet,
   Globe2,
   Download,
-  Upload
+  Upload,
+  Bell,
+  Smartphone
 } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
 
@@ -1222,6 +1224,411 @@ const AdminTransactionsView = ({
   );
 };
 
+const AdminMobileAppView = () => {
+  type MobileEvent = {
+    id: string;
+    metricKey: string;
+    value: number;
+    units: string;
+    observedAt: string;
+    userId?: string | null;
+    role?: string | null;
+    notificationType?: string | null;
+    reason?: string | null;
+    platform?: string | null;
+    city?: string | null;
+    region?: string | null;
+    source?: string | null;
+    distanceKm?: string | null;
+    radiusKm?: string | null;
+  };
+  type MobilePayload = {
+    generatedAt: string;
+    deployment: {
+      metadataStatus?: string;
+      appVersion?: string | null;
+      apkUrl?: string | null;
+      updateUrl?: string | null;
+      buildSha?: string | null;
+      builtAt?: string | null;
+      metadataError?: string | null;
+      productionCommit?: string | null;
+      productionDeployId?: string | null;
+    };
+    installUsage: {
+      apkDownloads30d: number;
+      appUpdateStarts30d: number;
+      appOpens30d: number;
+      loginEvents30d: number;
+      activeAppUsers30d: number;
+    };
+    pushHealth: {
+      fcmConfigured: boolean;
+      registeredDevices30d: number;
+      activePushDevices: number;
+      usersWithPush: number;
+      sent24h: number;
+      failed24h: number;
+      skipped24h: number;
+      successRate24h: number;
+    };
+    proximity: {
+      radiusKm: number;
+      nearbyPush24h: number;
+      nearbyPresence24h: number;
+      nearbyRideRequests24h: number;
+      nearbyRideOffers24h: number;
+    };
+    recentEvents: MobileEvent[];
+    notes?: string[];
+  };
+
+  const [payload, setPayload] = useState<MobilePayload | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [eventSearch, setEventSearch] = useState('');
+  const [eventTypeFilter, setEventTypeFilter] = useState<'all' | 'push' | 'install' | 'usage' | 'proximity'>('all');
+  const [eventsPage, setEventsPage] = useState(1);
+  const [eventsPageSize, setEventsPageSize] = useState<number>(10);
+
+  const loadMobileApp = async (withLoader = false) => {
+    if (withLoader) setIsLoading(true);
+    try {
+      const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
+      const response = await axios.get(adminMobileAppPath, { headers });
+      setPayload(response.data || null);
+    } catch (error) {
+      console.error('Mobile app admin view failed:', error);
+      setPayload(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      if (!active) return;
+      await loadMobileApp(true);
+    })();
+    const timer = window.setInterval(() => {
+      void loadMobileApp(false);
+    }, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const cardTone = (tone: 'dark' | 'orange' | 'green' | 'blue' | 'red' = 'dark') => {
+    if (tone === 'orange') return 'bg-orange-50 text-mairide-accent';
+    if (tone === 'green') return 'bg-green-50 text-green-700';
+    if (tone === 'blue') return 'bg-blue-50 text-blue-700';
+    if (tone === 'red') return 'bg-red-50 text-red-600';
+    return 'bg-mairide-bg text-mairide-primary';
+  };
+
+  const renderMetricCard = (
+    label: string,
+    value: string | number,
+    helper: string,
+    icon: React.ElementType,
+    tone: 'dark' | 'orange' | 'green' | 'blue' | 'red' = 'dark'
+  ) => {
+    const Icon = icon;
+    return (
+      <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-4">
+          <div className={cn("rounded-2xl p-3", cardTone(tone))}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <span className="rounded-full bg-mairide-bg px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-mairide-secondary">
+            Live
+          </span>
+        </div>
+        <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.22em] text-mairide-secondary">{label}</p>
+        <p className="mt-2 text-3xl font-black text-mairide-primary break-words">{value}</p>
+        <p className="mt-2 text-xs leading-relaxed text-mairide-secondary">{helper}</p>
+      </div>
+    );
+  };
+
+  const filteredEvents = useMemo(() => {
+    const events = payload?.recentEvents || [];
+    return events.filter((event) => {
+      const metricKey = String(event.metricKey || '');
+      const notificationType = String(event.notificationType || '');
+      const matchesType =
+        eventTypeFilter === 'all'
+        || (eventTypeFilter === 'push' && metricKey.startsWith('push_'))
+        || (eventTypeFilter === 'install' && metricKey.startsWith('android_'))
+        || (eventTypeFilter === 'usage' && ['app_opened', 'user_logged_in'].includes(metricKey))
+        || (eventTypeFilter === 'proximity' && notificationType.startsWith('nearby_'));
+      const matchesSearch = matchesAdminSearch(eventSearch, [
+        event.id,
+        event.metricKey,
+        event.userId,
+        event.role,
+        event.notificationType,
+        event.reason,
+        event.platform,
+        event.city,
+        event.region,
+        event.source,
+        event.distanceKm,
+        event.radiusKm,
+        event.observedAt,
+      ]);
+      return matchesType && matchesSearch;
+    });
+  }, [payload?.recentEvents, eventSearch, eventTypeFilter]);
+
+  const eventsPageCount = getAdminPageCount(filteredEvents.length, eventsPageSize);
+  const pagedEvents = useMemo(
+    () => getAdminPageItems(filteredEvents, eventsPage, eventsPageSize),
+    [filteredEvents, eventsPage, eventsPageSize]
+  );
+  useEffect(() => {
+    setEventsPage(1);
+  }, [eventSearch, eventTypeFilter, eventsPageSize]);
+  useEffect(() => {
+    if (eventsPage > eventsPageCount) setEventsPage(eventsPageCount);
+  }, [eventsPage, eventsPageCount]);
+
+  if (isLoading) {
+    return (
+      <div className="rounded-[32px] border border-mairide-secondary bg-white p-10 text-center">
+        <p className="text-sm font-bold uppercase tracking-widest text-mairide-secondary">Loading mobile app control room...</p>
+      </div>
+    );
+  }
+
+  const deployment = payload?.deployment;
+  const installUsage = payload?.installUsage;
+  const pushHealth = payload?.pushHealth;
+  const proximity = payload?.proximity;
+  const shortSha = deployment?.buildSha ? deployment.buildSha.slice(0, 8) : 'N/A';
+
+  return (
+    <div className="space-y-8">
+      <div className="rounded-[36px] bg-mairide-primary p-6 md:p-8 text-white shadow-xl shadow-mairide-primary/10">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/60">Android Control Room</p>
+            <h2 className="mt-2 text-3xl font-black tracking-tight">Mobile App Deployment & Push Health</h2>
+            <p className="mt-2 max-w-3xl text-sm text-white/70">
+              Dedicated view for APK metadata, app usage, FCM registration, and nearby proximity notification delivery.
+            </p>
+          </div>
+          <div className="rounded-[28px] bg-white/10 p-5 backdrop-blur-md">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">Latest APK</p>
+            <p className="mt-2 text-2xl font-black">{deployment?.appVersion || 'Version unavailable'}</p>
+            <p className="mt-1 text-xs text-white/70">
+              Build {shortSha} • {deployment?.builtAt ? new Date(deployment.builtAt).toLocaleString() : 'Build time unavailable'}
+            </p>
+            <p className={cn(
+              "mt-3 inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest",
+              deployment?.metadataStatus === 'live' ? 'bg-green-400/20 text-green-100' : 'bg-orange-400/20 text-orange-100'
+            )}>
+              Metadata {deployment?.metadataStatus || 'unknown'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm lg:col-span-2">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">APK / Deployment Status</p>
+              <h3 className="mt-2 text-2xl font-black text-mairide-primary">Current Android release</h3>
+              <p className="mt-1 text-sm text-mairide-secondary">This card reads the live Android update metadata used by the web and app download flow.</p>
+            </div>
+            <a
+              href={deployment?.apkUrl || '#'}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white hover:bg-mairide-primary/90"
+            >
+              Open APK URL
+            </a>
+          </div>
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              ['App version', deployment?.appVersion || 'N/A'],
+              ['Update JSON', deployment?.updateUrl || 'N/A'],
+              ['APK URL', deployment?.apkUrl || 'N/A'],
+              ['Production deploy', deployment?.productionDeployId || 'N/A'],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-2xl bg-mairide-bg p-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{label}</p>
+                <p className="mt-2 break-all text-sm font-bold text-mairide-primary">{value}</p>
+              </div>
+            ))}
+          </div>
+          {deployment?.metadataError ? (
+            <p className="mt-4 rounded-2xl bg-orange-50 p-3 text-xs font-bold text-orange-700">
+              Metadata warning: {deployment.metadataError}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">FCM Runtime</p>
+          <h3 className="mt-2 text-2xl font-black text-mairide-primary">
+            {pushHealth?.fcmConfigured ? 'Ready to send' : 'Credentials missing'}
+          </h3>
+          <p className="mt-2 text-sm text-mairide-secondary">
+            {pushHealth?.fcmConfigured
+              ? 'Firebase service account is present in production, so nearby pushes can be delivered.'
+              : 'Token registration can still work, but delivery will be skipped until Firebase service account JSON is configured.'}
+          </p>
+          <div className={cn(
+            "mt-5 rounded-2xl p-4 text-sm font-bold",
+            pushHealth?.fcmConfigured ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'
+          )}>
+            Success rate last 24h: {pushHealth?.successRate24h ?? 0}%
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Install & Usage</p>
+          <h3 className="mt-1 text-2xl font-black text-mairide-primary">Android install activity</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+          {renderMetricCard('APK downloads', installUsage?.apkDownloads30d ?? 0, 'Started downloads in the last 30 days.', Download, 'orange')}
+          {renderMetricCard('Update starts', installUsage?.appUpdateStarts30d ?? 0, 'App update actions started in the last 30 days.', Upload, 'blue')}
+          {renderMetricCard('Active app users', installUsage?.activeAppUsers30d ?? 0, 'Distinct signed-in app users in the last 30 days.', Users, 'green')}
+          {renderMetricCard('App opens', installUsage?.appOpens30d ?? 0, 'Recorded app open events in the last 30 days.', Smartphone, 'dark')}
+          {renderMetricCard('Login events', installUsage?.loginEvents30d ?? 0, 'Signed-in mobile/web app login telemetry.', UserIcon, 'dark')}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Push Notification Health</p>
+          <h3 className="mt-1 text-2xl font-black text-mairide-primary">Device registration and delivery</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+          {renderMetricCard('Devices registered', pushHealth?.registeredDevices30d ?? 0, 'New FCM token registrations in the last 30 days.', Bell, 'green')}
+          {renderMetricCard('Active push devices', pushHealth?.activePushDevices ?? 0, 'Currently stored active notification devices.', Smartphone, 'blue')}
+          {renderMetricCard('Push sent', pushHealth?.sent24h ?? 0, 'Successful FCM sends in the last 24 hours.', Send, 'green')}
+          {renderMetricCard('Push failed', pushHealth?.failed24h ?? 0, 'Failed FCM sends in the last 24 hours.', AlertTriangle, 'red')}
+          {renderMetricCard('Push skipped', pushHealth?.skipped24h ?? 0, 'Skipped sends, usually no device or missing FCM credentials.', AlertCircle, 'orange')}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Proximity Notification Activity</p>
+          <h3 className="mt-1 text-2xl font-black text-mairide-primary">Nearby traveler and driver matching signals</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+          {renderMetricCard('Current radius', `${proximity?.radiusKm ?? 25} km`, 'Configured nearby notification radius.', MapPin, 'dark')}
+          {renderMetricCard('Nearby pushes', proximity?.nearbyPush24h ?? 0, 'All nearby push notifications sent in 24 hours.', Bell, 'green')}
+          {renderMetricCard('Presence alerts', proximity?.nearbyPresence24h ?? 0, 'Driver/traveler proximity presence alerts.', Navigation, 'blue')}
+          {renderMetricCard('Ride request alerts', proximity?.nearbyRideRequests24h ?? 0, 'Nearby ride request notifications to drivers.', Car, 'orange')}
+          {renderMetricCard('Ride offer alerts', proximity?.nearbyRideOffers24h ?? 0, 'Nearby ride offer notifications to travelers.', PlusCircle, 'orange')}
+        </div>
+      </div>
+
+      <div className="rounded-[36px] border border-mairide-secondary bg-white shadow-sm overflow-hidden">
+        <div className="p-6 md:p-8 border-b border-mairide-secondary space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Recent Notification Events</p>
+              <h3 className="mt-2 text-2xl font-black text-mairide-primary">Mobile telemetry timeline</h3>
+              <p className="mt-1 text-sm text-mairide-secondary">Search by user, event type, city, role, device, reason, or radius.</p>
+            </div>
+            <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">
+              Updated {payload?.generatedAt ? new Date(payload.generatedAt).toLocaleString() : 'N/A'}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-mairide-secondary" />
+              <input
+                type="text"
+                value={eventSearch}
+                onChange={(event) => setEventSearch(event.target.value)}
+                placeholder="Search event, user, city, notification type, reason, platform..."
+                className="w-full rounded-2xl bg-mairide-bg py-3 pl-11 pr-4 text-sm font-bold text-mairide-primary outline-none placeholder:font-medium placeholder:text-mairide-secondary"
+              />
+            </div>
+            <select
+              value={eventTypeFilter}
+              onChange={(event) => setEventTypeFilter(event.target.value as any)}
+              className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
+            >
+              <option value="all">All mobile events</option>
+              <option value="push">Push delivery</option>
+              <option value="proximity">Proximity only</option>
+              <option value="install">Install / update</option>
+              <option value="usage">App usage</option>
+            </select>
+          </div>
+        </div>
+        <div className="divide-y divide-mairide-secondary">
+          {pagedEvents.length ? pagedEvents.map((event) => (
+            <div key={event.id} className="p-5 md:p-6 hover:bg-mairide-bg/50 transition-colors">
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_180px] gap-4 items-start">
+                <div>
+                  <p className="font-bold text-mairide-primary break-words">{event.metricKey.replaceAll('_', ' ')}</p>
+                  <p className="mt-1 text-xs text-mairide-secondary break-all">ID: {event.id}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">User / Role</p>
+                  <p className="mt-1 text-sm font-bold text-mairide-primary break-all">{event.userId || 'N/A'}</p>
+                  <p className="text-xs text-mairide-secondary capitalize">{event.role || 'unknown'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Context</p>
+                  <p className="mt-1 text-sm font-bold text-mairide-primary">{event.notificationType || event.source || event.platform || 'mobile event'}</p>
+                  <p className="text-xs text-mairide-secondary">
+                    {[event.reason, event.city, event.region].filter(Boolean).join(' • ') || 'No additional context'}
+                  </p>
+                  {(event.distanceKm || event.radiusKm) && (
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                      Distance {event.distanceKm || 'N/A'} km / Radius {event.radiusKm || 'N/A'} km
+                    </p>
+                  )}
+                </div>
+                <div className="xl:text-right">
+                  <p className="text-sm font-bold text-mairide-primary">{event.observedAt ? new Date(event.observedAt).toLocaleString() : 'N/A'}</p>
+                  <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{event.value} {event.units}</p>
+                </div>
+              </div>
+            </div>
+          )) : (
+            <div className="p-12 text-center text-mairide-secondary italic">No mobile events match the current search.</div>
+          )}
+        </div>
+        <AdminListPagination
+          page={eventsPage}
+          pageCount={eventsPageCount}
+          pageSize={eventsPageSize}
+          totalCount={payload?.recentEvents?.length || 0}
+          filteredCount={filteredEvents.length}
+          onPageChange={setEventsPage}
+          onPageSizeChange={setEventsPageSize}
+        />
+      </div>
+
+      {!!payload?.notes?.length && (
+        <div className="rounded-[28px] border border-orange-200 bg-orange-50 p-5">
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-orange-700">Setup Notes</p>
+          <div className="mt-3 space-y-1">
+            {payload.notes.map((note) => (
+              <p key={note} className="text-sm text-orange-800">{note}</p>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- Error Handling ---
 
 enum OperationType {
@@ -1533,6 +1940,7 @@ const adminTransactionsPath = adminApiPath("transactions");
 const adminUsersPath = adminApiPath("users");
 const adminVerifyDriverPath = adminApiPath("verify-driver");
 const adminCapacityPath = adminApiPath("capacity");
+const adminMobileAppPath = adminApiPath("mobile-app");
 const resolveReleaseVersion = (configVersion?: unknown, remoteVersion?: unknown) => {
   const configured = String(configVersion || "").trim();
   if (configured) return configured;
@@ -15896,7 +16304,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity'>('revenue');
+  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile'>('revenue');
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
@@ -16748,6 +17156,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             { id: 'rides', label: 'Rides', icon: Car, roles: ['super_admin', 'compliance'] },
             { id: 'revenue', label: 'Revenue', icon: IndianRupee, roles: ['super_admin', 'finance'] },
             { id: 'capacity', label: 'Capacity', icon: TrendingUp, roles: ['super_admin', 'finance', 'support'] },
+            { id: 'mobile', label: 'Mobile App', icon: Smartphone, roles: ['super_admin', 'finance', 'support'] },
             { id: 'analytics', label: 'Analytics', icon: LineChartIcon, roles: ['super_admin', 'finance'] },
             { id: 'transactions', label: 'Transactions', icon: Receipt, roles: ['super_admin', 'finance', 'support'] },
             { id: 'config', label: 'Config', icon: Settings, roles: ['super_admin', 'finance'] },
@@ -17491,6 +17900,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         )}
 
         {activeTab === 'capacity' && <AdminCapacityView />}
+
+        {activeTab === 'mobile' && <AdminMobileAppView />}
 
         {activeTab === 'analytics' && (
           <AdminCashFlowAnalytics bookings={bookings} users={users} />

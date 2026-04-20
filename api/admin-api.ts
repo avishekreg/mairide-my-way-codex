@@ -654,6 +654,28 @@ function makeMetric(input: {
   };
 }
 
+function sumUsageMetric(rows: any[], metricKey: string) {
+  return rows
+    .filter((row: any) => row?.metric_key === metricKey)
+    .reduce((total: number, row: any) => total + safeNumber(row?.value, 1), 0);
+}
+
+function countUsageMetricByNotificationType(rows: any[], notificationType: string) {
+  return rows
+    .filter((row: any) => row?.metric_key === "push_notification_sent")
+    .filter((row: any) => String(row?.data?.notificationType || "") === notificationType)
+    .reduce((total: number, row: any) => total + safeNumber(row?.value, 1), 0);
+}
+
+function countDistinctUsageUsers(rows: any[], metricKeys: string[]) {
+  return new Set(
+    rows
+      .filter((row: any) => metricKeys.includes(String(row?.metric_key || "")))
+      .map((row: any) => String(row?.data?.userId || "").trim())
+      .filter(Boolean)
+  ).size;
+}
+
 function pluckTimestamp(row: any, ...keys: string[]) {
   for (const key of keys) {
     const value = row?.[key];
@@ -1030,10 +1052,6 @@ async function handleCapacity(req: any, res: any) {
     const observedAt = normalizeToIso(row?.observed_at);
     return observedAt ? new Date(observedAt).getTime() >= new Date(twentyFourHoursAgo).getTime() : false;
   });
-  const sumUsageMetric = (rows: any[], metricKey: string) =>
-    rows
-      .filter((row: any) => row?.metric_key === metricKey)
-      .reduce((total: number, row: any) => total + safeNumber(row?.value, 1), 0);
   const androidDownloads30d = sumUsageMetric(usageEvents30d, "android_apk_download_started");
   const pushTokensRegistered30d = sumUsageMetric(usageEvents30d, "push_token_registered");
   const pushNotifications24h = sumUsageMetric(usageEvents24h, "push_notification_sent");
@@ -1041,12 +1059,7 @@ async function handleCapacity(req: any, res: any) {
     .filter((row: any) => row?.metric_key === "push_notification_sent")
     .filter((row: any) => String(row?.data?.notificationType || "").startsWith("nearby_"))
     .reduce((total: number, row: any) => total + safeNumber(row?.value, 1), 0);
-  const activeAppUsers30d = new Set(
-    usageEvents30d
-      .filter((row: any) => ["app_opened", "user_logged_in"].includes(String(row?.metric_key || "")))
-      .map((row: any) => String(row?.data?.userId || "").trim())
-      .filter(Boolean)
-  ).size;
+  const activeAppUsers30d = countDistinctUsageUsers(usageEvents30d, ["app_opened", "user_logged_in"]);
 
   const metrics = [
     makeMetric({
@@ -1412,6 +1425,190 @@ async function handleCapacity(req: any, res: any) {
   });
 }
 
+async function fetchAndroidUpdateMetadata(configData: Record<string, any>) {
+  const updateUrl =
+    String(configData.androidUpdateUrl || "").trim() ||
+    process.env.MAIRIDE_ANDROID_UPDATE_URL ||
+    "https://www.mairide.in/downloads/android-update.json";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+  try {
+    const response = await fetch(updateUrl, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(`Metadata returned ${response.status}`);
+    }
+    return {
+      status: "live",
+      updateUrl,
+      appVersion: body?.appVersion || null,
+      apkUrl: body?.apkUrl || null,
+      buildSha: body?.buildSha || null,
+      builtAt: body?.builtAt || null,
+    };
+  } catch (error: any) {
+    return {
+      status: "unavailable",
+      updateUrl,
+      appVersion: configData.appVersion || null,
+      apkUrl: process.env.MAIRIDE_ANDROID_APK_URL || "https://downloads.mairide.in/mairide-android.apk",
+      buildSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
+      builtAt: null,
+      error: error?.name === "AbortError" ? "Metadata request timed out" : error?.message || "Metadata unavailable",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function handleMobileApp(req: any, res: any) {
+  const auth = await getAuthenticatedAdmin(req, false);
+  if ("error" in auth) {
+    return res.status(auth.error.status).json({ error: auth.error.message });
+  }
+
+  const nowIso = new Date().toISOString();
+  const ninetyDaysAgo = daysBackIso(90);
+  const thirtyDaysAgo = daysBackIso(30);
+  const twentyFourHoursAgo = daysBackIso(1);
+
+  const { data: configRow } = await auth.supabaseAdmin
+    .from("app_config")
+    .select("data")
+    .eq("id", "global")
+    .maybeSingle();
+  const configData = (configRow?.data as Record<string, any>) || {};
+
+  const [usageEventsResult, usersResult] = await Promise.all([
+    auth.supabaseAdmin
+      .from("platform_usage_events")
+      .select("id, metric_key, value, units, observed_at, data")
+      .gte("observed_at", ninetyDaysAgo)
+      .order("observed_at", { ascending: false })
+      .limit(800),
+    auth.supabaseAdmin
+      .from("users")
+      .select("id, email, display_name, role, status, location, updated_at, data")
+      .limit(1200),
+  ]);
+
+  if (usageEventsResult.error) throw usageEventsResult.error;
+  if (usersResult.error) throw usersResult.error;
+
+  const usageEvents = usageEventsResult.data || [];
+  const users = usersResult.data || [];
+  const usageEvents30d = usageEvents.filter((row: any) => {
+    const observedAt = normalizeToIso(row?.observed_at);
+    return observedAt ? new Date(observedAt).getTime() >= new Date(thirtyDaysAgo).getTime() : false;
+  });
+  const usageEvents24h = usageEvents.filter((row: any) => {
+    const observedAt = normalizeToIso(row?.observed_at);
+    return observedAt ? new Date(observedAt).getTime() >= new Date(twentyFourHoursAgo).getTime() : false;
+  });
+
+  const notificationDevices = users.flatMap((row: any) => {
+    const devices = Array.isArray(row?.data?.notificationDevices) ? row.data.notificationDevices : [];
+    return devices.map((device: any) => ({
+      userId: row.id,
+      role: row.role,
+      platform: device?.platform || "android",
+      enabled: device?.enabled !== false,
+      registeredAt: device?.registeredAt || device?.updatedAt || row.updated_at,
+      token: String(device?.token || ""),
+    }));
+  });
+  const activePushDevices = notificationDevices.filter((device: any) => device.enabled && device.token);
+  const usersWithPush = new Set(activePushDevices.map((device: any) => device.userId)).size;
+
+  const sent24h = sumUsageMetric(usageEvents24h, "push_notification_sent");
+  const failed24h = sumUsageMetric(usageEvents24h, "push_notification_failed");
+  const skipped24h = sumUsageMetric(usageEvents24h, "push_notification_skipped");
+  const nearby24h = usageEvents24h
+    .filter((row: any) => row?.metric_key === "push_notification_sent")
+    .filter((row: any) => String(row?.data?.notificationType || "").startsWith("nearby_"))
+    .reduce((total: number, row: any) => total + safeNumber(row?.value, 1), 0);
+
+  const metadata = await fetchAndroidUpdateMetadata(configData);
+  const mobileEventKeys = new Set([
+    "app_opened",
+    "user_logged_in",
+    "android_apk_download_started",
+    "android_app_update_started",
+    "push_token_registered",
+    "push_notification_sent",
+    "push_notification_failed",
+    "push_notification_skipped",
+  ]);
+  const recentEvents = usageEvents
+    .filter((row: any) => mobileEventKeys.has(String(row?.metric_key || "")))
+    .slice(0, 160)
+    .map((row: any) => ({
+      id: row.id,
+      metricKey: row.metric_key,
+      value: safeNumber(row.value, 1),
+      units: row.units || "event",
+      observedAt: row.observed_at,
+      userId: row.data?.userId || null,
+      role: row.data?.role || null,
+      notificationType: row.data?.notificationType || null,
+      reason: row.data?.reason || null,
+      platform: row.data?.platform || null,
+      city: row.data?.city || null,
+      region: row.data?.region || null,
+      source: row.data?.source || null,
+      distanceKm: row.data?.distanceKm || null,
+      radiusKm: row.data?.radiusKm || null,
+    }));
+
+  return res.status(200).json({
+    generatedAt: nowIso,
+    deployment: {
+      metadataStatus: metadata.status,
+      appVersion: metadata.appVersion,
+      apkUrl: metadata.apkUrl,
+      updateUrl: metadata.updateUrl,
+      buildSha: metadata.buildSha,
+      builtAt: metadata.builtAt,
+      metadataError: "error" in metadata ? metadata.error : null,
+      productionCommit: process.env.VERCEL_GIT_COMMIT_SHA || null,
+      productionDeployId: process.env.VERCEL_DEPLOYMENT_ID || process.env.VERCEL_URL || null,
+    },
+    installUsage: {
+      apkDownloads30d: sumUsageMetric(usageEvents30d, "android_apk_download_started"),
+      appUpdateStarts30d: sumUsageMetric(usageEvents30d, "android_app_update_started"),
+      appOpens30d: sumUsageMetric(usageEvents30d, "app_opened"),
+      loginEvents30d: sumUsageMetric(usageEvents30d, "user_logged_in"),
+      activeAppUsers30d: countDistinctUsageUsers(usageEvents30d, ["app_opened", "user_logged_in"]),
+    },
+    pushHealth: {
+      fcmConfigured: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FCM_SERVICE_ACCOUNT_JSON),
+      registeredDevices30d: sumUsageMetric(usageEvents30d, "push_token_registered"),
+      activePushDevices: activePushDevices.length,
+      usersWithPush,
+      sent24h,
+      failed24h,
+      skipped24h,
+      successRate24h: Number(((sent24h / Math.max(sent24h + failed24h + skipped24h, 1)) * 100).toFixed(1)),
+    },
+    proximity: {
+      radiusKm:
+        safeNumber(configData.nearbyNotificationRadiusKm ?? configData.pushNotificationRadiusKm ?? configData.notificationRadiusKm, 25),
+      nearbyPush24h: nearby24h,
+      nearbyPresence24h: countUsageMetricByNotificationType(usageEvents24h, "nearby_presence"),
+      nearbyRideRequests24h: countUsageMetricByNotificationType(usageEvents24h, "nearby_ride_request"),
+      nearbyRideOffers24h: countUsageMetricByNotificationType(usageEvents24h, "nearby_ride_offer"),
+    },
+    recentEvents,
+    notes: [
+      "This tab reads platform_usage_events and Android update metadata.",
+      "Push delivery requires FIREBASE_SERVICE_ACCOUNT_JSON or FCM_SERVICE_ACCOUNT_JSON in production.",
+    ],
+  });
+}
+
 export default async function handler(req: any, res: any) {
   let action = "";
   try {
@@ -1451,6 +1648,9 @@ export default async function handler(req: any, res: any) {
       case "capacity":
         if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
         return handleCapacity(req, res);
+      case "mobile-app":
+        if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+        return handleMobileApp(req, res);
       default:
         return res.status(404).json({ error: "Admin action not found" });
     }
