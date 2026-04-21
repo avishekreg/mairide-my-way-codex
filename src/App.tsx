@@ -1539,7 +1539,7 @@ const AdminMobileAppView = () => {
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Recent Notification Events</p>
               <h3 className="mt-2 text-2xl font-black text-mairide-primary">Mobile telemetry timeline</h3>
-              <p className="mt-1 text-sm text-mairide-secondary">Search by user, event type, city, role, device, reason, or radius.</p>
+              <p className="mt-1 text-sm text-mairide-secondary">Search by user, event type, role, device, reason, network context, or proximity radius.</p>
             </div>
             <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">
               Updated {payload?.generatedAt ? new Date(payload.generatedAt).toLocaleString() : 'N/A'}
@@ -1552,7 +1552,7 @@ const AdminMobileAppView = () => {
                 type="text"
                 value={eventSearch}
                 onChange={(event) => setEventSearch(event.target.value)}
-                placeholder="Search event, user, city, notification type, reason, platform..."
+                placeholder="Search event, user, notification type, reason, platform, network context..."
                 className="w-full rounded-2xl bg-mairide-bg py-3 pl-11 pr-4 text-sm font-bold text-mairide-primary outline-none placeholder:font-medium placeholder:text-mairide-secondary"
               />
             </div>
@@ -1570,37 +1570,44 @@ const AdminMobileAppView = () => {
           </div>
         </div>
         <div className="divide-y divide-mairide-secondary">
-          {pagedEvents.length ? pagedEvents.map((event) => (
-            <div key={event.id} className="p-5 md:p-6 hover:bg-mairide-bg/50 transition-colors">
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_180px] gap-4 items-start">
-                <div>
-                  <p className="font-bold text-mairide-primary break-words">{event.metricKey.replaceAll('_', ' ')}</p>
-                  <p className="mt-1 text-xs text-mairide-secondary break-all">ID: {event.id}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">User / Role</p>
-                  <p className="mt-1 text-sm font-bold text-mairide-primary break-all">{event.userId || 'N/A'}</p>
-                  <p className="text-xs text-mairide-secondary capitalize">{event.role || 'unknown'}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Context</p>
-                  <p className="mt-1 text-sm font-bold text-mairide-primary">{event.notificationType || event.source || event.platform || 'mobile event'}</p>
-                  <p className="text-xs text-mairide-secondary">
-                    {[event.reason, event.city, event.region].filter(Boolean).join(' • ') || 'No additional context'}
-                  </p>
-                  {(event.distanceKm || event.radiusKm) && (
-                    <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
-                      Distance {event.distanceKm || 'N/A'} km / Radius {event.radiusKm || 'N/A'} km
+          {pagedEvents.length ? pagedEvents.map((event) => {
+            const isNearbyPush = String(event.notificationType || '').startsWith('nearby_');
+            const networkContext = [event.city, event.region].filter(Boolean).join(' • ');
+            const eventContext = [event.reason, event.source, event.platform].filter(Boolean).join(' • ');
+            return (
+              <div key={event.id} className="p-5 md:p-6 hover:bg-mairide-bg/50 transition-colors">
+                <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_180px] gap-4 items-start">
+                  <div>
+                    <p className="font-bold text-mairide-primary break-words">{event.metricKey.replaceAll('_', ' ')}</p>
+                    <p className="mt-1 text-xs text-mairide-secondary break-all">ID: {event.id}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">User / Role</p>
+                    <p className="mt-1 text-sm font-bold text-mairide-primary break-all">{event.userId || 'N/A'}</p>
+                    <p className="text-xs text-mairide-secondary capitalize">{event.role || 'unknown'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Network Context</p>
+                    <p className="mt-1 text-sm font-bold text-mairide-primary">{event.notificationType || event.source || event.platform || 'mobile event'}</p>
+                    <p className="text-xs text-mairide-secondary">
+                      {isNearbyPush
+                        ? (eventContext || 'Nearby push event')
+                        : (networkContext ? `Approx. request network: ${networkContext}` : eventContext || 'No network context')}
                     </p>
-                  )}
-                </div>
-                <div className="xl:text-right">
-                  <p className="text-sm font-bold text-mairide-primary">{event.observedAt ? new Date(event.observedAt).toLocaleString() : 'N/A'}</p>
-                  <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{event.value} {event.units}</p>
+                    {isNearbyPush && (event.distanceKm || event.radiusKm) && (
+                      <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                        Distance {event.distanceKm || 'N/A'} km / Radius {event.radiusKm || 'N/A'} km
+                      </p>
+                    )}
+                  </div>
+                  <div className="xl:text-right">
+                    <p className="text-sm font-bold text-mairide-primary">{event.observedAt ? new Date(event.observedAt).toLocaleString() : 'N/A'}</p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{event.value} {event.units}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          )) : (
+            );
+          }) : (
             <div className="p-12 text-center text-mairide-secondary italic">No mobile events match the current search.</div>
           )}
         </div>
