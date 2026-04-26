@@ -221,25 +221,90 @@ function buildStaticMaiRideReply(rawMessage: string, language?: string) {
   const message = String(rawMessage || "").trim().toLowerCase();
   const hindi = normalizedLanguage.startsWith("hi");
   const bengali = normalizedLanguage.startsWith("bn");
+  const rideSearchIntent =
+    /(search|find|look\s*for|book|get)\s+(a\s+)?ride/.test(message) ||
+    /ride\s+for\s+me/.test(message) ||
+    /can you search/.test(message) ||
+    (message.includes("from") && message.includes("to"));
+  const offerRideIntent =
+    /(offer|post|publish|list)\s+(a\s+)?ride/.test(message) ||
+    /become\s+a\s+driver/.test(message) ||
+    /go\s+online/.test(message);
+  const negotiationIntent =
+    /counter\s*offer|negotiat|bargain|change\s+fare|lower\s+fare|raise\s+fare/.test(message);
+  const paymentIntent =
+    /payment|pay|razorpay|platform fee|gst|maicoin|wallet/.test(message);
+  const cancellationIntent =
+    /cancel|refund|reschedul|change\s+booking|modify\s+booking/.test(message);
 
   if (!message) {
     if (hindi) {
-      return "नमस्ते, मैं Mai Ira हूँ। मैं MaiRide rides, pricing, booking flow, support, service regions और booking status में आपकी मदद कर सकती हूँ।";
+      return "नमस्ते, मैं Mai Ira हूँ। मैं MaiRide पर ride search, booking, fare negotiation, payment, support और booking status में आपकी मदद कर सकती हूँ।";
     }
     if (bengali) {
-      return "নমস্কার, আমি Mai Ira। আমি MaiRide ride, fare, booking flow, support, service region এবং booking status নিয়ে সাহায্য করতে পারি।";
+      return "নমস্কার, আমি Mai Ira। আমি MaiRide-এ ride search, booking, fare negotiation, payment, support আর booking status নিয়ে সাহায্য করতে পারি।";
     }
-    return "Hi, I’m Mai Ira. I can help with MaiRide rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions.";
+    return "Hi, I’m Mai Ira. I can help with ride search, bookings, fares, negotiation, payment, support, and booking status on MaiRide.";
   }
 
   if (/(^|\b)(hi|hello|hey|namaste|hola)(\b|$)/.test(message)) {
     if (hindi) {
-      return "नमस्ते, मैं Mai Ira हूँ। मैं ride booking, pricing, negotiation flow, payment steps, support और booking status में आपकी मदद कर सकती हूँ।";
+      return "नमस्ते, मैं Mai Ira हूँ। आप ride search, booking, pricing, negotiation, payment या support में जो भी मदद चाहें, मैं साथ हूँ।";
     }
     if (bengali) {
-      return "নমস্কার, আমি Mai Ira। আমি ride booking, pricing, negotiation flow, payment steps, support আর booking status নিয়ে সাহায্য করতে পারি।";
+      return "নমস্কার, আমি Mai Ira। আপনি ride search, booking, pricing, negotiation, payment বা support নিয়ে যেকোনো সাহায্য চাইলে আমি আছি।";
     }
-    return "Hi, I’m Mai Ira. I can help with ride booking, pricing, negotiation flow, payment steps, support, and booking status.";
+    return "Hi, I’m Mai Ira. I can help you search rides, compare fares, negotiate, complete payments, and track bookings on MaiRide.";
+  }
+
+  if (rideSearchIntent) {
+    if (hindi) {
+      return "हाँ, मैं ride search में मदद कर सकती हूँ। कृपया अपना origin, destination, journey day और seats बताइए। अगर आप traveler dashboard पर हैं, तो Request a Ride खोलकर वही details भरें और मैं next step समझा दूँगी।";
+    }
+    if (bengali) {
+      return "হ্যাঁ, আমি ride search-এ সাহায্য করতে পারি। আপনার origin, destination, journey day আর seats জানালে আমি next step বলব। আপনি যদি traveler dashboard-এ থাকেন, তাহলে Request a Ride খুলে ওই details দিন।";
+    }
+    return "Yes, I can help with that. Tell me your origin, destination, journey day, and seats needed. If you are already on the traveler dashboard, open Request a Ride and enter those details, and I’ll guide you with the next step.";
+  }
+
+  if (offerRideIntent) {
+    if (hindi) {
+      return "अगर आप ride offer करना चाहते हैं, तो driver dashboard में Go Online या Offer a Ride flow से route, seats, fare और departure time भरें। Offer live होते ही nearby matching travelers उसे देख पाएंगे।";
+    }
+    if (bengali) {
+      return "আপনি যদি ride offer করতে চান, driver dashboard থেকে Go Online বা Offer a Ride flow ব্যবহার করে route, seats, fare আর departure time দিন। Offer live হলে nearby matching traveler-রা সেটা দেখতে পাবে।";
+    }
+    return "If you want to offer a ride, use Go Online or Offer a Ride from the driver dashboard and enter your route, seats, fare, and departure time. Once the offer goes live, nearby matching travelers can see it.";
+  }
+
+  if (negotiationIntent) {
+    if (hindi) {
+      return "MaiRide में traveler और driver दोनों counter offer भेज सकते हैं। Negotiation तभी तक खुला रहता है जब तक एक side accept, reject या cancel न कर दे। Accept होते ही payment flow शुरू हो जाता है।";
+    }
+    if (bengali) {
+      return "MaiRide-এ traveler আর driver দুজনেই counter offer পাঠাতে পারে। Negotiation খোলা থাকে যতক্ষণ না এক পক্ষ accept, reject বা cancel করে। Accept হলেই payment flow শুরু হয়।";
+    }
+    return "On MaiRide, both traveler and driver can send counter offers. Negotiation stays open until one side accepts, rejects, or cancels. Once accepted, the payment flow starts automatically.";
+  }
+
+  if (paymentIntent) {
+    if (hindi) {
+      return "Payment step में listed ride fare, platform fee और GST अलग दिखते हैं। कुछ flows में MaiCoins या wallet balance भी apply हो सकता है। Successful payment के बाद booking आगे बढ़ती है और contact details unlock हो जाते हैं।";
+    }
+    if (bengali) {
+      return "Payment step-এ listed fare, platform fee আর GST আলাদা করে দেখা যায়। কিছু flow-এ MaiCoins বা wallet balance-ও apply হতে পারে। Successful payment-এর পরে booking এগোয় আর contact details unlock হয়।";
+    }
+    return "In the payment step, the listed fare, platform fee, and GST are shown separately. In some flows, MaiCoins or wallet balance can also apply. After successful payment, the booking moves forward and contact details unlock.";
+  }
+
+  if (cancellationIntent) {
+    if (hindi) {
+      return "अगर booking cancel या modify करनी है, पहले उसकी current status check करें। Pending stage में changes आसान होते हैं, लेकिन confirmed या paid ride के लिए Support team की मदद लग सकती है।";
+    }
+    if (bengali) {
+      return "Booking cancel বা modify করতে হলে আগে current status check করুন। Pending stage-এ change সহজ হয়, কিন্তু confirmed বা paid ride-এর জন্য Support team-এর সাহায্য লাগতে পারে।";
+    }
+    return "If you need to cancel or modify a booking, first check its current status. Changes are easier in the pending stage, but confirmed or paid rides may need help from the Support team.";
   }
 
   if (message.includes("price") || message.includes("fare") || message.includes("cost")) {
@@ -291,12 +356,12 @@ function buildStaticMaiRideReply(rawMessage: string, language?: string) {
   }
 
   if (hindi) {
-    return "मैं MaiRide rides, pricing, booking flow, booking status, support tickets, service regions और admin actions में मदद कर सकती हूँ। MaiRide से जुड़ा सवाल पूछिए, मैं मदद करूँगी।";
+    return "मैं MaiRide पर ride search, booking, fare, negotiation, payment और support में मदद कर सकती हूँ। चाहें तो आप origin-destination या booking issue सीधे लिख दीजिए।";
   }
   if (bengali) {
-    return "আমি MaiRide rides, pricing, booking flow, booking status, support tickets, service regions আর admin actions নিয়ে সাহায্য করতে পারি। MaiRide-সংক্রান্ত প্রশ্ন করুন, আমি সাহায্য করব।";
+    return "আমি MaiRide-এ ride search, booking, fare, negotiation, payment আর support নিয়ে সাহায্য করতে পারি। চাইলে আপনি origin-destination বা booking issue সরাসরি লিখে দিন।";
   }
-  return "I can help with MaiRide rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions. Please ask a MaiRide-specific question and I’ll help.";
+  return "I can help with ride search, bookings, fares, negotiation, payments, and support on MaiRide. If you want, send me your route or booking issue directly and I’ll guide you.";
 }
 
 async function parseRequestBody(req: any) {
