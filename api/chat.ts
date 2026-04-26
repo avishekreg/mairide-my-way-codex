@@ -114,7 +114,7 @@ async function getUserContext(userId?: string) {
   }
 }
 
-function buildGeminiSystemInstruction(config: Record<string, any>, language: string, userContext: { displayName: string; role: string }) {
+function buildSystemInstruction(config: Record<string, any>, language: string, userContext: { displayName: string; role: string }) {
   const customPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
   const languageInstruction = getLanguageInstruction(language);
   const humanStyleInstruction = getHumanStyleInstruction();
@@ -135,6 +135,47 @@ function buildGeminiSystemInstruction(config: Record<string, any>, language: str
     "Inject and follow this persona JSON strictly:",
     JSON.stringify(IRA_PERSONALITY_JSON),
   ].join("\n\n");
+}
+
+function getProviderModel(config: Record<string, any>, provider: "gemini" | "openai" | "claude") {
+  const configuredModel = String(config.llmModel || "").trim();
+
+  if (provider === "gemini") {
+    if (configuredModel.toLowerCase().startsWith("gemini")) return configuredModel;
+    return "gemini-1.5-pro";
+  }
+
+  if (provider === "openai") {
+    if (configuredModel.toLowerCase().startsWith("gpt")) return configuredModel;
+    return "gpt-4o-mini";
+  }
+
+  if (configuredModel.toLowerCase().startsWith("claude")) return configuredModel;
+  return "claude-3-5-haiku-latest";
+}
+
+function hasProviderCredentials(config: Record<string, any>, provider: "gemini" | "openai" | "claude") {
+  switch (provider) {
+    case "gemini":
+      return Boolean(String(config.geminiApiKey || process.env.GEMINI_API_KEY || "").trim());
+    case "openai":
+      return Boolean(String(config.openaiApiKey || process.env.OPENAI_API_KEY || "").trim());
+    case "claude":
+      return Boolean(String(config.claudeApiKey || process.env.CLAUDE_API_KEY || "").trim());
+    default:
+      return false;
+  }
+}
+
+function getProviderAttemptOrder(config: Record<string, any>) {
+  const selectedProvider = String(config.llmProvider || "gemini").trim().toLowerCase() as "gemini" | "openai" | "claude";
+  const providers: Array<"gemini" | "openai" | "claude"> = ["gemini", "openai", "claude"];
+  const orderedProviders = [selectedProvider, ...providers.filter((provider) => provider !== selectedProvider)];
+
+  return orderedProviders.filter((provider, index, source) => {
+    if (source.indexOf(provider) !== index) return false;
+    return hasProviderCredentials(config, provider);
+  });
 }
 
 function getLanguageInstruction(language?: string) {
@@ -175,30 +216,69 @@ function normalizeMessages(messages: any[] = []) {
     .slice(-8);
 }
 
-function buildStaticMaiRideReply(rawMessage: string) {
+function buildStaticMaiRideReply(rawMessage: string, language?: string) {
+  const normalizedLanguage = String(language || "en-IN").trim().toLowerCase();
   const message = String(rawMessage || "").trim().toLowerCase();
+  const hindi = normalizedLanguage.startsWith("hi");
+  const bengali = normalizedLanguage.startsWith("bn");
 
   if (!message) {
+    if (hindi) {
+      return "नमस्ते, मैं Mai Ira हूँ। मैं MaiRide rides, pricing, booking flow, support, service regions और booking status में आपकी मदद कर सकती हूँ।";
+    }
+    if (bengali) {
+      return "নমস্কার, আমি Mai Ira। আমি MaiRide ride, fare, booking flow, support, service region এবং booking status নিয়ে সাহায্য করতে পারি।";
+    }
     return "Hi, I’m Mai Ira. I can help with MaiRide rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions.";
   }
 
   if (/(^|\b)(hi|hello|hey|namaste|hola)(\b|$)/.test(message)) {
+    if (hindi) {
+      return "नमस्ते, मैं Mai Ira हूँ। मैं ride booking, pricing, negotiation flow, payment steps, support और booking status में आपकी मदद कर सकती हूँ।";
+    }
+    if (bengali) {
+      return "নমস্কার, আমি Mai Ira। আমি ride booking, pricing, negotiation flow, payment steps, support আর booking status নিয়ে সাহায্য করতে পারি।";
+    }
     return "Hi, I’m Mai Ira. I can help with ride booking, pricing, negotiation flow, payment steps, support, and booking status.";
   }
 
   if (message.includes("price") || message.includes("fare") || message.includes("cost")) {
+    if (hindi) {
+      return "MaiRide ride card पर listed fare दिखता है। Confirmation से पहले platform fee और GST अलग दिखते हैं। Negotiation तब तक चलता है जब तक एक side accept या reject न कर दे।";
+    }
+    if (bengali) {
+      return "MaiRide ride card-এ listed fare দেখা যায়। Confirmation-এর আগে platform fee আর GST আলাদা দেখানো হয়। Negotiation চলতে থাকে যতক্ষণ না এক পক্ষ accept বা reject করে।";
+    }
     return "MaiRide shows the listed ride fare on each offer card. Platform fee and GST are shown separately before confirmation. During negotiation, both parties can counter until one side accepts or rejects.";
   }
 
   if (message.includes("book") || message.includes("booking flow") || message.includes("how do i book")) {
+    if (hindi) {
+      return "Ride book करने के लिए search करें, route और departure time check करें, फिर request या counter offer भेजें। किसी एक side के accept करते ही दोनों users platform fee complete करते हैं और contact details unlock हो जाती हैं।";
+    }
+    if (bengali) {
+      return "Ride book করতে search করুন, route আর departure time check করুন, তারপর request বা counter offer পাঠান। এক পক্ষ accept করলে দুই user platform fee complete করে এবং contact details unlock হয়ে যায়।";
+    }
     return "To book a ride, search available rides, open the ride card, review route and departure timing, then send a booking request or counter offer. Once one side accepts, both parties complete platform-fee payment and contact details unlock automatically.";
   }
 
   if (message.includes("status") || message.includes("booking status")) {
+    if (hindi) {
+      return "Booking status आप अपनी active booking या ride card से देख सकते हैं। Common states हैं: pending, counter offer, confirmed, paid, started और completed।";
+    }
+    if (bengali) {
+      return "Booking status আপনি active booking বা ride card থেকে দেখতে পারবেন। Common states হলো: pending, counter offer, confirmed, paid, started আর completed।";
+    }
     return "You can check booking status from your active booking or ride card. Common states are pending, counter offer, confirmed, paid, started, and completed.";
   }
 
   if (message.includes("support") || message.includes("ticket")) {
+    if (hindi) {
+      return "Support के लिए app के Support section का उपयोग करें ताकि MaiRide team issue ठीक से track कर सके। Confirmation के बाद cancellation के लिए support या admin action की जरूरत होती है।";
+    }
+    if (bengali) {
+      return "Support-এর জন্য app-এর Support section ব্যবহার করুন যাতে MaiRide team ঠিকভাবে issue track করতে পারে। Confirmation-এর পরে cancellation-এর জন্য support বা admin action দরকার হয়।";
+    }
     return "For support, please use the Support section in the app so the MaiRide team can track your issue properly. If a ride needs a forced cancellation after confirmation, customer support or admin action is required.";
   }
 
@@ -210,6 +290,12 @@ function buildStaticMaiRideReply(rawMessage: string) {
     return "I can help with admin workflows only for verified admin accounts inside the Admin panel. If you’re not an admin, I can still help with rides, bookings, payments, and support.";
   }
 
+  if (hindi) {
+    return "मैं MaiRide rides, pricing, booking flow, booking status, support tickets, service regions और admin actions में मदद कर सकती हूँ। MaiRide से जुड़ा सवाल पूछिए, मैं मदद करूँगी।";
+  }
+  if (bengali) {
+    return "আমি MaiRide rides, pricing, booking flow, booking status, support tickets, service regions আর admin actions নিয়ে সাহায্য করতে পারি। MaiRide-সংক্রান্ত প্রশ্ন করুন, আমি সাহায্য করব।";
+  }
   return "I can help with MaiRide rides, pricing, booking flow, booking status, support tickets, service regions, and admin actions. Please ask a MaiRide-specific question and I’ll help.";
 }
 
@@ -245,11 +331,11 @@ async function callGemini(
   const apiKey = String(config.geminiApiKey || FALLBACK_GEMINI_API_KEY || "").trim();
   if (!apiKey) throw new Error("Gemini API key is not configured.");
 
-  const model = "gemini-1.5-pro";
+  const model = getProviderModel(config, "gemini");
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || apiKey });
-  const systemInstruction = buildGeminiSystemInstruction(config, String(language || "en-IN"), userContext);
+  const systemInstruction = buildSystemInstruction(config, String(language || "en-IN"), userContext);
   const contents = messages.slice(-10).map((message) => ({
     role: message.role === "assistant" ? "model" : "user",
     parts: [{ text: String(message.content || "") }],
@@ -273,14 +359,17 @@ async function callGemini(
   return text;
 }
 
-async function callOpenAI(config: Record<string, any>, messages: any[], language?: string) {
+async function callOpenAI(
+  config: Record<string, any>,
+  messages: any[],
+  language?: string,
+  userContext: { displayName: string; role: string } = { displayName: "", role: "consumer" }
+) {
   const apiKey = String(config.openaiApiKey || "").trim();
   if (!apiKey) throw new Error("OpenAI API key is not configured.");
 
-  const model = String(config.llmModel || "gpt-4o-mini").trim();
-  const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
-  const languageInstruction = getLanguageInstruction(language);
-  const humanStyleInstruction = getHumanStyleInstruction();
+  const model = getProviderModel(config, "openai");
+  const systemPrompt = buildSystemInstruction(config, String(language || "en-IN"), userContext);
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
 
@@ -297,7 +386,7 @@ async function callOpenAI(config: Record<string, any>, messages: any[], language
     headers,
     body: JSON.stringify({
       model,
-      instructions: `${systemPrompt}\n\n${languageInstruction}\n\n${humanStyleInstruction}`,
+      instructions: systemPrompt,
       input: messages.map((message) => ({
         role: message.role,
         content: [{ type: "input_text", text: message.content }],
@@ -321,14 +410,17 @@ async function callOpenAI(config: Record<string, any>, messages: any[], language
   return text;
 }
 
-async function callClaude(config: Record<string, any>, messages: any[], language?: string) {
+async function callClaude(
+  config: Record<string, any>,
+  messages: any[],
+  language?: string,
+  userContext: { displayName: string; role: string } = { displayName: "", role: "consumer" }
+) {
   const apiKey = String(config.claudeApiKey || "").trim();
   if (!apiKey) throw new Error("Claude API key is not configured.");
 
-  const model = String(config.llmModel || "claude-3-5-haiku-latest").trim();
-  const systemPrompt = String(config.chatbotSystemPrompt || DEFAULT_PROMPT).trim();
-  const languageInstruction = getLanguageInstruction(language);
-  const humanStyleInstruction = getHumanStyleInstruction();
+  const model = getProviderModel(config, "claude");
+  const systemPrompt = buildSystemInstruction(config, String(language || "en-IN"), userContext);
   const temperature = Number(config.chatbotTemperature ?? 0.3);
   const maxTokens = Number(config.chatbotMaxTokens ?? 400);
 
@@ -336,12 +428,12 @@ async function callClaude(config: Record<string, any>, messages: any[], language
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiKey,
+      "x-api-key": process.env.CLAUDE_API_KEY || apiKey,
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
       model,
-      system: `${systemPrompt}\n\n${languageInstruction}\n\n${humanStyleInstruction}`,
+      system: systemPrompt,
       max_tokens: maxTokens,
       temperature,
       messages: messages.map((message) => ({
@@ -380,18 +472,32 @@ async function handleUserMessage(
   }
 
   const messages = normalizeMessages([...(history || []), { role: "user", content: message }]).slice(-10);
-  const provider = String(config.llmProvider || "gemini").trim().toLowerCase();
+  const providerAttemptOrder = getProviderAttemptOrder(config);
 
-  switch (provider) {
-    case "gemini":
-      return callGemini(config, messages, language, userContext);
-    case "openai":
-      return callOpenAI(config, messages, language);
-    case "claude":
-      return callClaude(config, messages, language);
-    default:
-      throw new Error("Unsupported LLM provider");
+  if (!providerAttemptOrder.length) {
+    throw new Error("No configured LLM provider credentials found.");
   }
+
+  const providerErrors: string[] = [];
+
+  for (const provider of providerAttemptOrder) {
+    try {
+      switch (provider) {
+        case "gemini":
+          return await callGemini(config, messages, language, userContext);
+        case "openai":
+          return await callOpenAI(config, messages, language, userContext);
+        case "claude":
+          return await callClaude(config, messages, language, userContext);
+      }
+    } catch (error: any) {
+      const messageText = String(error?.message || error || "Unknown provider error");
+      providerErrors.push(`${provider}: ${messageText}`);
+      console.error(`Chat provider ${provider} failed:`, error);
+    }
+  }
+
+  throw new Error(`All configured chat providers failed. ${providerErrors.join(" | ")}`);
 }
 
 export default async function handler(req: any, res: any) {
@@ -430,7 +536,7 @@ export default async function handler(req: any, res: any) {
       });
     } catch (providerError) {
       console.error("Chat provider failed, using static fallback:", providerError);
-      reply = buildStaticMaiRideReply(latestUserMessage);
+      reply = buildStaticMaiRideReply(latestUserMessage, language);
     }
 
     return res.status(200).json({ message: reply });
