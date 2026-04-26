@@ -13775,6 +13775,18 @@ const ChatbotCore = ({
       /ride\\s+for\\s+me/.test(message) ||
       /can you search/.test(message) ||
       (message.includes('from') && message.includes('to'));
+    const identityIntent =
+      message.includes('are you ai') ||
+      message.includes('are you a bot') ||
+      message.includes('who are you') ||
+      message.includes('what are you') ||
+      message.includes('are you human') ||
+      message === 'ai' ||
+      message === 'ai?' ||
+      message === 'bot' ||
+      message === 'bot?';
+    const capabilityIntent =
+      /what can you do|how can you help|help me|what do you help with|what can i ask/.test(message);
     const offerRideIntent =
       /(offer|post|publish|list)\\s+(a\\s+)?ride/.test(message) ||
       /become\\s+a\\s+driver/.test(message) ||
@@ -13802,6 +13814,18 @@ const ChatbotCore = ({
       return hindi
         ? "नमस्ते, मैं Kiara हूँ। आप ride search, booking, pricing, negotiation, payment या support में जो भी मदद चाहें, मैं साथ हूँ।"
         : "Hi, I’m Kiara. I can help you search rides, compare fares, negotiate, complete payments, and track bookings on MaiRide.";
+    }
+
+    if (identityIntent) {
+      return hindi
+        ? "मैं Kiara हूँ, MaiRide की in-app assistant. मैं यहाँ rides, booking, fares, payment और support में practical मदद देने के लिए हूँ."
+        : "I’m Kiara, MaiRide’s in-app assistant. I’m here to help with rides, bookings, fares, payments, and support in a practical way.";
+    }
+
+    if (capabilityIntent) {
+      return hindi
+        ? "मैं rides search करने, booking flow समझाने, fare negotiation, payment steps, booking status और support issues में मदद कर सकती हूँ. आप चाहें तो अपना route या issue सीधे लिख दीजिए."
+        : "I can help you search rides, understand booking flow, negotiate fares, complete payment steps, check booking status, and handle support issues. If you want, just send me your route or issue directly.";
     }
 
     if (rideSearchIntent) {
@@ -13877,8 +13901,8 @@ const ChatbotCore = ({
     }
 
     return hindi
-      ? "मैं MaiRide पर ride search, booking, fare, negotiation, payment और support में मदद कर सकती हूँ। चाहें तो आप origin-destination या booking issue सीधे लिख दीजिए।"
-      : "I can help with ride search, bookings, fares, negotiation, payments, and support on MaiRide. If you want, send me your route or booking issue directly and I’ll guide you.";
+      ? "मैं Kiara हूँ. अगर आप चाहें, तो अपना route, booking issue, fare question या support problem सीधे लिख दीजिए और मैं next step साफ़-साफ़ बता दूँगी।"
+      : "I’m Kiara. If you want, send me your route, booking issue, fare question, or support problem directly, and I’ll guide you with the next step clearly.";
   };
 
   const toggleVoiceInput = () => {
