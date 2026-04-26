@@ -216,6 +216,108 @@ function normalizeMessages(messages: any[] = []) {
     .slice(-8);
 }
 
+function isApprovedDriver(row: any) {
+  const data = (row?.data as Record<string, any>) || {};
+  const role = row?.role || data.role;
+  const status = row?.status || data.status;
+  const onboardingComplete = row?.onboarding_complete ?? data.onboardingComplete;
+  const verificationStatus = row?.verification_status || data.verificationStatus;
+  const hasDriverDetails = Boolean(row?.driver_details || data.driverDetails);
+
+  return (
+    role === "driver" &&
+    status === "active" &&
+    onboardingComplete === true &&
+    hasDriverDetails &&
+    verificationStatus !== "rejected"
+  );
+}
+
+function isRouteAvailabilityIntent(rawMessage: string) {
+  const message = String(rawMessage || "").trim().toLowerCase();
+  return (
+    /(what|which).*(route|routes).*(operating|running|active|available)/.test(message) ||
+    /(current|currently).*(route|routes|rides|offers)/.test(message) ||
+    /available\s+(rides|routes|offers)/.test(message) ||
+    /operating\s+on/.test(message) ||
+    /service\s+route/.test(message)
+  );
+}
+
+async function getAvailableRideRouteSummaries(limit = 6) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const [{ data: rideRows, error: ridesError }, { data: driverRows, error: driversError }] = await Promise.all([
+    supabaseAdmin
+      .from("rides")
+      .select("id, driver_id, status, data, created_at, updated_at")
+      .eq("status", "available")
+      .order("created_at", { ascending: false }),
+    supabaseAdmin
+      .from("users")
+      .select("id, role, status, onboarding_complete, verification_status, driver_details, data"),
+  ]);
+
+  if (ridesError) throw ridesError;
+  if (driversError) throw driversError;
+
+  const approvedDriverIds = new Set((driverRows || []).filter(isApprovedDriver).map((row: any) => row.id));
+  const dedupedRoutes = new Map<string, { origin: string; destination: string; departureDayLabel: string; departureClock: string }>();
+
+  for (const row of rideRows || []) {
+    const data = (row?.data as Record<string, any>) || {};
+    const driverId = row?.driver_id || data.driverId;
+    if (!approvedDriverIds.has(driverId)) continue;
+    const origin = String(data.origin || "").trim();
+    const destination = String(data.destination || "").trim();
+    if (!origin || !destination) continue;
+    const key = `${origin} -> ${destination}`.toLowerCase();
+    if (dedupedRoutes.has(key)) continue;
+    dedupedRoutes.set(key, {
+      origin,
+      destination,
+      departureDayLabel: String(data.departureDayLabel || data.departureDay || "").trim(),
+      departureClock: String(data.departureClock || "").trim(),
+    });
+    if (dedupedRoutes.size >= limit) break;
+  }
+
+  return Array.from(dedupedRoutes.values());
+}
+
+async function buildLiveRouteAvailabilityReply(rawMessage: string, language?: string) {
+  const normalizedLanguage = String(language || "en-IN").trim().toLowerCase();
+  const hindi = normalizedLanguage.startsWith("hi");
+  const bengali = normalizedLanguage.startsWith("bn");
+  const routes = await getAvailableRideRouteSummaries(6);
+
+  if (!routes.length) {
+    if (hindi) {
+      return "अभी मेरे पास कोई active driver route live नहीं दिख रहा है। आप चाहें तो अपना origin और destination भेजिए, मैं आपको ride request पोस्ट करने का सही flow बता दूँगी।";
+    }
+    if (bengali) {
+      return "এই মুহূর্তে কোনো active driver route live দেখা যাচ্ছে না। চাইলে আপনার origin আর destination পাঠান, আমি ride request post করার next step বলে দেব।";
+    }
+    return "I’m not seeing any active driver routes live right now. If you want, send me your origin and destination and I’ll guide you on posting a ride request or checking again.";
+  }
+
+  const routeLines = routes
+    .map((route) => {
+      const timing = route.departureDayLabel && route.departureClock
+        ? ` (${route.departureDayLabel} at ${route.departureClock})`
+        : "";
+      return `- ${route.origin} -> ${route.destination}${timing}`;
+    })
+    .join("\n");
+
+  if (hindi) {
+    return `अभी ये active ride routes live दिख रहे हैं:\n${routeLines}\n\nअगर आप चाहें, तो मैं आपके route के हिसाब से अगला सही booking step भी बता सकती हूँ।`;
+  }
+  if (bengali) {
+    return `এই মুহূর্তে এই active ride routes live দেখা যাচ্ছে:\n${routeLines}\n\nআপনি চাইলে আপনার route অনুযায়ী next booking step-ও আমি বলে দিতে পারি।`;
+  }
+  return `These active ride routes are live right now:\n${routeLines}\n\nIf you want, send me your route and I’ll guide you with the next booking step.`;
+}
+
 function buildStaticMaiRideReply(rawMessage: string, language?: string) {
   const normalizedLanguage = String(language || "en-IN").trim().toLowerCase();
   const message = String(rawMessage || "").trim().toLowerCase();
@@ -230,6 +332,7 @@ function buildStaticMaiRideReply(rawMessage: string, language?: string) {
     /(offer|post|publish|list)\s+(a\s+)?ride/.test(message) ||
     /become\s+a\s+driver/.test(message) ||
     /go\s+online/.test(message);
+  const routeAvailabilityIntent = isRouteAvailabilityIntent(message);
   const negotiationIntent =
     /counter\s*offer|negotiat|bargain|change\s+fare|lower\s+fare|raise\s+fare/.test(message);
   const paymentIntent =
@@ -275,6 +378,16 @@ function buildStaticMaiRideReply(rawMessage: string, language?: string) {
       return "আপনি যদি ride offer করতে চান, driver dashboard থেকে Go Online বা Offer a Ride flow ব্যবহার করে route, seats, fare আর departure time দিন। Offer live হলে nearby matching traveler-রা সেটা দেখতে পাবে।";
     }
     return "If you want to offer a ride, use Go Online or Offer a Ride from the driver dashboard and enter your route, seats, fare, and departure time. Once the offer goes live, nearby matching travelers can see it.";
+  }
+
+  if (routeAvailabilityIntent) {
+    if (hindi) {
+      return "मैं live route list अभी पढ़ नहीं पा रही हूँ, लेकिन आप अपना origin और destination भेजिए। मैं आपको search या ride request flow का सही next step बता दूँगी।";
+    }
+    if (bengali) {
+      return "আমি এখন live route list পড়তে পারছি না, কিন্তু আপনি origin আর destination পাঠান। আমি search বা ride request flow-এর next step বলে দেব।";
+    }
+    return "I’m having trouble reading the live route list right now, but if you send me your origin and destination, I can still guide you through search or the right ride-request step.";
   }
 
   if (negotiationIntent) {
@@ -534,6 +647,14 @@ async function handleUserMessage(
 
   if (effectiveRole !== "admin" && isAdminIntent(message)) {
     return "I can help with rides, booking, fares, status, and support. Admin actions are available only inside the verified Admin panel.";
+  }
+
+  if (isRouteAvailabilityIntent(message)) {
+    try {
+      return await buildLiveRouteAvailabilityReply(message, language);
+    } catch (error) {
+      console.error("Live route availability reply failed:", error);
+    }
   }
 
   const messages = normalizeMessages([...(history || []), { role: "user", content: message }]).slice(-10);

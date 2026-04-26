@@ -13669,6 +13669,8 @@ const ChatbotCore = ({
   const [voiceInputSupported, setVoiceInputSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const chatApiPath = '/api/chat';
 
   useEffect(() => {
@@ -13747,6 +13749,23 @@ const ChatbotCore = ({
     }
   }, [selectedLanguage]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const viewport = messagesViewportRef.current;
+    if (!viewport) return;
+
+    const scrollToLatest = () => {
+      viewport.scrollTop = viewport.scrollHeight;
+      messagesEndRef.current?.scrollIntoView({ block: 'end' });
+    };
+
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(scrollToLatest);
+    } else {
+      scrollToLatest();
+    }
+  }, [messages, isTyping, isOpen]);
+
   const buildStaticMaiRideReply = (rawMessage: string, language: string) => {
     const lang = String(language || '').toLowerCase();
     const message = String(rawMessage || '').trim().toLowerCase();
@@ -13760,6 +13779,12 @@ const ChatbotCore = ({
       /(offer|post|publish|list)\\s+(a\\s+)?ride/.test(message) ||
       /become\\s+a\\s+driver/.test(message) ||
       /go\\s+online/.test(message);
+    const routeAvailabilityIntent =
+      /(what|which).*(route|routes).*(operating|running|active|available)/.test(message) ||
+      /(current|currently).*(route|routes|rides|offers)/.test(message) ||
+      /available\\s+(rides|routes|offers)/.test(message) ||
+      /operating\\s+on/.test(message) ||
+      /service\\s+route/.test(message);
     const negotiationIntent =
       /counter\\s*offer|negotiat|bargain|change\\s+fare|lower\\s+fare|raise\\s+fare/.test(message);
     const paymentIntent =
@@ -13789,6 +13814,12 @@ const ChatbotCore = ({
       return hindi
         ? "अगर आप ride offer करना चाहते हैं, तो driver dashboard में Go Online या Offer a Ride flow से route, seats, fare और departure time भरें। Offer live होते ही nearby matching travelers उसे देख पाएंगे।"
         : "If you want to offer a ride, use Go Online or Offer a Ride from the driver dashboard and enter your route, seats, fare, and departure time. Once the offer goes live, nearby matching travelers can see it.";
+    }
+
+    if (routeAvailabilityIntent) {
+      return hindi
+        ? "मैं live route list अभी नहीं पढ़ पा रही हूँ, लेकिन आप अपना origin और destination भेजिए। मैं आपको search या ride request flow का सही next step बता दूँगी।"
+        : "I’m having trouble reading the live route list right now, but if you send me your origin and destination, I can still guide you through search or the right ride-request step.";
     }
 
     if (negotiationIntent) {
@@ -13958,7 +13989,7 @@ const ChatbotCore = ({
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-mairide-bg">
+            <div ref={messagesViewportRef} className="flex-1 overflow-y-auto p-6 space-y-4 bg-mairide-bg">
               {messages.length === 0 && (
                 <div className="text-center py-8">
                   <p className="text-mairide-secondary text-sm italic serif">
@@ -13992,6 +14023,7 @@ const ChatbotCore = ({
                   </div>
                 </div>
               )}
+              <div ref={messagesEndRef} aria-hidden="true" />
             </div>
 
             <div className="p-4 bg-white border-t border-mairide-secondary flex space-x-2">
