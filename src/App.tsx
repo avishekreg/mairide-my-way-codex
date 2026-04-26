@@ -13769,14 +13769,14 @@ const ChatbotCore = ({
 
     if (!message) {
       return hindi
-        ? "नमस्ते, मैं Mai Ira हूँ। मैं MaiRide पर ride search, booking, fare negotiation, payment, support और booking status में आपकी मदद कर सकती हूँ।"
-        : "Hi, I’m Mai Ira. I can help with ride search, bookings, fares, negotiation, payment, support, and booking status on MaiRide.";
+        ? "नमस्ते, मैं Kiara हूँ। मैं MaiRide पर ride search, booking, fare negotiation, payment, support और booking status में आपकी मदद कर सकती हूँ।"
+        : "Hi, I’m Kiara. I can help with ride search, bookings, fares, negotiation, payment, support, and booking status on MaiRide.";
     }
 
     if (/(^|\\b)(hi|hello|hey|namaste)(\\b|$)/.test(message)) {
       return hindi
-        ? "नमस्ते, मैं Mai Ira हूँ। आप ride search, booking, pricing, negotiation, payment या support में जो भी मदद चाहें, मैं साथ हूँ।"
-        : "Hi, I’m Mai Ira. I can help you search rides, compare fares, negotiate, complete payments, and track bookings on MaiRide.";
+        ? "नमस्ते, मैं Kiara हूँ। आप ride search, booking, pricing, negotiation, payment या support में जो भी मदद चाहें, मैं साथ हूँ।"
+        : "Hi, I’m Kiara. I can help you search rides, compare fares, negotiate, complete payments, and track bookings on MaiRide.";
     }
 
     if (rideSearchIntent) {
@@ -13935,7 +13935,7 @@ const ChatbotCore = ({
                   <Bot className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-white font-bold">Mai Ira</h3>
+                  <h3 className="text-white font-bold">Mai Kiara</h3>
                   <p className="text-white/60 text-[10px] uppercase tracking-wider">Online</p>
                 </div>
               </div>
@@ -14840,7 +14840,7 @@ const AdminRevenueAnalysis = ({
 };
 
 const AdminConfigView = () => {
-  const defaultChatbotPrompt = `You are MaiRide's official in-app assistant, Mai Ira. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Use friendly wording, acknowledge user concerns briefly, and give practical next steps. Keep replies short, clear, and supportive.
+  const defaultChatbotPrompt = `You are MaiRide's official in-app assistant, Mai Kiara. When referring to yourself in conversation, use only the name Kiara. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Use friendly wording, acknowledge user concerns briefly, and give practical next steps. Keep replies short, clear, and supportive.
 
 Answer only about MaiRide topics:
 - rides

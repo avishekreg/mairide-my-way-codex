@@ -25,7 +25,7 @@ async function getGlobalConfig() {
     chatbotTemperature: 0.3,
     chatbotMaxTokens: 400,
     chatbotSystemPrompt: DEFAULT_PROMPT,
-    chatbotFallbackMessage: "Mai Ira is temporarily unavailable. Please use the Support section if you need urgent help.",
+    chatbotFallbackMessage: "Mai Kiara is temporarily unavailable. Please use the Support section if you need urgent help.",
     chatbotDefaultLanguage: "en-IN",
     chatbotVoiceOutputEnabled: false,
     chatbotVoiceInputEnabled: true,
@@ -60,11 +60,11 @@ async function getGlobalConfig() {
 }
 
 const DEFAULT_PROMPT =
-  "You are MaiRide's official in-app assistant, Mai Ira. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Acknowledge user concerns briefly and then give practical next steps. Keep replies concise, clear, and supportive. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. For non-admin users, do not provide admin actions or admin operational guidance. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.";
+  "You are MaiRide's official in-app assistant, Mai Kiara. When referring to yourself in conversation, use only the name Kiara. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Acknowledge user concerns briefly and then give practical next steps. Keep replies concise, clear, and supportive. Answer only about MaiRide topics: rides, pricing, booking flow, support, service regions, booking status, support tickets, and admin actions. Do not answer unrelated general knowledge questions. For non-admin users, do not provide admin actions or admin operational guidance. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.";
 
 const IRA_PERSONALITY_JSON = {
   assistant_config: {
-    identity: "Ira",
+    identity: "Kiara",
     brand: "MaiRide",
     persona: "Professional, Warm, Soft-spoken (Makhmali), and Highly Intelligent.",
     language_style: "Hinglish (Natural mix of Hindi and English).",
@@ -239,22 +239,22 @@ function buildStaticMaiRideReply(rawMessage: string, language?: string) {
 
   if (!message) {
     if (hindi) {
-      return "नमस्ते, मैं Mai Ira हूँ। मैं MaiRide पर ride search, booking, fare negotiation, payment, support और booking status में आपकी मदद कर सकती हूँ।";
+      return "नमस्ते, मैं Kiara हूँ। मैं MaiRide पर ride search, booking, fare negotiation, payment, support और booking status में आपकी मदद कर सकती हूँ।";
     }
     if (bengali) {
-      return "নমস্কার, আমি Mai Ira। আমি MaiRide-এ ride search, booking, fare negotiation, payment, support আর booking status নিয়ে সাহায্য করতে পারি।";
+      return "নমস্কার, আমি Kiara। আমি MaiRide-এ ride search, booking, fare negotiation, payment, support আর booking status নিয়ে সাহায্য করতে পারি।";
     }
-    return "Hi, I’m Mai Ira. I can help with ride search, bookings, fares, negotiation, payment, support, and booking status on MaiRide.";
+    return "Hi, I’m Kiara. I can help with ride search, bookings, fares, negotiation, payment, support, and booking status on MaiRide.";
   }
 
   if (/(^|\b)(hi|hello|hey|namaste|hola)(\b|$)/.test(message)) {
     if (hindi) {
-      return "नमस्ते, मैं Mai Ira हूँ। आप ride search, booking, pricing, negotiation, payment या support में जो भी मदद चाहें, मैं साथ हूँ।";
+      return "नमस्ते, मैं Kiara हूँ। आप ride search, booking, pricing, negotiation, payment या support में जो भी मदद चाहें, मैं साथ हूँ।";
     }
     if (bengali) {
-      return "নমস্কার, আমি Mai Ira। আপনি ride search, booking, pricing, negotiation, payment বা support নিয়ে যেকোনো সাহায্য চাইলে আমি আছি।";
+      return "নমস্কার, আমি Kiara। আপনি ride search, booking, pricing, negotiation, payment বা support নিয়ে যেকোনো সাহায্য চাইলে আমি আছি।";
     }
-    return "Hi, I’m Mai Ira. I can help you search rides, compare fares, negotiate, complete payments, and track bookings on MaiRide.";
+    return "Hi, I’m Kiara. I can help you search rides, compare fares, negotiate, complete payments, and track bookings on MaiRide.";
   }
 
   if (rideSearchIntent) {
@@ -609,7 +609,7 @@ export default async function handler(req: any, res: any) {
     console.error("Chat route failed:", error);
     return res.status(500).json({
       error: error?.message || "A server error has occurred",
-      message: error?.message || "Mai Ira is temporarily unavailable. Please use the Support section if you need urgent help.",
+      message: error?.message || "Mai Kiara is temporarily unavailable. Please use the Support section if you need urgent help.",
     });
   }
 }
