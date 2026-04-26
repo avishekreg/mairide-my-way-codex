@@ -2412,9 +2412,9 @@ const applyGoogleTranslateLanguage = (language: string) => {
 };
 
 let googleTranslateScriptPromise: Promise<void> | null = null;
-const ensureGoogleTranslateScriptLoaded = (): Promise<void> => {
+const ensureGoogleTranslateScriptLoaded = (forceForSession = false): Promise<void> => {
   if (typeof window === 'undefined' || typeof document === 'undefined') return Promise.resolve();
-  if (!hasStoredCookieConsentCategory('preferences')) return Promise.resolve();
+  if (!forceForSession && !hasStoredCookieConsentCategory('preferences')) return Promise.resolve();
   if ((window as any).google?.translate?.TranslateElement) return Promise.resolve();
   if (googleTranslateScriptPromise) return googleTranslateScriptPromise;
 
@@ -4543,7 +4543,6 @@ const Navbar = ({
                     value={uiLanguage}
                     onChange={(next) => {
                       onChangeLanguage(next);
-                      setIsOpen(false);
                     }}
                   />
                 </div>
@@ -19693,7 +19692,11 @@ const App = () => {
       safeStorageRemove('local', UI_LANGUAGE_STORAGE_KEY);
       clearGoogleTranslateArtifacts();
       if (lang !== 'en') {
-        setUiLanguage('en');
+        void ensureGoogleTranslateScriptLoaded(true).then(() => {
+          window.setTimeout(() => applyGoogleTranslateLanguage(lang), 80);
+          window.setTimeout(() => applyGoogleTranslateLanguage(lang), 220);
+          window.setTimeout(() => applyGoogleTranslateLanguage(lang), 650);
+        });
       }
       return;
     }
@@ -19818,15 +19821,23 @@ const App = () => {
   const commitUiLanguage = (nextLanguage: string) => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
     if (!canUseCookieCategory(cookieConsent, 'preferences')) {
-      if (normalized !== 'en') {
-        showAppDialog(
-          'Please enable Preferences in Cookie Preferences to save and apply app language translation.',
-          'warning',
-          'Cookie preferences needed'
-        );
+      setUiLanguage(normalized);
+      safeStorageRemove('local', UI_LANGUAGE_STORAGE_KEY);
+      safeStorageRemove('local', UI_LANGUAGE_PROMPT_SEEN_KEY);
+      if (normalized === 'en') {
+        clearGoogleTranslateArtifacts();
+      } else {
+        void ensureGoogleTranslateScriptLoaded(true).then(() => {
+          window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 40);
+          window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 220);
+          window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 650);
+        });
       }
-      setUiLanguage('en');
-      clearGoogleTranslateArtifacts();
+      showAppDialog(
+        'Language changed for this session. Enable Preferences in Cookie Preferences if you want MaiRide to remember it next time.',
+        'info',
+        'Language updated'
+      );
       return;
     }
     setUiLanguage(normalized);
