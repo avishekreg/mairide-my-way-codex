@@ -13770,6 +13770,10 @@ const ChatbotCore = ({
     const lang = String(language || '').toLowerCase();
     const message = String(rawMessage || '').trim().toLowerCase();
     const hindi = lang.startsWith('hi');
+    const mentionsIdentityTerms =
+      /\b(ai|bot|human|person|real)\b/.test(message) ||
+      message.includes('who are you') ||
+      message.includes('what are you');
     const rideSearchIntent =
       /(search|find|look\\s*for|book|get)\\s+(a\\s+)?ride/.test(message) ||
       /ride\\s+for\\s+me/.test(message) ||
@@ -13778,9 +13782,18 @@ const ChatbotCore = ({
     const identityIntent =
       message.includes('are you ai') ||
       message.includes('are you a bot') ||
+      message.includes('real human') ||
+      message.includes('real person') ||
+      message.includes('human or a bot') ||
+      message.includes('human or bot') ||
+      message.includes('human or ai') ||
+      message.includes('ai or human') ||
+      message.includes('am i talking to a bot') ||
+      message.includes('are you a real human') ||
       message.includes('who are you') ||
       message.includes('what are you') ||
       message.includes('are you human') ||
+      (mentionsIdentityTerms && /\b(are|r|you|who|what|real)\b/.test(message)) ||
       message === 'ai' ||
       message === 'ai?' ||
       message === 'bot' ||
@@ -13818,8 +13831,8 @@ const ChatbotCore = ({
 
     if (identityIntent) {
       return hindi
-        ? "मैं Kiara हूँ, MaiRide की in-app assistant. मैं यहाँ rides, booking, fares, payment और support में practical मदद देने के लिए हूँ."
-        : "I’m Kiara, MaiRide’s in-app assistant. I’m here to help with rides, bookings, fares, payments, and support in a practical way.";
+        ? "मैं Kiara हूँ, MaiRide की virtual in-app assistant, इंसान agent नहीं. मैं ride search, booking, fares, payment और support में तुरंत practical मदद देने के लिए यहाँ हूँ."
+        : "I’m Kiara, MaiRide’s virtual in-app assistant, not a human agent. I’m here to help with rides, bookings, fares, payments, and support in a practical way.";
     }
 
     if (capabilityIntent) {

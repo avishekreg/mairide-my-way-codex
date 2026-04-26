@@ -323,6 +323,10 @@ function buildStaticMaiRideReply(rawMessage: string, language?: string) {
   const message = String(rawMessage || "").trim().toLowerCase();
   const hindi = normalizedLanguage.startsWith("hi");
   const bengali = normalizedLanguage.startsWith("bn");
+  const mentionsIdentityTerms =
+    /\b(ai|bot|human|person|real)\b/.test(message) ||
+    message.includes("who are you") ||
+    message.includes("what are you");
   const rideSearchIntent =
     /(search|find|look\s*for|book|get)\s+(a\s+)?ride/.test(message) ||
     /ride\s+for\s+me/.test(message) ||
@@ -331,9 +335,18 @@ function buildStaticMaiRideReply(rawMessage: string, language?: string) {
   const identityIntent =
     message.includes("are you ai") ||
     message.includes("are you a bot") ||
+    message.includes("real human") ||
+    message.includes("real person") ||
+    message.includes("human or a bot") ||
+    message.includes("human or bot") ||
+    message.includes("human or ai") ||
+    message.includes("ai or human") ||
+    message.includes("am i talking to a bot") ||
+    message.includes("are you a real human") ||
     message.includes("who are you") ||
     message.includes("what are you") ||
     message.includes("are you human") ||
+    (mentionsIdentityTerms && /\b(are|r|you|who|what|real)\b/.test(message)) ||
     message === "ai" ||
     message === "ai?" ||
     message === "bot" ||
@@ -374,12 +387,12 @@ function buildStaticMaiRideReply(rawMessage: string, language?: string) {
 
   if (identityIntent) {
     if (hindi) {
-      return "मैं Kiara हूँ, MaiRide की in-app assistant. मैं यहाँ rides, booking, fares, payment और support में practical मदद देने के लिए हूँ.";
+      return "मैं Kiara हूँ, MaiRide की virtual in-app assistant, इंसान agent नहीं. मैं ride search, booking, fares, payment और support में तुरंत practical मदद देने के लिए यहाँ हूँ.";
     }
     if (bengali) {
-      return "আমি Kiara, MaiRide-এর in-app assistant. আমি rides, booking, fares, payment আর support নিয়ে practical সাহায্য করার জন্য আছি।";
+      return "আমি Kiara, MaiRide-এর virtual in-app assistant, human agent নই। আমি ride search, booking, fares, payment আর support নিয়ে practical সাহায্য করার জন্য আছি।";
     }
-    return "I’m Kiara, MaiRide’s in-app assistant. I’m here to help with rides, bookings, fares, payments, and support in a practical way.";
+    return "I’m Kiara, MaiRide’s virtual in-app assistant, not a human agent. I’m here to help with rides, bookings, fares, payments, and support in a practical way.";
   }
 
   if (capabilityIntent) {
