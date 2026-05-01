@@ -92,6 +92,26 @@ jobs:
       - name: Sync Android platform
         run: npx cap sync android
 
+      - name: Inject Android runtime permissions
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "Android manifest not found at $MANIFEST"
+            exit 1
+          fi
+
+          for permission in \
+            "android.permission.CAMERA" \
+            "android.permission.ACCESS_FINE_LOCATION" \
+            "android.permission.ACCESS_COARSE_LOCATION"
+          do
+            if ! grep -q "$permission" "$MANIFEST"; then
+              sed -i "/<application/i\\    <uses-permission android:name=\"$permission\" \\/>" "$MANIFEST"
+            fi
+          done
+
+          echo "Injected Android runtime permissions into generated manifest."
+
       - name: Configure Firebase services for Android push
         env:
           ANDROID_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}

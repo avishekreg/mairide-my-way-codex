@@ -1781,6 +1781,8 @@ const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
 const CONSENT_VERSION = 'consent-v1';
 const COOKIE_CONSENT_STORAGE_KEY = 'mairide_cookie_consent_v1';
 const COOKIE_CONSENT_OPEN_EVENT = 'mairide:cookie-consent-open';
+const REGISTRATION_CAMERA_PERMISSION_KEY_PREFIX = 'mairide_registration_camera_prompted_v1';
+const REGISTRATION_LOCATION_PERMISSION_KEY_PREFIX = 'mairide_registration_location_prompted_v1';
 const isAndroidAppRuntime = () => isAppWebViewRuntime() || isAndroidWebViewLikeRuntime();
 const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -1809,6 +1811,61 @@ const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
     storage.removeItem(key);
   } catch {
     // Ignore storage-remove failures in restricted browsers
+  }
+};
+const buildRegistrationPermissionStorageKey = (prefix: string, uid: string) => `${prefix}:${uid}`;
+const requestAndroidRegistrationPermissions = async ({
+  uid,
+  role,
+}: {
+  uid: string;
+  role: 'consumer' | 'driver' | 'admin';
+}) => {
+  if (typeof window === 'undefined' || !isAndroidAppRuntime() || !uid || role === 'admin') return;
+
+  const cameraKey = buildRegistrationPermissionStorageKey(REGISTRATION_CAMERA_PERMISSION_KEY_PREFIX, uid);
+  const locationKey = buildRegistrationPermissionStorageKey(REGISTRATION_LOCATION_PERMISSION_KEY_PREFIX, uid);
+
+  if (safeStorageGet('local', cameraKey) !== '1') {
+    safeStorageSet('local', cameraKey, '1');
+    try {
+      let cameraPermission = '';
+      const currentPermissions = await CapacitorCamera.checkPermissions().catch(() => null);
+      cameraPermission = String(currentPermissions?.camera || currentPermissions?.photos || '');
+
+      if (!cameraPermission || cameraPermission === 'prompt' || cameraPermission === 'prompt-with-rationale') {
+        const requestedPermissions = await CapacitorCamera.requestPermissions({ permissions: ['camera'] }).catch(() => null);
+        cameraPermission = String(requestedPermissions?.camera || requestedPermissions?.photos || cameraPermission || '');
+      }
+
+      if (cameraPermission && !['granted', 'limited'].includes(cameraPermission)) {
+        console.warn('Android registration camera permission not granted yet.');
+      }
+    } catch (error) {
+      console.warn('Android registration camera permission request failed:', error);
+    }
+  }
+
+  if (safeStorageGet('local', locationKey) !== '1') {
+    safeStorageSet('local', locationKey, '1');
+    try {
+      await new Promise<void>((resolve) => {
+        if (!navigator.geolocation) {
+          resolve();
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          () => resolve(),
+          (error) => {
+            console.warn('Android registration location permission request failed:', error);
+            resolve();
+          },
+          { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+        );
+      });
+    } catch (error) {
+      console.warn('Android registration location bootstrap failed:', error);
+    }
   }
 };
 type CookieConsentCategory = 'necessary' | 'preferences' | 'analytics' | 'marketing';
@@ -5642,6 +5699,9 @@ const findUserProfileByPhone = async (value: string) => {
           
           await setDoc(docRef, newProfile);
           clearStoredOAuthIntent();
+          if (isSignUp) {
+            void requestAndroidRegistrationPermissions({ uid: user.uid, role: newProfile.role });
+          }
           
           if (oldUid !== user.uid && !oldUid.startsWith('manual_')) {
             await deleteDoc(doc(db, 'users', oldUid));
@@ -5681,6 +5741,9 @@ const findUserProfileByPhone = async (value: string) => {
         };
         await setDoc(docRef, newProfile);
         clearStoredOAuthIntent();
+        if (isSignUp) {
+          void requestAndroidRegistrationPermissions({ uid: user.uid, role: newProfile.role });
+        }
         
         // Initialize wallet and referral
         await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined);
@@ -5695,6 +5758,9 @@ const findUserProfileByPhone = async (value: string) => {
           await updateDoc(docRef, { role: 'admin', onboardingComplete: true });
         }
         clearStoredOAuthIntent();
+        if (isSignUp) {
+          void requestAndroidRegistrationPermissions({ uid: user.uid, role: existingProfile.role });
+        }
       }
     } catch (error: any) {
       if (error.message === "NOT_REGISTERED") throw error;
@@ -6636,6 +6702,10 @@ const DriverOnboarding = ({
   const [capturingField, setCapturingField] = useState<string | null>(null);
   const verificationMarkers = buildVerificationMarkers(formData as any);
   const aadhaarSegments = splitAadhaarDigits(formData.aadhaarNumber);
+
+  useEffect(() => {
+    void requestAndroidRegistrationPermissions({ uid: profile.uid, role: 'driver' });
+  }, [profile.uid]);
 
   const updateAadhaarSegment = (index: number, value: string) => {
     const nextSegments = [...aadhaarSegments];
