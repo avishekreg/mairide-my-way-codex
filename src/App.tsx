@@ -2207,7 +2207,7 @@ const isWithinAnyDashboardCorridor = (
   radiusKm: number = DASHBOARD_MATCH_RADIUS_KM
 ) => {
   if (!candidateRoute) return false;
-  if (!referenceRoutes.length) return true;
+  if (!referenceRoutes.length) return false;
   return referenceRoutes.some((referenceRoute) =>
     routeCorridorMatch({
       rideOriginLocation: candidateRoute.originLocation,
@@ -4374,15 +4374,15 @@ const Navbar = ({
     profile?.role === 'driver'
       ? [
           { id: 'dashboard', label: 'Dashboard' },
-          { id: 'requests', label: 'Requests' },
-          { id: 'history', label: 'History' },
+          { id: 'requests', label: 'Booking Requests' },
+          { id: 'history', label: 'Ride History' },
           { id: 'wallet', label: 'Wallet' },
           { id: 'support', label: 'Support' },
           { id: 'profile', label: 'Profile' },
         ]
       : [
           { id: 'search', label: 'Request Ride' },
-          { id: 'history', label: 'History' },
+          { id: 'history', label: 'My Bookings' },
           { id: 'wallet', label: 'Wallet' },
           { id: 'support', label: 'Support' },
           { id: 'profile', label: 'Profile' },
@@ -4628,7 +4628,6 @@ const Navbar = ({
                 </button>
               </div>
               <div className="px-4 py-4 space-y-2">
-                <button onClick={handleHomeNavigation} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Home</button>
                 {roleTabs.map((item) => (
                   <button
                     key={item.id}
@@ -4638,19 +4637,9 @@ const Navbar = ({
                     {item.label}
                   </button>
                 ))}
-                <button onClick={() => { navigate('/support'); setIsOpen(false); }} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Support Page</button>
                 {profile?.role === 'admin' && (
                   <button onClick={() => { navigate('/admin'); setIsOpen(false); }} className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors">Admin Panel</button>
                 )}
-                <button
-                  onClick={() => {
-                    navigate(profile?.role === 'driver' ? '/driver/rides' : '/consumer/bookings');
-                    setIsOpen(false);
-                  }}
-                  className="block w-full rounded-2xl px-4 py-3 text-left font-semibold text-mairide-primary hover:bg-mairide-bg transition-colors"
-                >
-                  {profile?.role === 'driver' ? 'My Rides' : 'My Bookings'}
-                </button>
                 <div className="px-4 py-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary mb-2">Language</p>
                   <LanguageSwitcher
