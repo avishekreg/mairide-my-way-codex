@@ -189,6 +189,9 @@ jobs:
 
       - name: Patch Gradle Kotlin dependency conflicts
         run: |
+          APP_VERSION_BASE="${VITE_APP_VERSION}"
+          APP_VERSION_NAME="${APP_VERSION_BASE}+build.${GITHUB_RUN_NUMBER}"
+
           cat >> android/build.gradle <<'EOF'
 
           allprojects {
@@ -215,9 +218,14 @@ jobs:
           }
           EOF
 
-          cat >> android/app/build.gradle <<'EOF'
+          cat >> android/app/build.gradle <<EOF
 
           android {
+            defaultConfig {
+              versionCode ${GITHUB_RUN_NUMBER}
+              versionName "${APP_VERSION_NAME}"
+            }
+
             signingConfigs {
               release {
                 storeFile file(project.findProperty("MAIRIDE_UPLOAD_STORE_FILE") ?: "mairide-release.keystore")

@@ -967,6 +967,21 @@ async function handleCompleteSignup(req: any, res: any) {
       });
     }
 
+    const rollbackPartialSignup = async (uid: string) => {
+      try {
+        await supabaseAdmin.from("referrals").delete().eq("referred_id", uid);
+      } catch {}
+      try {
+        await supabaseAdmin.from("transactions").delete().eq("user_id", uid);
+      } catch {}
+      try {
+        await supabaseAdmin.from("users").delete().eq("id", uid);
+      } catch {}
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(uid);
+      } catch {}
+    };
+
     const row = buildSignupRow({
       uid: authData.user.id,
       email: normalizedEmail,
@@ -981,6 +996,7 @@ async function handleCompleteSignup(req: any, res: any) {
 
     const { error: profileError } = await supabaseAdmin.from("users").upsert(row, { onConflict: "id" });
     if (profileError) {
+      await rollbackPartialSignup(authData.user.id);
       return res.status(500).json({ error: profileError.message || "Failed to create user profile" });
     }
 
@@ -1009,6 +1025,7 @@ async function handleCompleteSignup(req: any, res: any) {
     );
 
     if (transactionError) {
+      await rollbackPartialSignup(authData.user.id);
       return res.status(500).json({ error: transactionError.message || "Failed to initialize wallet" });
     }
 
@@ -1041,6 +1058,7 @@ async function handleCompleteSignup(req: any, res: any) {
       );
 
       if (referralError) {
+        await rollbackPartialSignup(authData.user.id);
         return res.status(500).json({ error: referralError.message || "Failed to initialize referral data" });
       }
     }

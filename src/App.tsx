@@ -61,6 +61,7 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { PushNotifications, type Token } from '@capacitor/push-notifications';
 import { Camera as CapacitorCamera, CameraResultType } from '@capacitor/camera';
+import { Geolocation } from '@capacitor/geolocation';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { FileOpener } from '@capawesome-team/capacitor-file-opener';
 import Webcam from 'react-webcam';
@@ -1814,6 +1815,60 @@ const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
   }
 };
 const buildRegistrationPermissionStorageKey = (prefix: string, uid: string) => `${prefix}:${uid}`;
+const isGrantedNativePermission = (status?: unknown) => ['granted', 'limited'].includes(String(status || '').trim().toLowerCase());
+const requestNativeAndroidCameraPermission = async () => {
+  try {
+    const currentPermissions = await CapacitorCamera.checkPermissions().catch(() => null);
+    let cameraPermission = String(currentPermissions?.camera || currentPermissions?.photos || '').trim().toLowerCase();
+
+    if (!isGrantedNativePermission(cameraPermission)) {
+      const requestedPermissions = await CapacitorCamera.requestPermissions({ permissions: ['camera'] }).catch(() => null);
+      cameraPermission = String(requestedPermissions?.camera || requestedPermissions?.photos || cameraPermission || '').trim().toLowerCase();
+    }
+
+    return isGrantedNativePermission(cameraPermission);
+  } catch (error) {
+    console.warn('Android registration camera permission request failed:', error);
+    return false;
+  }
+};
+const requestNativeAndroidLocationPermission = async () => {
+  try {
+    if (Capacitor.isNativePlatform() && isAndroidAppRuntime()) {
+      const currentPermissions = await Geolocation.checkPermissions().catch(() => null);
+      let locationPermission = String(
+        currentPermissions?.location || currentPermissions?.coarseLocation || ''
+      ).trim().toLowerCase();
+
+      if (!isGrantedNativePermission(locationPermission)) {
+        const requestedPermissions = await Geolocation.requestPermissions().catch(() => null);
+        locationPermission = String(
+          requestedPermissions?.location || requestedPermissions?.coarseLocation || locationPermission || ''
+        ).trim().toLowerCase();
+      }
+
+      return isGrantedNativePermission(locationPermission);
+    }
+
+    return await new Promise<boolean>((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(false);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        () => resolve(true),
+        (error) => {
+          console.warn('Android registration location permission request failed:', error);
+          resolve(false);
+        },
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+      );
+    });
+  } catch (error) {
+    console.warn('Android registration location bootstrap failed:', error);
+    return false;
+  }
+};
 const requestAndroidRegistrationPermissions = async ({
   uid,
   role,
@@ -1827,44 +1882,22 @@ const requestAndroidRegistrationPermissions = async ({
   const locationKey = buildRegistrationPermissionStorageKey(REGISTRATION_LOCATION_PERMISSION_KEY_PREFIX, uid);
 
   if (safeStorageGet('local', cameraKey) !== '1') {
-    safeStorageSet('local', cameraKey, '1');
-    try {
-      let cameraPermission = '';
-      const currentPermissions = await CapacitorCamera.checkPermissions().catch(() => null);
-      cameraPermission = String(currentPermissions?.camera || currentPermissions?.photos || '');
-
-      if (!cameraPermission || cameraPermission === 'prompt' || cameraPermission === 'prompt-with-rationale') {
-        const requestedPermissions = await CapacitorCamera.requestPermissions({ permissions: ['camera'] }).catch(() => null);
-        cameraPermission = String(requestedPermissions?.camera || requestedPermissions?.photos || cameraPermission || '');
-      }
-
-      if (cameraPermission && !['granted', 'limited'].includes(cameraPermission)) {
-        console.warn('Android registration camera permission not granted yet.');
-      }
-    } catch (error) {
-      console.warn('Android registration camera permission request failed:', error);
+    const cameraGranted = await requestNativeAndroidCameraPermission();
+    if (cameraGranted) {
+      safeStorageSet('local', cameraKey, '1');
+    } else {
+      safeStorageRemove('local', cameraKey);
+      console.warn('Android registration camera permission not granted yet.');
     }
   }
 
   if (safeStorageGet('local', locationKey) !== '1') {
-    safeStorageSet('local', locationKey, '1');
-    try {
-      await new Promise<void>((resolve) => {
-        if (!navigator.geolocation) {
-          resolve();
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          () => resolve(),
-          (error) => {
-            console.warn('Android registration location permission request failed:', error);
-            resolve();
-          },
-          { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
-        );
-      });
-    } catch (error) {
-      console.warn('Android registration location bootstrap failed:', error);
+    const locationGranted = await requestNativeAndroidLocationPermission();
+    if (locationGranted) {
+      safeStorageSet('local', locationKey, '1');
+    } else {
+      safeStorageRemove('local', locationKey);
+      console.warn('Android registration location permission not granted yet.');
     }
   }
 };
@@ -2056,6 +2089,17 @@ const openAndroidAppSettings = async () => {
   }
 
   return false;
+};
+
+const ensureAndroidDriverSignupPermissions = async () => {
+  if (typeof window === 'undefined' || !isAndroidAppRuntime()) {
+    return { cameraGranted: true, locationGranted: true };
+  }
+
+  const cameraGranted = await requestNativeAndroidCameraPermission();
+  const locationGranted = await requestNativeAndroidLocationPermission();
+
+  return { cameraGranted, locationGranted };
 };
 
 const withCacheBust = (url: string) => {
@@ -3906,6 +3950,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
   const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
   const [androidDownloadUrl, setAndroidDownloadUrl] = useState(LIVE_ANDROID_APK_URL);
+  const [installedAndroidVersion, setInstalledAndroidVersion] = useState(APP_VERSION);
 
   const openAndroidDownload = () => {
     const runDownload = async () => {
@@ -3929,6 +3974,18 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
     setIsAndroidDevice(/android/i.test(navigator.userAgent || '') && isAndroidAppRuntime());
   }, []);
 
+  useEffect(() => {
+    if (!isAndroidDevice) return;
+    let active = true;
+    void resolveInstalledAndroidVersion().then((version) => {
+      if (!active) return;
+      setInstalledAndroidVersion(String(version || APP_VERSION).trim() || APP_VERSION);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isAndroidDevice]);
+
   const checkAndroidUpdate = useCallback(async () => {
     if (!isAndroidDevice) return;
     setIsCheckingAndroidUpdate(true);
@@ -3946,7 +4003,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
         setAndroidUpdateMessage('Update metadata unavailable. Please try again.');
         return;
       }
-      const hasUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(releaseVersion);
+      const hasUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(installedAndroidVersion);
       if (hasUpdate) {
         setIsAndroidUpdateAvailable(true);
         setAndroidUpdateMessage(`New Android build ${latestVersion} is available.`);
@@ -3959,7 +4016,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
     } finally {
       setIsCheckingAndroidUpdate(false);
     }
-  }, [isAndroidDevice, releaseVersion]);
+  }, [installedAndroidVersion, isAndroidDevice]);
 
   useEffect(() => {
     if (!isAndroidDevice) return;
@@ -5434,6 +5491,14 @@ const findUserProfileByPhone = async (value: string) => {
 
   const completeEmailPasswordSignUp = async () => {
     try {
+      if (role === 'driver' && isAndroidAppRuntime()) {
+        const { cameraGranted, locationGranted } = await ensureAndroidDriverSignupPermissions();
+        if (!cameraGranted || !locationGranted) {
+          alert('Camera and location permissions are required before driver signup can continue. Please allow both permissions and try again.');
+          return;
+        }
+      }
+
       const signupResponse = await postAuthAction('complete-signup', {
           email: normalizedSignupEmail,
           password,
@@ -5461,6 +5526,16 @@ const findUserProfileByPhone = async (value: string) => {
     } catch (error: any) {
       console.error("Complete Sign Up Error:", error);
       if (error.code === 'auth/email-already-in-use' || /already (registered|exists|been registered)/i.test(error.message || '')) {
+        if (role === 'driver' && isAndroidAppRuntime()) {
+          try {
+            const resumed = await signInWithEmailAndPassword(auth, normalizedSignupEmail, password);
+            await handleProfileSetup(resumed.user, normalizedSignupPhone, sanitizeDisplayName(displayName), false);
+            alert('We found your unfinished driver signup and resumed it. Please continue verification.');
+            return;
+          } catch (resumeError: any) {
+            console.warn('Android driver signup resume failed:', resumeError);
+          }
+        }
         alert("This email is already registered. Please login instead.");
         setAuthMode('login');
       } else {
@@ -5595,6 +5670,13 @@ const findUserProfileByPhone = async (value: string) => {
     setIsLoading(true);
     setNotRegisteredError(false);
     try {
+      if (authMode === 'signup' && role === 'driver' && isAndroidAppRuntime()) {
+        const { cameraGranted, locationGranted } = await ensureAndroidDriverSignupPermissions();
+        if (!cameraGranted || !locationGranted) {
+          alert('Camera and location permissions are required before driver signup can continue. Please allow both permissions and try again.');
+          return;
+        }
+      }
       safeStorageSet('session', OAUTH_MODE_KEY, authMode);
       safeStorageSet('session', OAUTH_ROLE_KEY, role);
       const provider = new GoogleAuthProvider();
@@ -6718,6 +6800,23 @@ const DriverOnboarding = ({
 
   const getCurrentLocation = (): Promise<{ lat: number, lng: number, timestamp: number }> => {
     return new Promise((resolve, reject) => {
+      if (Capacitor.isNativePlatform() && isAndroidAppRuntime()) {
+        Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 8000,
+          maximumAge: 0,
+        })
+          .then((pos) =>
+            resolve({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              timestamp: Date.now(),
+            })
+          )
+          .catch((err) => reject(err));
+        return;
+      }
+
       if (!navigator.geolocation) {
         reject(new Error("Geolocation not supported"));
         return;
@@ -6734,37 +6833,83 @@ const DriverOnboarding = ({
     });
   };
 
-  const handleCapture = async (image: string) => {
-    if (capturingField) {
-      try {
-        const normalizedImage = await compressDataUrlImage(image);
-        const location = await getCurrentLocation();
-        const geoTagFieldMap: Record<string, string> = {
-          selfiePhoto: 'selfieGeoTag',
-          aadhaarFrontPhoto: 'aadhaarFrontGeoTag',
-          aadhaarBackPhoto: 'aadhaarBackGeoTag',
-          dlFrontPhoto: 'dlFrontGeoTag',
-          dlBackPhoto: 'dlBackGeoTag',
-          vehiclePhoto: 'vehicleGeoTag',
-          rcPhoto: 'rcGeoTag',
-        };
-        const geoTagField = geoTagFieldMap[capturingField] || null;
+  const assignCapturedDriverImage = async (field: string, image: string) => {
+    try {
+      const normalizedImage = await compressDataUrlImage(image);
+      const location = await getCurrentLocation();
+      const geoTagFieldMap: Record<string, string> = {
+        selfiePhoto: 'selfieGeoTag',
+        aadhaarFrontPhoto: 'aadhaarFrontGeoTag',
+        aadhaarBackPhoto: 'aadhaarBackGeoTag',
+        dlFrontPhoto: 'dlFrontGeoTag',
+        dlBackPhoto: 'dlBackGeoTag',
+        vehiclePhoto: 'vehicleGeoTag',
+        rcPhoto: 'rcGeoTag',
+      };
+      const geoTagField = geoTagFieldMap[field] || null;
 
-        setFormData(prev => ({ 
-          ...prev, 
-          [capturingField]: normalizedImage,
-          ...(geoTagField ? { [geoTagField]: location } : {}),
-          ...(capturingField.startsWith('aadhaar') ? { aadhaarGeoTag: location } : {}),
-          ...(capturingField.startsWith('dl') ? { dlGeoTag: location } : {})
-        }));
-      } catch (error) {
-        console.warn("Geo-tagging failed:", error);
-        // Still set the image even if geo-tagging fails, but maybe alert the user
-        const normalizedImage = await compressDataUrlImage(image);
-        setFormData(prev => ({ ...prev, [capturingField]: normalizedImage }));
-      }
-      setCapturingField(null);
+      setFormData(prev => ({
+        ...prev,
+        [field]: normalizedImage,
+        ...(geoTagField ? { [geoTagField]: location } : {}),
+        ...(field.startsWith('aadhaar') ? { aadhaarGeoTag: location } : {}),
+        ...(field.startsWith('dl') ? { dlGeoTag: location } : {})
+      }));
+    } catch (error) {
+      console.warn("Geo-tagging failed:", error);
+      const normalizedImage = await compressDataUrlImage(image);
+      setFormData(prev => ({ ...prev, [field]: normalizedImage }));
     }
+  };
+
+  const handleCapture = async (image: string) => {
+    if (!capturingField) return;
+    await assignCapturedDriverImage(capturingField, image);
+    setCapturingField(null);
+  };
+
+  const startDriverCapture = async (field: string) => {
+    if (isAndroidAppRuntime()) {
+      const { cameraGranted, locationGranted } = await ensureAndroidDriverSignupPermissions();
+      if (!cameraGranted || !locationGranted) {
+        showAppDialog(
+          'Camera and location permissions are required for driver verification captures. Please allow them in app settings and try again.',
+          'warning',
+          'Permissions required'
+        );
+        return;
+      }
+
+      try {
+        const photo = await CapacitorCamera.getPhoto({
+          quality: 85,
+          allowEditing: false,
+          resultType: CameraResultType.DataUrl,
+          saveToGallery: false,
+        });
+        const imagePayload =
+          String(photo?.dataUrl || '').trim() ||
+          (photo?.base64String ? `data:image/jpeg;base64,${photo.base64String}` : '');
+        if (!imagePayload) return;
+        await assignCapturedDriverImage(field, imagePayload);
+      } catch (error: any) {
+        const message = String(error?.message || error || '');
+        if (/permission|denied|not authorized|forbidden/i.test(message)) {
+          showAppDialog(
+            'Camera permission is still blocked. Please enable camera and location permissions for MaiRide in Android settings, then try again.',
+            'warning',
+            'Permissions required'
+          );
+          return;
+        }
+        if (!/cancel|user cancelled|user canceled/i.test(message)) {
+          showAppDialog(message || 'We could not open the camera right now. Please try again.', 'error', 'Camera unavailable');
+        }
+      }
+      return;
+    }
+
+    setCapturingField(field);
   };
 
   const uploadImage = async (base64: string, path: string) => {
@@ -6974,7 +7119,7 @@ const DriverOnboarding = ({
                 </div>
               )}
               <button 
-                onClick={() => setCapturingField('selfiePhoto')}
+                onClick={() => void startDriverCapture('selfiePhoto')}
                 className="bg-mairide-primary text-white px-8 py-3 rounded-2xl font-bold text-sm hover:scale-105 transition-transform"
               >
                 {formData.selfiePhoto ? 'Retake Selfie' : 'Capture Selfie'}
@@ -7015,7 +7160,7 @@ const DriverOnboarding = ({
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Front Side</p>
                 <div 
-                  onClick={() => setCapturingField('aadhaarFrontPhoto')}
+                  onClick={() => void startDriverCapture('aadhaarFrontPhoto')}
                   className="aspect-[3/2] border-2 border-dashed border-mairide-secondary rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-mairide-bg transition-colors overflow-hidden"
                 >
                   {formData.aadhaarFrontPhoto ? (
@@ -7028,7 +7173,7 @@ const DriverOnboarding = ({
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Back Side</p>
                 <div 
-                  onClick={() => setCapturingField('aadhaarBackPhoto')}
+                  onClick={() => void startDriverCapture('aadhaarBackPhoto')}
                   className="aspect-[3/2] border-2 border-dashed border-mairide-secondary rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-mairide-bg transition-colors overflow-hidden"
                 >
                   {formData.aadhaarBackPhoto ? (
@@ -7068,7 +7213,7 @@ const DriverOnboarding = ({
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Front Side</p>
                 <div 
-                  onClick={() => setCapturingField('dlFrontPhoto')}
+                  onClick={() => void startDriverCapture('dlFrontPhoto')}
                   className="aspect-[3/2] border-2 border-dashed border-mairide-secondary rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-mairide-bg transition-colors overflow-hidden"
                 >
                   {formData.dlFrontPhoto ? (
@@ -7081,7 +7226,7 @@ const DriverOnboarding = ({
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Back Side</p>
                 <div 
-                  onClick={() => setCapturingField('dlBackPhoto')}
+                  onClick={() => void startDriverCapture('dlBackPhoto')}
                   className="aspect-[3/2] border-2 border-dashed border-mairide-secondary rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-mairide-bg transition-colors overflow-hidden"
                 >
                   {formData.dlBackPhoto ? (
@@ -7224,7 +7369,7 @@ const DriverOnboarding = ({
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Vehicle Photo</p>
                 <div 
-                  onClick={() => setCapturingField('vehiclePhoto')}
+                  onClick={() => void startDriverCapture('vehiclePhoto')}
                   className="aspect-square border-2 border-dashed border-mairide-secondary rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-mairide-bg transition-colors overflow-hidden"
                 >
                   {formData.vehiclePhoto ? (
@@ -7237,7 +7382,7 @@ const DriverOnboarding = ({
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">RC Photo</p>
                 <div 
-                  onClick={() => setCapturingField('rcPhoto')}
+                  onClick={() => void startDriverCapture('rcPhoto')}
                   className="aspect-square border-2 border-dashed border-mairide-secondary rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-mairide-bg transition-colors overflow-hidden"
                 >
                   {formData.rcPhoto ? (
