@@ -10983,10 +10983,6 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
             ? destinationDistance <= 120
             : routeTextMatches(normalizedDestination, normalizedSearchTo));
 
-        const nearbyToTraveler = isWithinDashboardMatchRadius(
-          travelerFeedLocation,
-          getFeedItemOriginLocation(data)
-        );
         const matchesActiveTravelerCorridor = isWithinAnyDashboardCorridor(
           getFeedItemRoute(data),
           activeTravelerRequestRoutes
@@ -10997,7 +10993,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         );
 
         const withinPlanningWindow = isRideWithinPlanningWindow(data);
-        if (originMatches && destinationMatches && withinPlanningWindow && nearbyToTraveler) {
+        if (originMatches && destinationMatches && withinPlanningWindow) {
           const nextRide = { ...data };
           const dedupeKey = getRideDuplicateKey(nextRide);
           if (matchesActiveTravelerCorridor) {
@@ -12290,19 +12286,17 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       travelerRideRequests
         .filter((request) => request.status === 'open')
         .filter((request) => request.consumerId !== profile.uid)
-        .filter((request) => isWithinDashboardMatchRadius(driverFeedLocation, getFeedItemOriginLocation(request)))
         .filter((request) => isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
-    [driverAvailableRideRoutes, driverFeedLocation, travelerRideRequests, profile.uid]
+    [driverAvailableRideRoutes, travelerRideRequests, profile.uid]
   );
   const partialTravelerRideRequests = useMemo(
     () =>
       travelerRideRequests
         .filter((request) => request.status === 'open')
         .filter((request) => request.consumerId !== profile.uid)
-        .filter((request) => isWithinDashboardMatchRadius(driverFeedLocation, getFeedItemOriginLocation(request)))
         .filter((request) => !isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes))
         .filter((request) => isWithinAnyPartialDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
-    [driverAvailableRideRoutes, driverFeedLocation, travelerRideRequests, profile.uid]
+    [driverAvailableRideRoutes, travelerRideRequests, profile.uid]
   );
 
   useEffect(() => {
