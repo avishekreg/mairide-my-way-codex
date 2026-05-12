@@ -12273,6 +12273,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     () => requests.filter((request) => !retiredRideIds.includes(request.rideId)),
     [requests, retiredRideIds]
   );
+  const linkedTravelerRequestIds = useMemo(
+    () =>
+      new Set(
+        activeDashboardRequests
+          .map((request) => String((request as any).linkedTravelerRequestId || ''))
+          .filter(Boolean)
+      ),
+    [activeDashboardRequests]
+  );
   const lockedRideIds = useMemo(
     () => Array.from(getLockedRideIds(driverBookings)),
     [driverBookings]
@@ -12286,17 +12295,19 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       travelerRideRequests
         .filter((request) => request.status === 'open')
         .filter((request) => request.consumerId !== profile.uid)
+        .filter((request) => !linkedTravelerRequestIds.has(request.id))
         .filter((request) => isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
-    [driverAvailableRideRoutes, travelerRideRequests, profile.uid]
+    [driverAvailableRideRoutes, travelerRideRequests, profile.uid, linkedTravelerRequestIds]
   );
   const partialTravelerRideRequests = useMemo(
     () =>
       travelerRideRequests
         .filter((request) => request.status === 'open')
         .filter((request) => request.consumerId !== profile.uid)
+        .filter((request) => !linkedTravelerRequestIds.has(request.id))
         .filter((request) => !isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes))
         .filter((request) => isWithinAnyPartialDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
-    [driverAvailableRideRoutes, travelerRideRequests, profile.uid]
+    [driverAvailableRideRoutes, travelerRideRequests, profile.uid, linkedTravelerRequestIds]
   );
 
   useEffect(() => {
@@ -12694,6 +12705,95 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     setShowOfferForm(true);
   };
 
+  const buildMatchedTravelerNegotiationThread = ({
+    bookingId,
+    request,
+    rideId,
+    ridePayload,
+    driverId,
+  }: {
+    bookingId: string;
+    request: TravelerRideRequest;
+    rideId: string;
+    ridePayload: Record<string, any>;
+    driverId: string;
+  }) => {
+    const nowIso = new Date().toISOString();
+    const requestedFare = Number(request.fare);
+    const listedFare = Number.isFinite(requestedFare) && requestedFare > 0 ? requestedFare : Number(ridePayload.price || 0);
+    const requestedOrigin = request.origin || ridePayload.origin || '';
+    const requestedDestination = request.destination || ridePayload.destination || '';
+
+    return {
+      id: bookingId,
+      rideId,
+      consumerId: request.consumerId,
+      consumerName: request.consumerName || 'Traveler',
+      consumerPhone: request.consumerPhone || '',
+      driverId,
+      driverName: String(ridePayload.driverName || profile.displayName || 'Driver'),
+      driverPhotoUrl: String(ridePayload.driverPhotoUrl || ''),
+      origin: ridePayload.origin || requestedOrigin,
+      destination: ridePayload.destination || requestedDestination,
+      listedOrigin: ridePayload.origin || requestedOrigin,
+      listedDestination: ridePayload.destination || requestedDestination,
+      requestedOrigin,
+      requestedDestination,
+      requiresDetour:
+        normalizeSearchText(requestedOrigin) !== normalizeSearchText(ridePayload.origin || '') ||
+        normalizeSearchText(requestedDestination) !== normalizeSearchText(ridePayload.destination || ''),
+      fare: listedFare,
+      listedFare,
+      negotiatedFare: Number(ridePayload.price || listedFare),
+      negotiationStatus: 'pending' as const,
+      negotiationActor: 'driver' as const,
+      driverCounterPending: true,
+      seatsBooked: Math.max(1, Number(request.seatsNeeded || 1)),
+      totalPrice: listedFare,
+      serviceFee: 0,
+      gstAmount: 0,
+      maiCoinsUsed: 0,
+      paymentStatus: 'pending' as const,
+      status: 'negotiating' as const,
+      linkedTravelerRequestId: request.id,
+      matchedRideId: rideId,
+      matchedDriverId: driverId,
+      matchedAt: nowIso,
+      departureDay: request.departureDay || ridePayload.departureDay,
+      departureDayLabel: request.departureDayLabel || ridePayload.departureDayLabel,
+      departureClock: request.departureClock || ridePayload.departureClock,
+      departureNote: request.departureNote || ridePayload.departureNote,
+      departureTime: request.departureTime || ridePayload.departureTime || nowIso,
+      rideRetired: false,
+      createdAt: request.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+  };
+
+  const upsertMatchedTravelerNegotiationThread = async ({
+    bookingId,
+    request,
+    rideId,
+    ridePayload,
+    driverId,
+  }: {
+    bookingId: string;
+    request: TravelerRideRequest;
+    rideId: string;
+    ridePayload: Record<string, any>;
+    driverId: string;
+  }) => {
+    const threadPayload = buildMatchedTravelerNegotiationThread({
+      bookingId,
+      request,
+      rideId,
+      ridePayload,
+      driverId,
+    });
+    await setDoc(doc(db, 'bookings', bookingId), threadPayload, { merge: true });
+    return threadPayload;
+  };
+
   const loadRelatedBookingThread = async (seedBooking: Booking) => {
     const snapshot = await getDocs(
       query(
@@ -12757,6 +12857,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       if (!resolvedDriverId) {
         throw new Error('Unable to resolve authenticated driver identity. Please sign in again and retry.');
       }
+      const linkedTravelerRequest = linkedTravelerRequestId
+        ? travelerRideRequests.find((request) => request.id === linkedTravelerRequestId) || null
+        : null;
 
       const ridePayload = {
         driverId: resolvedDriverId,
@@ -12785,6 +12888,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         createdRideId = rideRef.id;
 
         if (linkedTravelerRequestId) {
+          if (linkedTravelerRequest) {
+            await upsertMatchedTravelerNegotiationThread({
+              bookingId: linkedTravelerRequestId,
+              request: linkedTravelerRequest,
+              rideId: createdRideId,
+              ridePayload,
+              driverId: resolvedDriverId,
+            });
+          }
           await updateDoc(doc(db, 'travelerRideRequests', linkedTravelerRequestId), {
             status: 'matched',
             matchedRideId: createdRideId || null,
@@ -12812,6 +12924,33 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           response = await axios.post(apiPath('/api/user/create-ride'), body, { headers, timeout: 15000 });
         }
         createdRideId = String(response?.data?.rideId || '');
+        const bookingId = String(response?.data?.bookingId || linkedTravelerRequestId || '');
+        if (bookingId && linkedTravelerRequest && createdRideId) {
+          await upsertMatchedTravelerNegotiationThread({
+            bookingId,
+            request: linkedTravelerRequest,
+            rideId: createdRideId,
+            ridePayload,
+            driverId: resolvedDriverId,
+          });
+        }
+      }
+      if (linkedTravelerRequestId && createdRideId) {
+        const matchedAt = new Date().toISOString();
+        setTravelerRideRequests((prev) =>
+          prev.map((request) =>
+            request.id === linkedTravelerRequestId
+              ? {
+                  ...request,
+                  status: 'matched',
+                  matchedRideId: createdRideId,
+                  matchedDriverId: resolvedDriverId,
+                  matchedAt,
+                  updatedAt: matchedAt,
+                }
+              : request
+          )
+        );
       }
       setNewRide({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
       setOriginLocation(null);

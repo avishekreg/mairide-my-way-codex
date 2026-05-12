@@ -1033,31 +1033,80 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
     if (insertRideError) throw insertRideError;
 
     const linkedTravelerRequestId = String(payload.linkedTravelerRequestId || "").trim();
+    let linkedBookingId: string | null = null;
     if (linkedTravelerRequestId) {
       const { data: requestRow, error: requestReadError } = await getSupabaseAdmin()
         .from("bookings")
-        .select("id,data,status")
+        .select("id,data,status,consumer_id,created_at")
         .eq("id", linkedTravelerRequestId)
         .maybeSingle();
 
       if (!requestReadError && requestRow && requestRow.status === "traveler_request_open") {
         const requestData = requestRow.data || {};
+        const requestedOrigin = String(requestData.origin || origin).trim() || origin;
+        const requestedDestination = String(requestData.destination || destination).trim() || destination;
+        const normalizedRequestedOrigin = normalizeText(requestedOrigin);
+        const normalizedRequestedDestination = normalizeText(requestedDestination);
+        const normalizedRideOrigin = normalizeText(origin);
+        const normalizedRideDestination = normalizeText(destination);
+        const listedFare = Number(requestData.fare);
+        const requestedFare = Number.isFinite(listedFare) && listedFare > 0 ? listedFare : price;
+        const bookingThreadData = {
+          ...requestData,
+          rideId,
+          consumerId: String(requestRow.consumer_id || requestData.consumerId || "").trim(),
+          consumerName:
+            String(requestData.consumerName || requestData.displayName || requestData.userName || "").trim() || "Traveler",
+          consumerPhone: String(requestData.consumerPhone || requestData.phoneNumber || "").trim(),
+          driverId: actorId,
+          driverName,
+          driverPhotoUrl,
+          origin,
+          destination,
+          listedOrigin: origin,
+          listedDestination: destination,
+          requestedOrigin,
+          requestedDestination,
+          requiresDetour:
+            normalizedRequestedOrigin !== normalizedRideOrigin ||
+            normalizedRequestedDestination !== normalizedRideDestination,
+          listedFare: requestedFare,
+          fare: requestedFare,
+          negotiatedFare: price,
+          negotiationStatus: "pending",
+          negotiationActor: "driver",
+          driverCounterPending: true,
+          seatsBooked: Math.max(1, Number(requestData.seatsNeeded || 1)),
+          totalPrice: requestedFare,
+          serviceFee: Number(requestData.serviceFee || 0),
+          gstAmount: Number(requestData.gstAmount || 0),
+          paymentStatus: String(requestData.paymentStatus || "pending"),
+          status: "negotiating",
+          linkedTravelerRequestId,
+          matchedRideId: rideId,
+          matchedDriverId: actorId,
+          matchedAt: now,
+          departureDay: requestData.departureDay || rideData.departureDay,
+          departureDayLabel: requestData.departureDayLabel || rideData.departureDayLabel,
+          departureClock: requestData.departureClock || rideData.departureClock,
+          departureNote: requestData.departureNote || rideData.departureNote,
+          departureTime: requestData.departureTime || rideData.departureTime,
+          rideRetired: false,
+          updatedAt: now,
+          createdAt: requestData.createdAt || requestRow.created_at || now,
+        };
         await getSupabaseAdmin()
           .from("bookings")
           .update({
-            status: "traveler_request_matched",
+            ride_id: rideId,
+            driver_id: actorId,
+            status: "negotiating",
             updated_at: now,
-            data: {
-              ...requestData,
-              status: "matched",
-              matchedRideId: rideId,
-              matchedDriverId: actorId,
-              matchedAt: now,
-              updatedAt: now,
-            },
+            data: bookingThreadData,
           })
           .eq("id", linkedTravelerRequestId)
           .eq("status", "traveler_request_open");
+        linkedBookingId = linkedTravelerRequestId;
       }
     }
 
@@ -1069,6 +1118,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       message: "Ride created successfully",
       id: rideId,
       rideId,
+      bookingId: linkedBookingId,
       ride: rideData,
     });
   } catch (error: any) {
