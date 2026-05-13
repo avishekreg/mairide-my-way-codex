@@ -10303,6 +10303,26 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [requestAutocompleteTo, setRequestAutocompleteTo] = useState<any | null>(null);
   const [requestOriginLocation, setRequestOriginLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [requestDestinationLocation, setRequestDestinationLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [travelerSmartMatchPrompt, setTravelerSmartMatchPrompt] = useState<{
+    draft: {
+      consumerId: string;
+      consumerName: string;
+      consumerPhone: string;
+      origin: string;
+      destination: string;
+      originLocation: { lat: number; lng: number };
+      destinationLocation: { lat: number; lng: number };
+      fare: number;
+      seatsNeeded: number;
+      departureDay: string;
+      departureDayLabel: string;
+      departureClock: string;
+      departureNote: string;
+      departureTime: string;
+    };
+    fullMatches: Ride[];
+    partialMatches: Ride[];
+  } | null>(null);
   const [directionsResponse, setDirectionsResponse] = useState<any | null>(null);
   const [rideStatusById, setRideStatusById] = useState<Record<string, Ride['status']>>({});
   const [tripSessions, setTripSessions] = useState<Record<string, TripSession>>({});
@@ -10775,7 +10795,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     return 'Today';
   };
 
-  const handlePostTravelerRequest = async () => {
+  const buildTravelerRequestDraft = async () => {
     const origin = newRequest.origin.trim();
     const destination = newRequest.destination.trim();
     const fareValue = Number(newRequest.fare);
@@ -10783,115 +10803,277 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
     if (!origin || !destination) {
       showAppDialog('Please select both origin and destination before posting your ride request.', 'warning');
-      return;
+      return null;
     }
     if (!Number.isFinite(fareValue) || fareValue <= 0) {
       showAppDialog('Please enter a valid target fare greater than zero.', 'warning');
-      return;
+      return null;
     }
     if (!Number.isFinite(seatsNeeded) || seatsNeeded < 1) {
       showAppDialog('Please choose at least one seat.', 'warning');
-      return;
+      return null;
     }
 
-    setIsPostingRequest(true);
-    try {
-      const geocodeTimeoutMs = 8000;
-      const profileLocation = profile.location || null;
-      const resolvedOriginLocation =
-        requestOriginLocation || userLocation || profileLocation || await withTimeout(geocodeAddress(origin), geocodeTimeoutMs, null);
-      const resolvedDestinationLocation =
-        requestDestinationLocation || await withTimeout(geocodeAddress(destination), geocodeTimeoutMs, null) || resolvedOriginLocation;
-      if (!resolvedOriginLocation) {
-        showAppDialog('Please allow location access or select a valid origin from suggestions.', 'warning');
+    const geocodeTimeoutMs = 8000;
+    const profileLocation = profile.location || null;
+    const resolvedOriginLocation =
+      requestOriginLocation || userLocation || profileLocation || await withTimeout(geocodeAddress(origin), geocodeTimeoutMs, null);
+    const resolvedDestinationLocation =
+      requestDestinationLocation || await withTimeout(geocodeAddress(destination), geocodeTimeoutMs, null) || resolvedOriginLocation;
+    if (!resolvedOriginLocation) {
+      showAppDialog('Please allow location access or select a valid origin from suggestions.', 'warning');
+      return null;
+    }
+
+    const resolvedConsumerId =
+      profile.uid || auth.currentUser?.uid || (await getSessionUserId()) || '';
+    const resolvedConsumerName =
+      profile.displayName || auth.currentUser?.displayName || profile.email || auth.currentUser?.email || 'Traveler';
+    if (!resolvedConsumerId) {
+      throw new Error('Unable to resolve authenticated traveler identity. Please sign in again and retry.');
+    }
+
+    return {
+      consumerId: resolvedConsumerId,
+      consumerName: resolvedConsumerName,
+      consumerPhone: profile.phoneNumber || '',
+      origin,
+      destination,
+      originLocation: resolvedOriginLocation,
+      destinationLocation: resolvedDestinationLocation,
+      fare: fareValue,
+      seatsNeeded,
+      departureDay: newRequest.departureDay,
+      departureDayLabel: formatDepartureDayLabel(newRequest.departureDay),
+      departureClock: newRequest.departureClock,
+      departureNote: 'Planned departure time may vary due to traffic, road, and operational conditions.',
+      departureTime: buildScheduledDeparture(newRequest.departureDay, newRequest.departureClock),
+    };
+  };
+
+  const findTravelerMatchCandidates = async (draft: {
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+    departureDay: string;
+  }) => {
+    let availableRides: Ride[] = [];
+    let allBookings: Booking[] = [];
+    if (isLocalDevFirestoreMode()) {
+      const [ridesSnapshot, bookingsSnapshot] = await Promise.all([
+        getDocs(query(collection(db, 'rides'), where('status', '==', 'available'))),
+        getDocs(collection(db, 'bookings')),
+      ]);
+      availableRides = ridesSnapshot.docs.map((snapshotDoc) => ({
+        id: snapshotDoc.id,
+        ...(snapshotDoc.data() as Ride),
+      }));
+      allBookings = bookingsSnapshot.docs.map((snapshotDoc) => ({
+        id: snapshotDoc.id,
+        ...(snapshotDoc.data() as Booking),
+      }));
+    } else {
+      const { data } = await axios.get(apiPath('/api/health?action=search-rides'));
+      availableRides = Array.isArray(data?.rides) ? data.rides : [];
+      allBookings = Array.isArray(data?.bookings) ? data.bookings : [];
+    }
+
+    const lockedRideIds = getLockedRideIds(allBookings);
+    const fullMatches = new Map<string, Ride>();
+    const partialMatches = new Map<string, Ride>();
+    const travelerRoute = {
+      originLocation: draft.originLocation,
+      destinationLocation: draft.destinationLocation,
+    };
+
+    availableRides.forEach((ride) => {
+      if (!ride?.id || lockedRideIds.has(ride.id)) return;
+      if (String(ride.status || '') !== 'available') return;
+      if (!isRideWithinPlanningWindow(ride)) return;
+      if (ride.departureDay && draft.departureDay && ride.departureDay !== draft.departureDay) return;
+
+      const rideRoute = getFeedItemRoute(ride as any);
+      if (!rideRoute) return;
+
+      const routeDistanceKm = getDistance(
+        rideRoute.originLocation.lat,
+        rideRoute.originLocation.lng,
+        rideRoute.destinationLocation.lat,
+        rideRoute.destinationLocation.lng
+      );
+      const { pickupDetourKm, dropDetourKm } = getAdaptiveDetourToleranceKm(routeDistanceKm);
+      const strictMatch =
+        routeCorridorMatch({
+          rideOriginLocation: rideRoute.originLocation,
+          rideDestinationLocation: rideRoute.destinationLocation,
+          travelerOriginLocation: travelerRoute.originLocation,
+          travelerDestinationLocation: travelerRoute.destinationLocation,
+          pickupDetourKm,
+          dropDetourKm,
+        }) ||
+        routeCorridorMatch({
+          rideOriginLocation: travelerRoute.originLocation,
+          rideDestinationLocation: travelerRoute.destinationLocation,
+          travelerOriginLocation: rideRoute.originLocation,
+          travelerDestinationLocation: rideRoute.destinationLocation,
+          pickupDetourKm,
+          dropDetourKm,
+        });
+      const dedupeKey = getRideDuplicateKey(ride);
+      if (strictMatch) {
+        fullMatches.set(dedupeKey, ride);
+        partialMatches.delete(dedupeKey);
         return;
       }
 
-      const resolvedConsumerId =
-        profile.uid || auth.currentUser?.uid || (await getSessionUserId()) || '';
-      const resolvedConsumerName =
-        profile.displayName || auth.currentUser?.displayName || profile.email || auth.currentUser?.email || 'Traveler';
-
-      const requestPayload = {
-        consumerId: resolvedConsumerId,
-        consumerName: resolvedConsumerName,
-        consumerPhone: profile.phoneNumber || '',
-        origin,
-        destination,
-        originLocation: resolvedOriginLocation,
-        destinationLocation: resolvedDestinationLocation,
-        fare: fareValue,
-        seatsNeeded,
-        departureDay: newRequest.departureDay,
-        departureDayLabel: formatDepartureDayLabel(newRequest.departureDay),
-        departureClock: newRequest.departureClock,
-        departureNote: 'Planned departure time may vary due to traffic, road, and operational conditions.',
-        departureTime: buildScheduledDeparture(newRequest.departureDay, newRequest.departureClock),
-      };
-      const requestBody = {
-        ...requestPayload,
-        action: 'create-traveler-request',
-      };
-
-      if (!requestPayload.consumerId) {
-        throw new Error('Unable to resolve authenticated traveler identity. Please sign in again and retry.');
+      const partialMatch =
+        routesSharePartialCorridor(
+          rideRoute,
+          travelerRoute,
+          DASHBOARD_MATCH_RADIUS_KM,
+          DASHBOARD_PARTIAL_DROP_RADIUS_KM
+        ) ||
+        routesSharePartialCorridor(
+          travelerRoute,
+          rideRoute,
+          DASHBOARD_MATCH_RADIUS_KM,
+          DASHBOARD_PARTIAL_DROP_RADIUS_KM
+        );
+      if (partialMatch) {
+        partialMatches.set(dedupeKey, ride);
       }
+    });
 
-      if (isLocalDevFirestoreMode()) {
-        const now = new Date().toISOString();
-        await addDoc(collection(db, 'travelerRideRequests'), {
-          ...requestPayload,
-          status: 'open',
-          createdAt: now,
-          updatedAt: now,
-        } as Omit<TravelerRideRequest, 'id'>);
-      } else {
-        const token = await withTimeout(getAccessToken(), 8000, '');
-        if (!token) {
-          throw new Error('Authentication timed out. Please retry.');
-        }
-        const headers = {
-          Authorization: `Bearer ${token}`,
-        };
+    return {
+      fullMatches: Array.from(fullMatches.values()).sort(
+        (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
+      ),
+      partialMatches: Array.from(partialMatches.values()).sort(
+        (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
+      ),
+    };
+  };
+
+  const submitTravelerRequestDraft = async (draft: {
+    consumerId: string;
+    consumerName: string;
+    consumerPhone: string;
+    origin: string;
+    destination: string;
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+    fare: number;
+    seatsNeeded: number;
+    departureDay: string;
+    departureDayLabel: string;
+    departureClock: string;
+    departureNote: string;
+    departureTime: string;
+  }) => {
+    const requestBody = {
+      ...draft,
+      action: 'create-traveler-request',
+    };
+
+    if (isLocalDevFirestoreMode()) {
+      const now = new Date().toISOString();
+      await addDoc(collection(db, 'travelerRideRequests'), {
+        ...draft,
+        status: 'open',
+        createdAt: now,
+        updatedAt: now,
+      } as Omit<TravelerRideRequest, 'id'>);
+    } else {
+      const token = await withTimeout(getAccessToken(), 8000, '');
+      if (!token) {
+        throw new Error('Authentication timed out. Please retry.');
+      }
+      const headers = {
+        Authorization: `Bearer ${token}`,
+      };
+      try {
+        await axios.post(apiPath('/api/user?action=create-traveler-request'), requestBody, {
+          headers,
+          timeout: 15000,
+        });
+      } catch {
         try {
-          await axios.post(apiPath('/api/user?action=create-traveler-request'), requestBody, {
+          await axios.post(apiPath('/api/user/create-traveler-request'), requestBody, {
             headers,
             timeout: 15000,
           });
-        } catch (primaryError) {
-          try {
-            await axios.post(apiPath('/api/user/create-traveler-request'), requestBody, {
-              headers,
-              timeout: 15000,
-            });
-          } catch (secondaryError) {
-            await axios.post(apiPath('/api/user'), requestBody, {
-              headers,
-              timeout: 15000,
-            });
-          }
+        } catch {
+          await axios.post(apiPath('/api/user'), requestBody, {
+            headers,
+            timeout: 15000,
+          });
         }
       }
+    }
 
-      void trackPlatformUsageEvent('ride_requested', {
-        origin,
-        destination,
-        seatsNeeded,
-        departureDay: newRequest.departureDay,
-      });
+    void trackPlatformUsageEvent('ride_requested', {
+      origin: draft.origin,
+      destination: draft.destination,
+      seatsNeeded: draft.seatsNeeded,
+      departureDay: draft.departureDay,
+    });
 
-      setNewRequest({
-        origin: '',
-        destination: '',
-        fare: '',
-        seats: '1',
-        departureDay: 'today',
-        departureClock: '09:00',
-      });
-      setRequestOriginLocation(null);
-      setRequestDestinationLocation(null);
-      setShowRequestForm(false);
-      showAppDialog('Ride request posted successfully. Drivers can now match your request.', 'success');
+    setNewRequest({
+      origin: '',
+      destination: '',
+      fare: '',
+      seats: '1',
+      departureDay: 'today',
+      departureClock: '09:00',
+    });
+    setRequestOriginLocation(null);
+    setRequestDestinationLocation(null);
+    setShowRequestForm(false);
+    showAppDialog('Ride request posted successfully. Drivers can now match your request.', 'success');
+  };
+
+  const openTravelerNegotiationFromSmartMatch = (ride: Ride) => {
+    if (!travelerSmartMatchPrompt) return;
+    setSearch({ from: travelerSmartMatchPrompt.draft.origin, to: travelerSmartMatchPrompt.draft.destination });
+    setSearchLocationFrom(travelerSmartMatchPrompt.draft.originLocation);
+    setSearchLocationTo(travelerSmartMatchPrompt.draft.destinationLocation);
+    setTravelerCounterFare(String(travelerSmartMatchPrompt.draft.fare || ''));
+    setSelectedRide(ride);
+    setShowRequestForm(false);
+    setTravelerSmartMatchPrompt(null);
+  };
+
+  const forcePostTravelerRequestFromSmartMatch = async () => {
+    if (!travelerSmartMatchPrompt) return;
+    setIsPostingRequest(true);
+    try {
+      await submitTravelerRequestDraft(travelerSmartMatchPrompt.draft);
+      setTravelerSmartMatchPrompt(null);
+    } catch (error) {
+      console.error('Failed to post ride request after force post:', error);
+      showAppDialog(getApiErrorMessage(error, 'Ride request failed to post. Please retry in a moment.'), 'error');
+    } finally {
+      setIsPostingRequest(false);
+    }
+  };
+
+  const handlePostTravelerRequest = async () => {
+    setIsPostingRequest(true);
+    try {
+      const draft = await buildTravelerRequestDraft();
+      if (!draft) return;
+
+      const matches = await findTravelerMatchCandidates(draft);
+      if (matches.fullMatches.length > 0 || matches.partialMatches.length > 0) {
+        setShowRequestForm(false);
+        setTravelerSmartMatchPrompt({
+          draft,
+          fullMatches: matches.fullMatches,
+          partialMatches: matches.partialMatches,
+        });
+        return;
+      }
+
+      await submitTravelerRequestDraft(draft);
     } catch (error) {
       console.error('Failed to post ride request:', error);
       showAppDialog(
@@ -12025,6 +12207,120 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           </AnimatePresence>
 
           <AnimatePresence>
+            {travelerSmartMatchPrompt && (
+              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.94 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.94 }}
+                  className="w-full max-w-4xl rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto"
+                >
+                  <div className="mb-5 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-3xl font-black tracking-tight text-mairide-primary">Matching rides found</h3>
+                      <p className="mt-1 text-sm text-mairide-secondary">
+                        Enter negotiation now, or force-post your own ride request.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setTravelerSmartMatchPrompt(null);
+                        setShowRequestForm(true);
+                      }}
+                      className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+                    >
+                      <X className="h-6 w-6" />
+                    </button>
+                  </div>
+
+                  {travelerSmartMatchPrompt.fullMatches.length > 0 && (
+                    <div className="mb-6">
+                      <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-lg font-bold text-mairide-primary">Direct route matches</h4>
+                        <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-green-700">
+                          Best fit
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {travelerSmartMatchPrompt.fullMatches.map((ride) => (
+                          <div key={`traveler-full-${ride.id}`} className="rounded-2xl border border-mairide-secondary bg-mairide-bg p-4">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <p className="text-base font-bold text-mairide-primary">{ride.origin} → {ride.destination}</p>
+                                <p className="text-sm text-mairide-secondary">{ride.driverName} • {formatRideDeparture(ride)}</p>
+                              </div>
+                              <div className="flex flex-col items-start gap-2 md:items-end">
+                                <p className="text-xl font-black text-mairide-accent">{formatCurrency(ride.price)}</p>
+                                <button
+                                  onClick={() => openTravelerNegotiationFromSmartMatch(ride)}
+                                  className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white", primaryActionButtonClass)}
+                                >
+                                  Enter Negotiation
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {travelerSmartMatchPrompt.partialMatches.length > 0 && (
+                    <div className="mb-6">
+                      <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-lg font-bold text-mairide-primary">Partial corridor matches</h4>
+                        <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-orange-700">
+                          Detour may apply
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {travelerSmartMatchPrompt.partialMatches.map((ride) => (
+                          <div key={`traveler-partial-${ride.id}`} className="rounded-2xl border border-orange-200 bg-orange-50/40 p-4">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <p className="text-base font-bold text-mairide-primary">{ride.origin} → {ride.destination}</p>
+                                <p className="text-sm text-mairide-secondary">{ride.driverName} • {formatRideDeparture(ride)}</p>
+                              </div>
+                              <div className="flex flex-col items-start gap-2 md:items-end">
+                                <p className="text-xl font-black text-mairide-accent">{formatCurrency(ride.price)}</p>
+                                <button
+                                  onClick={() => openTravelerNegotiationFromSmartMatch(ride)}
+                                  className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white", primaryActionButtonClass)}
+                                >
+                                  Enter Negotiation
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <button
+                      onClick={() => {
+                        setTravelerSmartMatchPrompt(null);
+                        setShowRequestForm(true);
+                      }}
+                      className={cn("rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-sm font-bold text-mairide-primary", secondaryActionButtonClass)}
+                    >
+                      Continue Editing Request
+                    </button>
+                    <button
+                      onClick={forcePostTravelerRequestFromSmartMatch}
+                      disabled={isPostingRequest}
+                      className={cn("rounded-2xl bg-mairide-accent px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
+                    >
+                      {isPostingRequest ? 'Posting...' : 'Force Post New Request'}
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
             {selectedRide && (
               <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-black/60 backdrop-blur-sm">
                 <motion.div 
@@ -12280,6 +12576,28 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [consumers, setConsumers] = useState<UserProfile[]>([]);
   const [travelerRideRequests, setTravelerRideRequests] = useState<TravelerRideRequest[]>([]);
   const [linkedTravelerRequestId, setLinkedTravelerRequestId] = useState<string | null>(null);
+  const [driverSmartMatchPrompt, setDriverSmartMatchPrompt] = useState<{
+    draft: {
+      driverId: string;
+      driverName: string;
+      driverPhotoUrl: string;
+      driverRating: number;
+      origin: string;
+      destination: string;
+      originLocation: { lat: number; lng: number };
+      destinationLocation: { lat: number; lng: number };
+      price: number;
+      seatsAvailable: number;
+      departureDay: string;
+      departureDayLabel: string;
+      departureClock: string;
+      departureNote: string;
+      departureTime: string;
+      createdAt: string;
+    };
+    fullMatches: TravelerRideRequest[];
+    partialMatches: TravelerRideRequest[];
+  } | null>(null);
   const [requests, setRequests] = useState<Booking[]>([]);
   const [counterFares, setCounterFares] = useState<{ [key: string]: string }>({});
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
@@ -12785,19 +13103,37 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return 'Today';
   };
 
-  const prefillRideOfferFromTravelerRequest = (request: TravelerRideRequest) => {
-    setNewRide({
+  const openDriverSmartMatchFromTravelerRequest = (request: TravelerRideRequest, mode: 'full' | 'partial') => {
+    if (!isOnline) {
+      alert('Please go online before entering negotiation.');
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const draft = {
+      driverId: profile.uid || auth.currentUser?.uid || profile.uid,
+      driverName: profile.displayName,
+      driverPhotoUrl: getResolvedUserPhoto(profile),
+      driverRating: getResolvedUserRating(profile),
       origin: request.origin || '',
       destination: request.destination || '',
-      price: String(request.fare || ''),
-      seats: String(request.seatsNeeded || 1),
+      originLocation: request.originLocation || userLocation || profile.location || { lat: 0, lng: 0 },
+      destinationLocation: request.destinationLocation || request.originLocation || userLocation || profile.location || { lat: 0, lng: 0 },
+      price: Number(request.fare || 0),
+      seatsAvailable: Number(request.seatsNeeded || 1),
       departureDay: request.departureDay || 'today',
+      departureDayLabel: request.departureDayLabel || formatDepartureDayLabel(request.departureDay || 'today'),
       departureClock: request.departureClock || '09:00',
+      departureNote: request.departureNote || 'Planned departure time may vary based on traffic, road, and operational conditions.',
+      departureTime: request.departureTime || buildScheduledDeparture(request.departureDay || 'today', request.departureClock || '09:00'),
+      createdAt: nowIso,
+    };
+    setLinkedTravelerRequestId(null);
+    setShowOfferForm(false);
+    setDriverSmartMatchPrompt({
+      draft,
+      fullMatches: mode === 'full' ? [request] : [],
+      partialMatches: mode === 'partial' ? [request] : [],
     });
-    setOriginLocation(request.originLocation || null);
-    setDestinationLocation(request.destinationLocation || null);
-    setLinkedTravelerRequestId(request.id);
-    setShowOfferForm(true);
   };
 
   const buildMatchedTravelerNegotiationThread = ({
@@ -12907,10 +13243,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return threadBookings.length ? threadBookings : [seedBooking];
   };
 
-  const handlePostRide = async () => {
+  const buildDriverRideDraft = async () => {
     if (!isOnline) {
       alert('Please go online before posting a ride offer.');
-      return;
+      return null;
     }
 
     const origin = newRide.origin.trim();
@@ -12920,139 +13256,280 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
     if (!origin || !destination) {
       alert('Please select both origin and destination before posting your offer.');
-      return;
+      return null;
     }
-
     if (!Number.isFinite(priceValue) || priceValue <= 0) {
       alert('Please enter a valid ride price greater than zero.');
-      return;
+      return null;
     }
-
     if (!Number.isFinite(seatsValue) || seatsValue < 1) {
       alert('Please choose at least one available seat.');
-      return;
+      return null;
     }
 
-    setIsPostingRide(true);
-    try {
-      const geocodeTimeoutMs = 8000;
-      const profileLocation = profile.location || null;
-      const resolvedOriginLocation =
-        originLocation || userLocation || profileLocation || await withTimeout(geocodeAddress(origin), geocodeTimeoutMs, null);
-      const resolvedDestinationLocation =
-        destinationLocation || await withTimeout(geocodeAddress(destination), geocodeTimeoutMs, null) || resolvedOriginLocation;
+    const geocodeTimeoutMs = 8000;
+    const profileLocation = profile.location || null;
+    const resolvedOriginLocation =
+      originLocation || userLocation || profileLocation || await withTimeout(geocodeAddress(origin), geocodeTimeoutMs, null);
+    const resolvedDestinationLocation =
+      destinationLocation || await withTimeout(geocodeAddress(destination), geocodeTimeoutMs, null) || resolvedOriginLocation;
+    if (!resolvedOriginLocation) {
+      alert('Please allow location access or select a valid origin from the suggestions.');
+      return null;
+    }
 
-      if (!resolvedOriginLocation) {
-        alert('Please allow location access or select a valid origin from the suggestions.');
-        return;
-      }
+    const resolvedDriverId =
+      profile.uid || auth.currentUser?.uid || (await getSessionUserId()) || '';
+    if (!resolvedDriverId) {
+      throw new Error('Unable to resolve authenticated driver identity. Please sign in again and retry.');
+    }
 
-      const resolvedDriverId =
-        profile.uid || auth.currentUser?.uid || (await getSessionUserId()) || '';
-      if (!resolvedDriverId) {
-        throw new Error('Unable to resolve authenticated driver identity. Please sign in again and retry.');
-      }
-      const linkedTravelerRequest = linkedTravelerRequestId
-        ? travelerRideRequests.find((request) => request.id === linkedTravelerRequestId) || null
-        : null;
+    return {
+      driverId: resolvedDriverId,
+      driverName: profile.displayName,
+      driverPhotoUrl: getResolvedUserPhoto(profile),
+      driverRating: getResolvedUserRating(profile),
+      origin,
+      destination,
+      originLocation: resolvedOriginLocation,
+      destinationLocation: resolvedDestinationLocation,
+      price: priceValue,
+      seatsAvailable: seatsValue,
+      status: 'available' as const,
+      departureDay: newRide.departureDay,
+      departureDayLabel: formatDepartureDayLabel(newRide.departureDay),
+      departureClock: newRide.departureClock,
+      departureNote: 'Planned departure time may vary based on traffic, road, and operational conditions.',
+      departureTime: buildScheduledDeparture(newRide.departureDay, newRide.departureClock),
+      createdAt: new Date().toISOString(),
+    };
+  };
 
-      const ridePayload = {
-        driverId: resolvedDriverId,
-        driverName: profile.displayName,
-        driverPhotoUrl: getResolvedUserPhoto(profile),
-        driverRating: getResolvedUserRating(profile),
-        origin,
-        destination,
-        originLocation: resolvedOriginLocation,
-        destinationLocation: resolvedDestinationLocation,
-        price: priceValue,
-        seatsAvailable: seatsValue,
-        status: 'available',
-        departureDay: newRide.departureDay,
-        departureDayLabel: formatDepartureDayLabel(newRide.departureDay),
-        departureClock: newRide.departureClock,
-        departureNote: 'Planned departure time may vary based on traffic, road, and operational conditions.',
-        departureTime: buildScheduledDeparture(newRide.departureDay, newRide.departureClock),
-        createdAt: new Date().toISOString()
-      };
+  const findDriverMatchCandidates = (draft: {
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+    departureDay: string;
+  }) => {
+    const offerRoute = {
+      originLocation: draft.originLocation,
+      destinationLocation: draft.destinationLocation,
+    };
+    const fullMatches: TravelerRideRequest[] = [];
+    const partialMatches: TravelerRideRequest[] = [];
 
-      let createdRideId = '';
-      if (isLocalDevFirestoreMode()) {
-        const nowIso = new Date().toISOString();
-        const rideRef = await addDoc(collection(db, 'rides'), ridePayload);
-        createdRideId = rideRef.id;
+    travelerRideRequests
+      .filter((request) => request.status === 'open')
+      .filter((request) => request.consumerId !== profile.uid)
+      .filter((request) => isRideWithinPlanningWindow(request))
+      .forEach((request) => {
+        if (request.departureDay && draft.departureDay && request.departureDay !== draft.departureDay) return;
+        const requestRoute = getFeedItemRoute(request);
+        if (!requestRoute) return;
 
-        if (linkedTravelerRequestId) {
-          if (linkedTravelerRequest) {
-            await upsertMatchedTravelerNegotiationThread({
-              bookingId: linkedTravelerRequestId,
-              request: linkedTravelerRequest,
-              rideId: createdRideId,
-              ridePayload,
-              driverId: resolvedDriverId,
-            });
-          }
-          await updateDoc(doc(db, 'travelerRideRequests', linkedTravelerRequestId), {
-            status: 'matched',
-            matchedRideId: createdRideId || null,
-            matchedDriverId: resolvedDriverId,
-            matchedAt: nowIso,
-            updatedAt: nowIso,
+        const routeDistanceKm = getDistance(
+          offerRoute.originLocation.lat,
+          offerRoute.originLocation.lng,
+          offerRoute.destinationLocation.lat,
+          offerRoute.destinationLocation.lng
+        );
+        const { pickupDetourKm, dropDetourKm } = getAdaptiveDetourToleranceKm(routeDistanceKm);
+        const strictMatch =
+          routeCorridorMatch({
+            rideOriginLocation: offerRoute.originLocation,
+            rideDestinationLocation: offerRoute.destinationLocation,
+            travelerOriginLocation: requestRoute.originLocation,
+            travelerDestinationLocation: requestRoute.destinationLocation,
+            pickupDetourKm,
+            dropDetourKm,
+          }) ||
+          routeCorridorMatch({
+            rideOriginLocation: requestRoute.originLocation,
+            rideDestinationLocation: requestRoute.destinationLocation,
+            travelerOriginLocation: offerRoute.originLocation,
+            travelerDestinationLocation: offerRoute.destinationLocation,
+            pickupDetourKm,
+            dropDetourKm,
           });
+        if (strictMatch) {
+          fullMatches.push(request);
+          return;
         }
-      } else {
-        const token = await withTimeout(getAccessToken(), 8000, '');
-        if (!token) {
-          throw new Error('Authentication timed out. Please retry.');
+
+        const partialMatch =
+          routesSharePartialCorridor(
+            offerRoute,
+            requestRoute,
+            DASHBOARD_MATCH_RADIUS_KM,
+            DASHBOARD_PARTIAL_DROP_RADIUS_KM
+          ) ||
+          routesSharePartialCorridor(
+            requestRoute,
+            offerRoute,
+            DASHBOARD_MATCH_RADIUS_KM,
+            DASHBOARD_PARTIAL_DROP_RADIUS_KM
+          );
+        if (partialMatch) {
+          partialMatches.push(request);
         }
-        const body = {
-          ...ridePayload,
-          linkedTravelerRequestId: linkedTravelerRequestId || null,
-        };
-        const headers = {
-          Authorization: `Bearer ${token}`,
-        };
-        let response;
-        try {
-          response = await axios.post(apiPath('/api/user?action=create-ride'), body, { headers, timeout: 15000 });
-        } catch (primaryError) {
-          response = await axios.post(apiPath('/api/user/create-ride'), body, { headers, timeout: 15000 });
-        }
-        createdRideId = String(response?.data?.rideId || '');
-        const bookingId = String(response?.data?.bookingId || linkedTravelerRequestId || '');
-        if (bookingId && linkedTravelerRequest && createdRideId) {
+      });
+
+    return { fullMatches, partialMatches };
+  };
+
+  const submitDriverRideDraft = async (
+    draft: {
+      driverId: string;
+      driverName: string;
+      driverPhotoUrl: string;
+      driverRating: number;
+      origin: string;
+      destination: string;
+      originLocation: { lat: number; lng: number };
+      destinationLocation: { lat: number; lng: number };
+      price: number;
+      seatsAvailable: number;
+      departureDay: string;
+      departureDayLabel: string;
+      departureClock: string;
+      departureNote: string;
+      departureTime: string;
+      createdAt: string;
+    },
+    linkedRequestIdOverride: string | null = linkedTravelerRequestId
+  ) => {
+    const linkedTravelerRequest = linkedRequestIdOverride
+      ? travelerRideRequests.find((request) => request.id === linkedRequestIdOverride) || null
+      : null;
+
+    let createdRideId = '';
+    if (isLocalDevFirestoreMode()) {
+      const nowIso = new Date().toISOString();
+      const rideRef = await addDoc(collection(db, 'rides'), draft);
+      createdRideId = rideRef.id;
+
+      if (linkedRequestIdOverride) {
+        if (linkedTravelerRequest) {
           await upsertMatchedTravelerNegotiationThread({
-            bookingId,
+            bookingId: linkedRequestIdOverride,
             request: linkedTravelerRequest,
             rideId: createdRideId,
-            ridePayload,
-            driverId: resolvedDriverId,
+            ridePayload: draft,
+            driverId: draft.driverId,
           });
         }
+        await updateDoc(doc(db, 'travelerRideRequests', linkedRequestIdOverride), {
+          status: 'matched',
+          matchedRideId: createdRideId || null,
+          matchedDriverId: draft.driverId,
+          matchedAt: nowIso,
+          updatedAt: nowIso,
+        });
       }
-      if (linkedTravelerRequestId && createdRideId) {
-        const matchedAt = new Date().toISOString();
-        setTravelerRideRequests((prev) =>
-          prev.map((request) =>
-            request.id === linkedTravelerRequestId
-              ? {
-                  ...request,
-                  status: 'matched',
-                  matchedRideId: createdRideId,
-                  matchedDriverId: resolvedDriverId,
-                  matchedAt,
-                  updatedAt: matchedAt,
-                }
-              : request
-          )
-        );
+    } else {
+      const token = await withTimeout(getAccessToken(), 8000, '');
+      if (!token) {
+        throw new Error('Authentication timed out. Please retry.');
       }
-      setNewRide({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
-      setOriginLocation(null);
-      setDestinationLocation(null);
-      setLinkedTravelerRequestId(null);
-      setShowOfferForm(false);
-      alert("Ride offer posted successfully!");
+      const body = {
+        ...draft,
+        linkedTravelerRequestId: linkedRequestIdOverride || null,
+      };
+      const headers = {
+        Authorization: `Bearer ${token}`,
+      };
+      let response;
+      try {
+        response = await axios.post(apiPath('/api/user?action=create-ride'), body, { headers, timeout: 15000 });
+      } catch {
+        response = await axios.post(apiPath('/api/user/create-ride'), body, { headers, timeout: 15000 });
+      }
+      createdRideId = String(response?.data?.rideId || '');
+      const bookingId = String(response?.data?.bookingId || linkedRequestIdOverride || '');
+      if (bookingId && linkedTravelerRequest && createdRideId) {
+        await upsertMatchedTravelerNegotiationThread({
+          bookingId,
+          request: linkedTravelerRequest,
+          rideId: createdRideId,
+          ridePayload: draft,
+          driverId: draft.driverId,
+        });
+      }
+    }
+
+    if (linkedRequestIdOverride && createdRideId) {
+      const matchedAt = new Date().toISOString();
+      setTravelerRideRequests((prev) =>
+        prev.map((request) =>
+          request.id === linkedRequestIdOverride
+            ? {
+                ...request,
+                status: 'matched',
+                matchedRideId: createdRideId,
+                matchedDriverId: draft.driverId,
+                matchedAt,
+                updatedAt: matchedAt,
+              }
+            : request
+        )
+      );
+    }
+
+    setNewRide({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
+    setOriginLocation(null);
+    setDestinationLocation(null);
+    setLinkedTravelerRequestId(null);
+    setShowOfferForm(false);
+    setDriverSmartMatchPrompt(null);
+    showAppDialog(
+      linkedRequestIdOverride ? 'Matching request found. Negotiation thread is now active.' : 'Ride offer posted successfully!',
+      'success'
+    );
+  };
+
+  const negotiateFromDriverSmartMatch = async (requestId: string) => {
+    if (!driverSmartMatchPrompt) return;
+    setIsPostingRide(true);
+    try {
+      await submitDriverRideDraft(driverSmartMatchPrompt.draft, requestId);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'rides');
+    } finally {
+      setIsPostingRide(false);
+    }
+  };
+
+  const forcePostDriverOfferFromSmartMatch = async () => {
+    if (!driverSmartMatchPrompt) return;
+    setIsPostingRide(true);
+    try {
+      await submitDriverRideDraft(driverSmartMatchPrompt.draft, null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'rides');
+    } finally {
+      setIsPostingRide(false);
+    }
+  };
+
+  const handlePostRide = async () => {
+    setIsPostingRide(true);
+    try {
+      const draft = await buildDriverRideDraft();
+      if (!draft) return;
+
+      if (!linkedTravelerRequestId) {
+        const matches = findDriverMatchCandidates(draft);
+        if (matches.fullMatches.length > 0 || matches.partialMatches.length > 0) {
+          setShowOfferForm(false);
+          setDriverSmartMatchPrompt({
+            draft,
+            fullMatches: matches.fullMatches,
+            partialMatches: matches.partialMatches,
+          });
+          return;
+        }
+      }
+
+      await submitDriverRideDraft(draft, linkedTravelerRequestId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'rides');
     } finally {
@@ -13783,6 +14260,122 @@ const finalizeDriverDashboardRazorpayPayment = async (
             </motion.div>
           )}
 
+          <AnimatePresence>
+            {driverSmartMatchPrompt && (
+              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.94 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.94 }}
+                  className="w-full max-w-4xl rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto"
+                >
+                  <div className="mb-5 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-3xl font-black tracking-tight text-mairide-primary">Matching traveler requests found</h3>
+                      <p className="mt-1 text-sm text-mairide-secondary">
+                        Start negotiation now, or force-post your ride offer.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setDriverSmartMatchPrompt(null);
+                        setShowOfferForm(true);
+                      }}
+                      className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+                    >
+                      <X className="h-6 w-6" />
+                    </button>
+                  </div>
+
+                  {driverSmartMatchPrompt.fullMatches.length > 0 && (
+                    <div className="mb-6">
+                      <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-lg font-bold text-mairide-primary">Direct route matches</h4>
+                        <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-green-700">
+                          Best fit
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {driverSmartMatchPrompt.fullMatches.map((request) => (
+                          <div key={`driver-full-${request.id}`} className="rounded-2xl border border-mairide-secondary bg-mairide-bg p-4">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <p className="text-base font-bold text-mairide-primary">{request.origin} → {request.destination}</p>
+                                <p className="text-sm text-mairide-secondary">{request.consumerName} • {formatRideDeparture(request)}</p>
+                              </div>
+                              <div className="flex flex-col items-start gap-2 md:items-end">
+                                <p className="text-xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
+                                <button
+                                  onClick={() => void negotiateFromDriverSmartMatch(request.id)}
+                                  disabled={isPostingRide}
+                                  className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
+                                >
+                                  {isPostingRide ? 'Opening...' : 'Enter Negotiation'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {driverSmartMatchPrompt.partialMatches.length > 0 && (
+                    <div className="mb-6">
+                      <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-lg font-bold text-mairide-primary">Partial corridor matches</h4>
+                        <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-orange-700">
+                          Detour may apply
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {driverSmartMatchPrompt.partialMatches.map((request) => (
+                          <div key={`driver-partial-${request.id}`} className="rounded-2xl border border-orange-200 bg-orange-50/40 p-4">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <p className="text-base font-bold text-mairide-primary">{request.origin} → {request.destination}</p>
+                                <p className="text-sm text-mairide-secondary">{request.consumerName} • {formatRideDeparture(request)}</p>
+                              </div>
+                              <div className="flex flex-col items-start gap-2 md:items-end">
+                                <p className="text-xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
+                                <button
+                                  onClick={() => void negotiateFromDriverSmartMatch(request.id)}
+                                  disabled={isPostingRide}
+                                  className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
+                                >
+                                  {isPostingRide ? 'Opening...' : 'Enter Negotiation'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <button
+                      onClick={() => {
+                        setDriverSmartMatchPrompt(null);
+                        setShowOfferForm(true);
+                      }}
+                      className={cn("rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-sm font-bold text-mairide-primary", secondaryActionButtonClass)}
+                    >
+                      Continue Editing Offer
+                    </button>
+                    <button
+                      onClick={() => void forcePostDriverOfferFromSmartMatch()}
+                      disabled={isPostingRide}
+                      className={cn("rounded-2xl bg-mairide-accent px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
+                    >
+                      {isPostingRide ? 'Posting...' : 'Force Post New Offer'}
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
           {activeTravelerRideRequests.length > 0 && (
             <div className="mb-8">
               <div className="mb-3 flex items-center justify-between">
@@ -13808,7 +14401,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                       <div className="flex flex-col items-start gap-2 md:items-end">
                         <p className="text-2xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
                         <button
-                          onClick={() => prefillRideOfferFromTravelerRequest(request)}
+                          onClick={() => openDriverSmartMatchFromTravelerRequest(request, 'full')}
                           className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white", primaryActionButtonClass)}
                         >
                           Match & Offer Ride
@@ -13861,7 +14454,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                       <div className="flex flex-col items-start gap-2 md:items-end">
                         <p className="text-2xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
                         <button
-                          onClick={() => prefillRideOfferFromTravelerRequest(request)}
+                          onClick={() => openDriverSmartMatchFromTravelerRequest(request, 'partial')}
                           className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white", primaryActionButtonClass)}
                         >
                           Explore & Offer
