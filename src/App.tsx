@@ -12599,6 +12599,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     partialMatches: TravelerRideRequest[];
   } | null>(null);
   const [requests, setRequests] = useState<Booking[]>([]);
+  const [driverNegotiationPreview, setDriverNegotiationPreview] = useState<Booking | null>(null);
   const [counterFares, setCounterFares] = useState<{ [key: string]: string }>({});
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
   const [retiredRideIds, setRetiredRideIds] = useState<string[]>([]);
@@ -13055,6 +13056,18 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return () => window.clearInterval(timer);
   }, [tripSessions]);
 
+  useEffect(() => {
+    if (!driverNegotiationPreview) return;
+    const latest = requests.find((booking) => booking.id === driverNegotiationPreview.id);
+    if (latest) {
+      setDriverNegotiationPreview(latest);
+      return;
+    }
+    if (driverNegotiationPreview.status === 'confirmed' || driverNegotiationPreview.status === 'rejected') {
+      setDriverNegotiationPreview(null);
+    }
+  }, [driverNegotiationPreview, requests]);
+
   const toggleOnline = async () => {
     const newState = !isOnline;
     setIsOnline(newState);
@@ -13472,6 +13485,20 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             : request
         )
       );
+      if (linkedTravelerRequest) {
+        const optimisticThread = normalizeNegotiationBooking(
+          buildMatchedTravelerNegotiationThread({
+            bookingId: linkedRequestIdOverride,
+            request: linkedTravelerRequest,
+            rideId: createdRideId,
+            ridePayload: draft,
+            driverId: draft.driverId,
+          }) as Booking
+        );
+        setRequests((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
+        setDriverBookings((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
+        setDriverNegotiationPreview(optimisticThread);
+      }
     }
 
     setNewRide({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
@@ -14370,6 +14397,87 @@ const finalizeDriverDashboardRazorpayPayment = async (
                     >
                       {isPostingRide ? 'Posting...' : 'Force Post New Offer'}
                     </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {driverNegotiationPreview && (
+              <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.94 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.94 }}
+                  className="w-full max-w-3xl rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto"
+                >
+                  <div className="mb-5 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-3xl font-black tracking-tight text-mairide-primary">Negotiation started</h3>
+                      <p className="mt-1 text-sm text-mairide-secondary">
+                        This is the live negotiation thread. You can accept, reject, or counter now.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setDriverNegotiationPreview(null)}
+                      className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+                    >
+                      <X className="h-6 w-6" />
+                    </button>
+                  </div>
+
+                  <div className="rounded-2xl border border-mairide-secondary bg-mairide-bg p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-base font-bold text-mairide-primary">{driverNegotiationPreview.origin} → {driverNegotiationPreview.destination}</p>
+                        <p className="text-sm text-mairide-secondary">Traveler: {driverNegotiationPreview.consumerName}</p>
+                      </div>
+                      <div className="text-left md:text-right">
+                        <p className="text-xl font-black text-mairide-accent">{formatCurrency(getNegotiationDisplayFare(driverNegotiationPreview))}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+                          {getPendingNegotiationActor(driverNegotiationPreview) === 'driver' ? 'Awaiting traveler' : 'Traveler counter'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-4">
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => {
+                          void handleDriverAction(driverNegotiationPreview, 'confirmed');
+                          setDriverNegotiationPreview(null);
+                        }}
+                        className={cn("flex-1 bg-green-600 text-white py-3", primaryActionButtonClass)}
+                      >
+                        Accept Offer
+                      </button>
+                      <button
+                        onClick={() => {
+                          void handleDriverAction(driverNegotiationPreview, 'rejected');
+                          setDriverNegotiationPreview(null);
+                        }}
+                        className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3", secondaryActionButtonClass)}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                    <div className="flex gap-3">
+                      <input
+                        type="number"
+                        placeholder="Counter fare"
+                        value={counterFares[driverNegotiationPreview.id] || ''}
+                        onChange={(e) => setCounterFares((prev) => ({ ...prev, [driverNegotiationPreview.id]: e.target.value }))}
+                        className="flex-1 p-3 bg-mairide-bg border border-mairide-secondary rounded-xl outline-none"
+                      />
+                      <button
+                        onClick={() => void handleDriverCounterOffer(driverNegotiationPreview, Number(counterFares[driverNegotiationPreview.id]))}
+                        className={cn("bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
+                      >
+                        Send Counter
+                      </button>
+                    </div>
                   </div>
                 </motion.div>
               </div>
