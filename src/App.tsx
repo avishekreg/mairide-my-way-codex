@@ -9262,12 +9262,26 @@ const MyRides = ({
       where('driverId', '==', profile.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+      const byRouteKey = new Map<string, any>();
+      snapshot.forEach((docSnapshot) => {
+        const nextRide = { id: docSnapshot.id, ...docSnapshot.data() } as any;
+        if (nextRide.status === 'cancelled' || hiddenRideIds.includes(nextRide.id)) return;
+        const dedupeKey = getRideDuplicateKey(nextRide);
+        const existing = byRouteKey.get(dedupeKey);
+        if (!existing) {
+          byRouteKey.set(dedupeKey, nextRide);
+          return;
+        }
+        const nextTime = new Date(String(nextRide.createdAt || 0)).getTime();
+        const existingTime = new Date(String(existing.createdAt || 0)).getTime();
+        if (nextTime >= existingTime) {
+          byRouteKey.set(dedupeKey, nextRide);
+        }
+      });
       setRides(
-        list
-          .filter((ride) => ride.status !== 'cancelled' && !hiddenRideIds.includes(ride.id))
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        Array.from(byRouteKey.values()).sort(
+          (a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime()
+        )
       );
       setLoading(false);
     });
@@ -13408,11 +13422,14 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       departureTime: string;
       createdAt: string;
     },
-    linkedRequestIdOverride: string | null = linkedTravelerRequestId
+    linkedRequestIdOverride: string | null = linkedTravelerRequestId,
+    linkedRequestOverride: TravelerRideRequest | null = null
   ) => {
-    const linkedTravelerRequest = linkedRequestIdOverride
-      ? travelerRideRequests.find((request) => request.id === linkedRequestIdOverride) || null
-      : null;
+    const linkedTravelerRequest =
+      linkedRequestOverride ||
+      (linkedRequestIdOverride
+        ? travelerRideRequests.find((request) => request.id === linkedRequestIdOverride) || null
+        : null);
 
     let createdRideId = '';
     if (isLocalDevFirestoreMode()) {
@@ -13513,11 +13530,11 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     );
   };
 
-  const negotiateFromDriverSmartMatch = async (requestId: string) => {
+  const negotiateFromDriverSmartMatch = async (request: TravelerRideRequest) => {
     if (!driverSmartMatchPrompt) return;
     setIsPostingRide(true);
     try {
-      await submitDriverRideDraft(driverSmartMatchPrompt.draft, requestId);
+      await submitDriverRideDraft(driverSmartMatchPrompt.draft, request.id, request);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'rides');
     } finally {
@@ -14333,7 +14350,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                               <div className="flex flex-col items-start gap-2 md:items-end">
                                 <p className="text-xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
                                 <button
-                                  onClick={() => void negotiateFromDriverSmartMatch(request.id)}
+                                  onClick={() => void negotiateFromDriverSmartMatch(request)}
                                   disabled={isPostingRide}
                                   className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
                                 >
@@ -14366,7 +14383,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                               <div className="flex flex-col items-start gap-2 md:items-end">
                                 <p className="text-xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
                                 <button
-                                  onClick={() => void negotiateFromDriverSmartMatch(request.id)}
+                                  onClick={() => void negotiateFromDriverSmartMatch(request)}
                                   disabled={isPostingRide}
                                   className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
                                 >
