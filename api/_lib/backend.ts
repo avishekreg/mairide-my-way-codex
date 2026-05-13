@@ -1164,6 +1164,124 @@ function mapTravelerRequestRow(row: any) {
   };
 }
 
+function mapBookingRow(row: any) {
+  const source = getBookingThreadSource(row);
+  const now = new Date().toISOString();
+  const normalizedStatus = (() => {
+    const topLevelStatus = String(row?.status || "").trim().toLowerCase();
+    const nestedStatus = String(source?.status || "").trim().toLowerCase();
+    const candidate = topLevelStatus || nestedStatus;
+    return ["pending", "confirmed", "completed", "cancelled", "negotiating", "rejected"].includes(candidate)
+      ? candidate
+      : "pending";
+  })();
+  const createdAt = source?.createdAt || row?.created_at || now;
+  const updatedAt = source?.updatedAt || row?.updated_at || row?.created_at || createdAt;
+
+  return {
+    id: row?.id,
+    ...(source || {}),
+    rideId: row?.ride_id || source?.rideId || "",
+    consumerId: row?.consumer_id || source?.consumerId || "",
+    driverId: row?.driver_id || source?.driverId || "",
+    consumerName: source?.consumerName || "",
+    consumerPhone: source?.consumerPhone || "",
+    driverName: source?.driverName || "",
+    driverPhotoUrl: source?.driverPhotoUrl || "",
+    driverPhone: source?.driverPhone || "",
+    origin: source?.origin || "",
+    destination: source?.destination || "",
+    fare: Number(source?.fare || 0),
+    seatsBooked: Number(source?.seatsBooked || source?.seatsNeeded || 1),
+    totalPrice: Number(source?.totalPrice || source?.fare || 0),
+    serviceFee: Number(source?.serviceFee || 0),
+    gstAmount: Number(source?.gstAmount || 0),
+    maiCoinsUsed: Number(source?.maiCoinsUsed || 0),
+    driverMaiCoinsUsed: Number(source?.driverMaiCoinsUsed || 0),
+    status: normalizedStatus,
+    createdAt,
+    updatedAt,
+    data: {
+      ...(row?.data || {}),
+      ...source,
+      rideId: row?.ride_id || source?.rideId || "",
+      consumerId: row?.consumer_id || source?.consumerId || "",
+      driverId: row?.driver_id || source?.driverId || "",
+      status: normalizedStatus,
+      createdAt,
+      updatedAt,
+    },
+  };
+}
+
+export async function handleUserListBookings(req: any, res: ResLike) {
+  try {
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+
+    const url = req.url ? new URL(req.url, "http://localhost") : null;
+    const scopeParam =
+      req.query?.scope ||
+      req.body?.scope ||
+      url?.searchParams.get("scope") ||
+      "consumer";
+
+    let currentUserId = "";
+
+    if (process.env.NODE_ENV === "production") {
+      try {
+        const user = await verifyTokenFromHeader(authHeader);
+        currentUserId = user.id;
+      } catch (error: any) {
+        return res.status(error?.status || 401).json({
+          error: extractErrorMessage(error, "Unauthorized"),
+        });
+      }
+    } else {
+      currentUserId =
+        req.body?.userId ||
+        req.query?.userId ||
+        url?.searchParams.get("userId") ||
+        "";
+    }
+
+    const scope = String(scopeParam || "consumer").trim().toLowerCase();
+    if (!["consumer", "driver"].includes(scope)) {
+      return res.status(400).json({ error: "Invalid booking scope" });
+    }
+    if (!currentUserId) {
+      return res.status(200).json({ bookings: [] });
+    }
+
+    let queryBuilder = getSupabaseAdmin()
+      .from("bookings")
+      .select("*")
+      .in("status", ["pending", "confirmed", "completed", "cancelled", "negotiating", "rejected"])
+      .order("updated_at", { ascending: false });
+
+    queryBuilder =
+      scope === "driver"
+        ? queryBuilder.eq("driver_id", currentUserId)
+        : queryBuilder.eq("consumer_id", currentUserId);
+
+    const { data, error } = await queryBuilder;
+    if (error) {
+      if (String(error?.code || "") === "42P01") {
+        return res.status(200).json({ bookings: [] });
+      }
+      throw error;
+    }
+
+    return res.status(200).json({
+      bookings: (data || []).map(mapBookingRow),
+    });
+  } catch (error: any) {
+    console.error("Error fetching bookings:", error);
+    return res.status(200).json({ bookings: [] });
+  }
+}
+
 export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike) {
   const payload = req.body || {};
   const normalizeLocation = (value: any) => {

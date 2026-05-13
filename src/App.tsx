@@ -10353,21 +10353,63 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'bookings'), where('consumerId', '==', profile.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: Booking[] = [];
-      snapshot.forEach((snapshotDoc) =>
-        list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-      );
-      setDashboardBookings(
-        dedupeBookingsByThread(
-          list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        )
-      );
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'bookings');
-    });
-    return () => unsubscribe();
+    if (isLocalDevFirestoreMode()) {
+      const q = query(collection(db, 'bookings'), where('consumerId', '==', profile.uid));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const list: Booking[] = [];
+        snapshot.forEach((snapshotDoc) =>
+          list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        );
+        setDashboardBookings(
+          dedupeBookingsByThread(
+            list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          )
+        );
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'bookings');
+      });
+      return () => unsubscribe();
+    }
+
+    let isMounted = true;
+    let pollTimer: number | null = null;
+
+    const loadDashboardBookings = async () => {
+      try {
+        const token = await getAccessToken();
+        const { data } = await axios.get(apiPath('/api/user?action=list-bookings&scope=consumer'), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!isMounted) return;
+        const list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
+        const normalized = dedupeBookingsByThread(
+          list
+            .map((booking) => normalizeNegotiationBooking(booking))
+            .sort(
+              (a, b) =>
+                new Date((b as any).updatedAt || b.createdAt).getTime() -
+                new Date((a as any).updatedAt || a.createdAt).getTime()
+            )
+        );
+        setDashboardBookings(normalized);
+      } catch (error) {
+        if (!isMounted) return;
+        console.error('Traveler booking load failed:', error);
+        setDashboardBookings([]);
+      }
+    };
+
+    void loadDashboardBookings();
+    pollTimer = window.setInterval(() => {
+      void loadDashboardBookings();
+    }, 8000);
+
+    return () => {
+      isMounted = false;
+      if (pollTimer) window.clearInterval(pollTimer);
+    };
   }, [profile.uid]);
 
   useEffect(() => {
@@ -12416,31 +12458,83 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, [profile.uid]);
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'bookings'),
-      where('driverId', '==', profile.uid),
-      where('status', 'in', ['pending', 'confirmed', 'negotiating'])
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: Booking[] = [];
-      snapshot.forEach((snapshotDoc) =>
-        list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+    if (isLocalDevFirestoreMode()) {
+      const q = query(
+        collection(db, 'bookings'),
+        where('driverId', '==', profile.uid),
+        where('status', 'in', ['pending', 'confirmed', 'negotiating'])
       );
-      setRequests(
-        dedupeBookingsByThread(list)
-          .filter(
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const list: Booking[] = [];
+        snapshot.forEach((snapshotDoc) =>
+          list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        );
+        setRequests(
+          dedupeBookingsByThread(list)
+            .filter(
+              (booking) =>
+                !retiredRideIds.includes(booking.rideId) &&
+                !(booking as any).rideRetired &&
+                booking.negotiationStatus !== 'rejected' &&
+                ['pending', 'confirmed', 'negotiating'].includes(booking.status)
+            )
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        );
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'bookings');
+      });
+      return () => unsubscribe();
+    }
+
+    let isMounted = true;
+    let pollTimer: number | null = null;
+
+    const loadDriverBookings = async () => {
+      try {
+        const token = await getAccessToken();
+        const { data } = await axios.get(apiPath('/api/user?action=list-bookings&scope=driver'), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!isMounted) return;
+        const list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
+        const normalized = dedupeBookingsByThread(
+          list
+            .map((booking) => normalizeNegotiationBooking(booking))
+            .sort(
+              (a, b) =>
+                new Date((b as any).updatedAt || b.createdAt).getTime() -
+                new Date((a as any).updatedAt || a.createdAt).getTime()
+            )
+        );
+        setDriverBookings(normalized);
+        setRequests(
+          normalized.filter(
             (booking) =>
               !retiredRideIds.includes(booking.rideId) &&
               !(booking as any).rideRetired &&
               booking.negotiationStatus !== 'rejected' &&
               ['pending', 'confirmed', 'negotiating'].includes(booking.status)
           )
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      );
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'bookings');
-    });
-    return () => unsubscribe();
+        );
+      } catch (error) {
+        if (!isMounted) return;
+        console.error('Driver booking load failed:', error);
+        setRequests([]);
+        setDriverBookings([]);
+      }
+    };
+
+    void loadDriverBookings();
+    pollTimer = window.setInterval(() => {
+      void loadDriverBookings();
+    }, 8000);
+
+    return () => {
+      isMounted = false;
+      if (pollTimer) window.clearInterval(pollTimer);
+    };
   }, [profile.uid, retiredRideIds]);
 
   useEffect(() => {
@@ -12472,6 +12566,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, [profile.uid]);
 
   useEffect(() => {
+    if (!isLocalDevFirestoreMode()) return;
     const q = query(collection(db, 'bookings'), where('driverId', '==', profile.uid));
     const unsubscribe = onSnapshot(
       q,

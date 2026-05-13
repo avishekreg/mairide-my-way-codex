@@ -4,6 +4,7 @@ import {
   handleUserChangePassword,
   handleUserCompleteDriverOnboarding,
   handleUserCounterBooking,
+  handleUserListBookings,
   handleUserCreateTravelerRequest,
   handleUserCreateRide,
   handleUserListTravelerRequests,
@@ -86,6 +87,10 @@ export default async function handler(req: any, res: any) {
       return handleUserListTravelerRequests(req, res);
     }
 
+    if (action === "list-bookings") {
+      return handleUserListBookings(req, res);
+    }
+
     if (action === "cancel-traveler-request") {
       return handleUserCancelTravelerRequest(req, res);
     }
@@ -138,6 +143,10 @@ export default async function handler(req: any, res: any) {
       return handleUserListTravelerRequests(req, res);
     }
 
+    if (req.url?.endsWith("/list-bookings")) {
+      return handleUserListBookings(req, res);
+    }
+
     if (req.url?.endsWith("/cancel-traveler-request")) {
       return handleUserCancelTravelerRequest(req, res);
     }
@@ -154,6 +163,9 @@ export default async function handler(req: any, res: any) {
   } catch (error: any) {
     if (action === "list-traveler-requests") {
       return res.status(200).json({ requests: [] });
+    }
+    if (action === "list-bookings") {
+      return res.status(200).json({ bookings: [] });
     }
     console.error("Unhandled user route error:", error);
     return res.status(error?.status || 500).json({ error: "User route failed" });
