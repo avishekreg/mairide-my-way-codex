@@ -981,6 +981,73 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       return res.status(403).json({ error: "Driver account is not active." });
     }
 
+    const linkedTravelerRequestId = String(payload.linkedTravelerRequestId || "").trim();
+    let linkedBookingId: string | null = null;
+    let linkedRequestRow: any = null;
+    let reusedRideIdForLinkedRequest: string | null = null;
+    if (linkedTravelerRequestId) {
+      const { data: requestRow, error: requestReadError } = await getSupabaseAdmin()
+        .from("bookings")
+        .select("id,data,status,consumer_id,driver_id,ride_id,created_at")
+        .eq("id", linkedTravelerRequestId)
+        .maybeSingle();
+
+      if (requestReadError) throw requestReadError;
+      if (!requestRow) {
+        return res.status(404).json({ error: "Traveler request not found." });
+      }
+
+      linkedRequestRow = requestRow;
+      const requestData = requestRow.data || {};
+      const existingRideId = String(requestRow.ride_id || requestData.matchedRideId || requestData.rideId || "").trim();
+      const existingDriverId = String(requestRow.driver_id || requestData.matchedDriverId || requestData.driverId || "").trim();
+      const existingStatus = String(requestRow.status || "").trim().toLowerCase();
+      if (existingRideId && (!existingDriverId || existingDriverId === actorId)) {
+        reusedRideIdForLinkedRequest = existingRideId;
+      }
+
+      if (existingStatus !== "traveler_request_open") {
+        if (existingRideId) {
+          return res.status(200).json({
+            message: "Negotiation already active for this traveler request.",
+            id: existingRideId,
+            rideId: existingRideId,
+            bookingId: requestRow.id,
+            reused: true,
+            ride: {
+              ...(requestData || {}),
+              id: existingRideId,
+              status: requestData.status || "available",
+            },
+          });
+        }
+        return res.status(409).json({
+          error: "Traveler request is no longer open for negotiation.",
+        });
+      }
+
+      if (existingDriverId && existingDriverId !== actorId) {
+        return res.status(409).json({
+          error: "This traveler request is already linked to another driver.",
+        });
+      }
+    }
+    if (reusedRideIdForLinkedRequest && linkedRequestRow) {
+      const requestData = linkedRequestRow.data || {};
+      return res.status(200).json({
+        message: "Negotiation already active for this traveler request.",
+        id: reusedRideIdForLinkedRequest,
+        rideId: reusedRideIdForLinkedRequest,
+        bookingId: linkedRequestRow.id,
+        reused: true,
+        ride: {
+          ...(requestData || {}),
+          id: reusedRideIdForLinkedRequest,
+          status: requestData.status || "available",
+        },
+      });
+    }
+
     const now = new Date().toISOString();
     const departureTime = String(payload.departureTime || "").trim() || now;
     const rideId = crypto.randomUUID();
@@ -1018,6 +1085,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
         payload.departureNote ||
         "Planned departure time may vary based on traffic, road, and operational conditions.",
       departureTime,
+      linkedTravelerRequestId: linkedTravelerRequestId || undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -1032,17 +1100,8 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
     });
     if (insertRideError) throw insertRideError;
 
-    const linkedTravelerRequestId = String(payload.linkedTravelerRequestId || "").trim();
-    let linkedBookingId: string | null = null;
-    if (linkedTravelerRequestId) {
-      const { data: requestRow, error: requestReadError } = await getSupabaseAdmin()
-        .from("bookings")
-        .select("id,data,status,consumer_id,created_at")
-        .eq("id", linkedTravelerRequestId)
-        .maybeSingle();
-
-      if (!requestReadError && requestRow && requestRow.status === "traveler_request_open") {
-        const requestData = requestRow.data || {};
+    if (linkedTravelerRequestId && linkedRequestRow && linkedRequestRow.status === "traveler_request_open") {
+        const requestData = linkedRequestRow.data || {};
         const requestedOrigin = String(requestData.origin || origin).trim() || origin;
         const requestedDestination = String(requestData.destination || destination).trim() || destination;
         const normalizedRequestedOrigin = normalizeText(requestedOrigin);
@@ -1054,7 +1113,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
         const bookingThreadData = {
           ...requestData,
           rideId,
-          consumerId: String(requestRow.consumer_id || requestData.consumerId || "").trim(),
+          consumerId: String(linkedRequestRow.consumer_id || requestData.consumerId || "").trim(),
           consumerName:
             String(requestData.consumerName || requestData.displayName || requestData.userName || "").trim() || "Traveler",
           consumerPhone: String(requestData.consumerPhone || requestData.phoneNumber || "").trim(),
@@ -1093,9 +1152,9 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
           departureTime: requestData.departureTime || rideData.departureTime,
           rideRetired: false,
           updatedAt: now,
-          createdAt: requestData.createdAt || requestRow.created_at || now,
+          createdAt: requestData.createdAt || linkedRequestRow.created_at || now,
         };
-        await getSupabaseAdmin()
+        const { data: linkedRows, error: linkedUpdateError } = await getSupabaseAdmin()
           .from("bookings")
           .update({
             ride_id: rideId,
@@ -1105,9 +1164,48 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
             data: bookingThreadData,
           })
           .eq("id", linkedTravelerRequestId)
-          .eq("status", "traveler_request_open");
-        linkedBookingId = linkedTravelerRequestId;
-      }
+          .eq("status", "traveler_request_open")
+          .select("id");
+        if (linkedUpdateError) throw linkedUpdateError;
+        if ((linkedRows || []).length > 0) {
+          linkedBookingId = linkedTravelerRequestId;
+        } else {
+          const { data: latestBooking } = await getSupabaseAdmin()
+            .from("bookings")
+            .select("id,ride_id,data,status")
+            .eq("id", linkedTravelerRequestId)
+            .maybeSingle();
+          const latestData = latestBooking?.data || {};
+          const latestRideId = String(latestBooking?.ride_id || latestData.matchedRideId || latestData.rideId || "").trim();
+          if (latestRideId) {
+            await getSupabaseAdmin()
+              .from("rides")
+              .update({
+                status: "cancelled",
+                updated_at: now,
+                data: {
+                  ...rideData,
+                  status: "cancelled",
+                  retiredAt: now,
+                  retirementReason: "linked_request_race_reused_existing_ride",
+                  updatedAt: now,
+                },
+              })
+              .eq("id", rideId);
+            return res.status(200).json({
+              message: "Negotiation already active for this traveler request.",
+              id: latestRideId,
+              rideId: latestRideId,
+              bookingId: linkedTravelerRequestId,
+              reused: true,
+              ride: {
+                ...(latestData || {}),
+                id: latestRideId,
+                status: latestData.status || "available",
+              },
+            });
+          }
+        }
     }
 
     void notifyNearbyRideOffer(getSupabaseAdmin(), rideData, actorId).catch((notificationError) => {

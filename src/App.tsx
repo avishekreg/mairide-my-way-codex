@@ -552,9 +552,27 @@ const routeTextMatches = (candidate: string, searchValue: string) => {
 const getRideDuplicateKey = (ride: Partial<Ride>) => {
   const origin = normalizeSearchText(ride.origin || '');
   const destination = normalizeSearchText(ride.destination || '');
-  const departureTime = ride.departureTime || '';
-  const driverId = ride.driverId || '';
-  return `${driverId}__${origin}__${destination}__${departureTime}`;
+  const driverId = String(ride.driverId || '');
+  const linkedTravelerRequestId = String(
+    (ride as any).linkedTravelerRequestId ||
+      (ride as any).linkedBookingId ||
+      (ride as any).matchedBookingId ||
+      ''
+  ).trim();
+  if (linkedTravelerRequestId) {
+    return `${driverId}__linked__${linkedTravelerRequestId}`;
+  }
+  const departureDay = String((ride as any).departureDay || '').trim().toLowerCase();
+  const departureClock = String((ride as any).departureClock || '').trim().slice(0, 5);
+  const fallbackDepartureDate = String((ride as any).departureTime || '').slice(0, 10);
+  const departureBucket =
+    departureDay || departureClock
+      ? `${departureDay || 'na'}@${departureClock || 'na'}`
+      : fallbackDepartureDate || 'na';
+  const priceBucket = Number.isFinite(Number((ride as any).price))
+    ? Math.round(Number((ride as any).price))
+    : Math.round(Number((ride as any).fare || 0));
+  return `${driverId}__${origin}__${destination}__${departureBucket}__${priceBucket}`;
 };
 
 const isVisibleInActiveRideViews = (record: { dashboardVisible?: boolean | null }) =>
@@ -13302,6 +13320,24 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return threadPayload;
   };
 
+  const findExistingDriverNegotiationForRequest = (requestId: string) => {
+    const normalizedRequestId = String(requestId || '').trim();
+    if (!normalizedRequestId) return null;
+
+    const merged = dedupeBookingsByThread([
+      ...(requests as Booking[]),
+      ...(driverBookings as Booking[]),
+    ]);
+
+    return (
+      merged.find((booking) => {
+        const linkedId = String((booking as any).linkedTravelerRequestId || '').trim();
+        if (linkedId && linkedId === normalizedRequestId) return true;
+        return String(booking.id || '').trim() === normalizedRequestId;
+      }) || null
+    );
+  };
+
   const loadRelatedBookingThread = async (seedBooking: Booking) => {
     const snapshot = await getDocs(
       query(
@@ -13475,16 +13511,34 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     linkedRequestIdOverride: string | null = linkedTravelerRequestId,
     linkedRequestOverride: TravelerRideRequest | null = null
   ) => {
+    const existingThread =
+      linkedRequestIdOverride ? findExistingDriverNegotiationForRequest(linkedRequestIdOverride) : null;
+    if (
+      existingThread &&
+      ['pending', 'negotiating'].includes(String(existingThread.status || ''))
+    ) {
+      setDriverNegotiationPreview(existingThread);
+      setLinkedTravelerRequestId(null);
+      setShowOfferForm(false);
+      setDriverSmartMatchPrompt(null);
+      showAppDialog('Negotiation thread already active. Opening it now.', 'success');
+      return;
+    }
+
     const linkedTravelerRequest =
       linkedRequestOverride ||
       (linkedRequestIdOverride
         ? travelerRideRequests.find((request) => request.id === linkedRequestIdOverride) || null
         : null);
+    const ridePayload = linkedRequestIdOverride
+      ? { ...draft, linkedTravelerRequestId: linkedRequestIdOverride }
+      : draft;
 
     let createdRideId = '';
+    let returnedBookingId = String(linkedRequestIdOverride || '');
     if (isLocalDevFirestoreMode()) {
       const nowIso = new Date().toISOString();
-      const rideRef = await addDoc(collection(db, 'rides'), draft);
+      const rideRef = await addDoc(collection(db, 'rides'), ridePayload);
       createdRideId = rideRef.id;
 
       if (linkedRequestIdOverride) {
@@ -13493,7 +13547,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             bookingId: linkedRequestIdOverride,
             request: linkedTravelerRequest,
             rideId: createdRideId,
-            ridePayload: draft,
+            ridePayload,
             driverId: draft.driverId,
           });
         }
@@ -13510,10 +13564,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       if (!token) {
         throw new Error('Authentication timed out. Please retry.');
       }
-      const body = {
-        ...draft,
-        linkedTravelerRequestId: linkedRequestIdOverride || null,
-      };
+      const body = { ...ridePayload };
       const headers = {
         Authorization: `Bearer ${token}`,
       };
@@ -13523,20 +13574,27 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       } catch {
         response = await axios.post(apiPath('/api/user/create-ride'), body, { headers, timeout: 15000 });
       }
-      createdRideId = String(response?.data?.rideId || '');
-      const bookingId = String(response?.data?.bookingId || linkedRequestIdOverride || '');
+      const responseData = response?.data || {};
+      createdRideId = String(responseData.rideId || responseData.id || responseData?.ride?.id || '');
+      returnedBookingId = String(responseData.bookingId || linkedRequestIdOverride || '');
+      const bookingId = returnedBookingId;
       if (bookingId && linkedTravelerRequest && createdRideId) {
         await upsertMatchedTravelerNegotiationThread({
           bookingId,
           request: linkedTravelerRequest,
           rideId: createdRideId,
-          ridePayload: draft,
+          ridePayload,
           driverId: draft.driverId,
         });
       }
     }
 
-    if (linkedRequestIdOverride && createdRideId) {
+    const resolvedRideId =
+      createdRideId ||
+      String((linkedTravelerRequest as any)?.matchedRideId || '') ||
+      String((existingThread as any)?.rideId || '');
+
+    if (linkedRequestIdOverride) {
       const matchedAt = new Date().toISOString();
       setTravelerRideRequests((prev) =>
         prev.map((request) =>
@@ -13544,7 +13602,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             ? {
                 ...request,
                 status: 'matched',
-                matchedRideId: createdRideId,
+                matchedRideId: resolvedRideId || request.matchedRideId,
                 matchedDriverId: draft.driverId,
                 matchedAt,
                 updatedAt: matchedAt,
@@ -13552,19 +13610,26 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             : request
         )
       );
-      if (linkedTravelerRequest) {
+      if (linkedTravelerRequest && resolvedRideId) {
         const optimisticThread = normalizeNegotiationBooking(
           buildMatchedTravelerNegotiationThread({
-            bookingId: linkedRequestIdOverride,
+            bookingId: returnedBookingId || linkedRequestIdOverride,
             request: linkedTravelerRequest,
-            rideId: createdRideId,
-            ridePayload: draft,
+            rideId: resolvedRideId,
+            ridePayload,
             driverId: draft.driverId,
           }) as Booking
         );
         setRequests((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
         setDriverBookings((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
         setDriverNegotiationPreview(optimisticThread);
+      } else {
+        const latestThread =
+          (linkedRequestIdOverride ? findExistingDriverNegotiationForRequest(linkedRequestIdOverride) : null) ||
+          (returnedBookingId ? findExistingDriverNegotiationForRequest(returnedBookingId) : null);
+        if (latestThread) {
+          setDriverNegotiationPreview(latestThread);
+        }
       }
     }
 
@@ -13582,9 +13647,19 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const negotiateFromDriverSmartMatch = async (request: TravelerRideRequest) => {
     if (!driverSmartMatchPrompt) return;
+    const existingThread = findExistingDriverNegotiationForRequest(request.id);
+    if (existingThread && ['pending', 'negotiating'].includes(String(existingThread.status || ''))) {
+      setDriverSmartMatchPrompt(null);
+      setShowOfferForm(false);
+      setDriverNegotiationPreview(existingThread);
+      showAppDialog('Opening your existing negotiation thread.', 'success');
+      return;
+    }
     setIsPostingRide(true);
     try {
       await submitDriverRideDraft(driverSmartMatchPrompt.draft, request.id, request);
+      setDriverSmartMatchPrompt(null);
+      setShowOfferForm(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'rides');
     } finally {
