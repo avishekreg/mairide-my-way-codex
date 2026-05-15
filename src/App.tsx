@@ -268,6 +268,26 @@ const isHtmlResponse = (response: Response) => {
 };
 
 const AUTH_REQUEST_TIMEOUT_MS = 15000;
+const SUPABASE_CLIENT_AUTH_TIMEOUT_MS = 12000;
+const PROFILE_SETUP_TIMEOUT_MS = 12000;
+
+const withRejectingTimeout = async <T,>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 
 const fetchAuthWithTimeout = async (url: string, requestInit: RequestInit, timeoutMs = AUTH_REQUEST_TIMEOUT_MS) => {
   const controller = new AbortController();
@@ -5628,10 +5648,14 @@ const findUserProfileByPhone = async (value: string) => {
             throw new Error('Login session could not be established.');
           }
 
-          const { error: setSessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
+          const { error: setSessionError } = await withRejectingTimeout(
+            supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            }),
+            SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
+            'Login session setup timed out. Please retry.'
+          );
 
           if (setSessionError) {
             throw new Error(setSessionError.message || 'Failed to set login session.');
@@ -5642,8 +5666,16 @@ const findUserProfileByPhone = async (value: string) => {
         }
 
         try {
-          const result = await signInWithEmailAndPassword(auth, normalizeEmailValue(normalizedUsername), password);
-          await handleProfileSetup(result.user, undefined, undefined, false);
+          const result = await withRejectingTimeout(
+            signInWithEmailAndPassword(auth, normalizeEmailValue(normalizedUsername), password),
+            SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
+            'Authentication service timed out. Please retry.'
+          );
+          await withRejectingTimeout(
+            handleProfileSetup(result.user, undefined, undefined, false),
+            PROFILE_SETUP_TIMEOUT_MS,
+            'Login profile setup timed out. Please retry.'
+          );
         } catch (loginError: any) {
           const loginMessage = String(loginError?.message || "").toLowerCase();
           const canUseServerFallback = loginMessage.includes("failed to fetch") || loginMessage.includes("network");
@@ -5665,10 +5697,14 @@ const findUserProfileByPhone = async (value: string) => {
             throw new Error('Login session could not be established.');
           }
 
-          const { error: setSessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
+          const { error: setSessionError } = await withRejectingTimeout(
+            supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            }),
+            SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
+            'Login session setup timed out. Please retry.'
+          );
 
           if (setSessionError) {
             throw new Error(setSessionError.message || 'Failed to set login session.');
