@@ -267,6 +267,27 @@ const isHtmlResponse = (response: Response) => {
   return contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
 };
 
+const AUTH_REQUEST_TIMEOUT_MS = 15000;
+
+const fetchAuthWithTimeout = async (url: string, requestInit: RequestInit, timeoutMs = AUTH_REQUEST_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...requestInit,
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Authentication service timed out. Please retry.');
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+};
+
 const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) => {
   const origins = buildOriginCandidates(path);
   let lastError: any = null;
@@ -275,7 +296,7 @@ const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) =
     const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
     const targetUrl = `${normalizedOrigin}${path}`;
     try {
-      const response = await fetch(targetUrl, requestInit);
+      const response = await fetchAuthWithTimeout(targetUrl, requestInit);
       if (requestInit.method?.toUpperCase() === 'POST') {
         if (isHtmlResponse(response)) {
           continue;
@@ -309,7 +330,7 @@ const forceDirectAuthFetch = async (path: string, requestInit: RequestInit) => {
   for (const origin of directOrigins) {
     const url = `${origin}${path}`;
     try {
-      const response = await fetch(url, {
+      const response = await fetchAuthWithTimeout(url, {
         ...requestInit,
         cache: 'no-store',
       });

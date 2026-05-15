@@ -9,6 +9,7 @@ const TIER2_REWARD = 5;
 const EMAIL_OTP_SESSION_PREFIX = "emailotp_";
 const PASSWORD_RESET_SESSION_PREFIX = "pwdreset_";
 const PASSWORD_RESET_TOKEN_PREFIX = "pwdtoken_";
+const SUPABASE_AUTH_TIMEOUT_MS = 9000;
 const inMemoryOtpSessions = new Map<string, {
   email: string;
   otpHash: string;
@@ -88,6 +89,25 @@ function normalizeEmail(email: unknown) {
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email);
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = SUPABASE_AUTH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      throw new Error("Authentication service timed out. Please retry.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function normalizeOtpValue(value: unknown) {
@@ -1096,7 +1116,7 @@ async function handlePasswordLogin(req: any, res: any) {
       return res.status(500).json({ error: "Supabase runtime config is incomplete." });
     }
 
-    const loginResponse = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+    const loginResponse = await fetchWithTimeout(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

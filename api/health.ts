@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
+const CONFIG_LOOKUP_TIMEOUT_MS = 2500;
+
 function applyCorsHeaders(req: any, res: any) {
   const requestOrigin = String(req?.headers?.origin || "").trim();
   const allowOrigin = requestOrigin || "*";
@@ -29,6 +31,24 @@ function getSupabasePublic(req?: any) {
   return createClient(supabaseUrl, anonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+}
+
+function getFallbackAppVersion() {
+  return String(process.env.VITE_APP_VERSION || "v2.0.1-beta").trim();
+}
+
+async function withTimeout<T>(promise: Promise<T>, fallback: T, ms = CONFIG_LOOKUP_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function isApprovedDriver(row: any) {
@@ -91,29 +111,31 @@ export default async function handler(req: any, res: any) {
       }
     }
     const resolveConfiguredVersion = async () => {
-      let configuredVersion = "";
-      try {
-        const supabaseAdmin = getSupabaseAdmin(req);
-        const { data, error } = await supabaseAdmin
-          .from("app_config")
-          .select("data")
-          .eq("id", "global")
-          .maybeSingle();
-        if (error) throw error;
-        configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
-      } catch {
-        const supabasePublic = getSupabasePublic(req);
-        if (supabasePublic) {
-          const { data } = await supabasePublic
+      const fallbackVersion = getFallbackAppVersion();
+      return withTimeout((async () => {
+        let configuredVersion = "";
+        try {
+          const supabaseAdmin = getSupabaseAdmin(req);
+          const { data, error } = await supabaseAdmin
             .from("app_config")
             .select("data")
             .eq("id", "global")
             .maybeSingle();
+          if (error) throw error;
           configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+        } catch {
+          const supabasePublic = getSupabasePublic(req);
+          if (supabasePublic) {
+            const { data } = await supabasePublic
+              .from("app_config")
+              .select("data")
+              .eq("id", "global")
+              .maybeSingle();
+            configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+          }
         }
-      }
-      const fallbackVersion = String(process.env.VITE_APP_VERSION || "v2.0.1-beta").trim();
-      return configuredVersion || fallbackVersion;
+        return configuredVersion || fallbackVersion;
+      })(), fallbackVersion);
     };
 
     const buildStampPayload = async () => ({
