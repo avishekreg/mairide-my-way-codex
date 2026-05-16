@@ -13403,6 +13403,114 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     );
   };
 
+  const startDriverNegotiationFromTravelerRequest = async (
+    request: TravelerRideRequest,
+    draft: {
+      driverId: string;
+      driverName: string;
+      driverPhotoUrl: string;
+      driverRating: number;
+      origin: string;
+      destination: string;
+      originLocation: { lat: number; lng: number };
+      destinationLocation: { lat: number; lng: number };
+      price: number;
+      seatsAvailable: number;
+      departureDay: string;
+      departureDayLabel: string;
+      departureClock: string;
+      departureNote: string;
+      departureTime: string;
+      createdAt: string;
+    }
+  ) => {
+    const existingThread = findExistingDriverNegotiationForRequest(request.id);
+    if (existingThread && ['pending', 'negotiating'].includes(String(existingThread.status || ''))) {
+      openDriverNegotiationThread(existingThread);
+      showAppDialog('Opening your existing negotiation thread.', 'success');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const resolvedRideId =
+      String((request as any).matchedRideId || '').trim() ||
+      `driver-negotiation-${profile.uid}-${request.id}`;
+    const bookingId = String(request.id || `${resolvedRideId}-${request.consumerId}`);
+    const ridePayload = {
+      ...draft,
+      status: 'negotiating' as const,
+      linkedTravelerRequestId: request.id,
+      matchedTravelerRequestId: request.id,
+      matchedRideId: resolvedRideId,
+      matchedDriverId: draft.driverId,
+      matchedAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    const optimisticThread = normalizeNegotiationBooking(
+      buildMatchedTravelerNegotiationThread({
+        bookingId,
+        request,
+        rideId: resolvedRideId,
+        ridePayload,
+        driverId: draft.driverId,
+      }) as Booking
+    );
+
+    // Open the real negotiation card immediately. Persistence runs after this so
+    // a slow write cannot bounce the driver back into the offer-posting form.
+    openDriverNegotiationThread(optimisticThread);
+    setTravelerRideRequests((prev) =>
+      prev.map((item) =>
+        item.id === request.id
+          ? {
+              ...item,
+              status: 'matched',
+              matchedRideId: resolvedRideId,
+              matchedDriverId: draft.driverId,
+              matchedAt: nowIso,
+              updatedAt: nowIso,
+            }
+          : item
+      )
+    );
+    setRequests((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
+    setDriverBookings((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
+    showAppDialog('Negotiation thread is ready. Send your counter or accept the request.', 'success');
+
+    try {
+      const persistedThread = await upsertMatchedTravelerNegotiationThread({
+        bookingId,
+        request,
+        rideId: resolvedRideId,
+        ridePayload,
+        driverId: draft.driverId,
+      });
+      const normalizedPersistedThread = normalizeNegotiationBooking(persistedThread as Booking);
+      setRequests((prev) => dedupeBookingsByThread([normalizedPersistedThread, ...prev]));
+      setDriverBookings((prev) => dedupeBookingsByThread([normalizedPersistedThread, ...prev]));
+      setDriverNegotiationPreview((current) =>
+        current && getBookingThreadKey(current) === getBookingThreadKey(optimisticThread)
+          ? normalizedPersistedThread
+          : current
+      );
+    } catch (threadError) {
+      console.warn('Driver negotiation thread persistence failed after opening preview.', threadError);
+    }
+
+    try {
+      await updateDoc(doc(db, 'travelerRideRequests', request.id), {
+        status: 'matched',
+        matchedRideId: resolvedRideId,
+        matchedDriverId: draft.driverId,
+        matchedAt: nowIso,
+        updatedAt: nowIso,
+      });
+    } catch (requestSyncError) {
+      console.warn('Traveler request match sync failed after opening driver negotiation preview.', requestSyncError);
+    }
+  };
+
   const loadRelatedBookingThread = async (seedBooking: Booking) => {
     const snapshot = await getDocs(
       query(
@@ -13710,20 +13818,11 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const negotiateFromDriverSmartMatch = async (request: TravelerRideRequest) => {
     const prompt = driverSmartMatchPrompt;
     if (!prompt) return;
-    const existingThread = findExistingDriverNegotiationForRequest(request.id);
-    if (existingThread && ['pending', 'negotiating'].includes(String(existingThread.status || ''))) {
-      openDriverNegotiationThread(existingThread);
-      showAppDialog('Opening your existing negotiation thread.', 'success');
-      return;
-    }
-    setDriverSmartMatchPrompt(null);
-    setShowOfferForm(false);
-    setLinkedTravelerRequestId(null);
     setIsPostingRide(true);
     try {
-      await submitDriverRideDraft(prompt.draft, request.id, request);
+      await startDriverNegotiationFromTravelerRequest(request, prompt.draft);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'rides');
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${request.id}`);
     } finally {
       setIsPostingRide(false);
     }
