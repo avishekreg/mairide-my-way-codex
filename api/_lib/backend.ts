@@ -34,6 +34,14 @@ function normalizeRouteText(value: string | null | undefined) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function normalizeText(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function getRideThreadKey(data: any) {
   return [
     data?.driverId || data?.driver_id || "",
@@ -1227,6 +1235,148 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
   }
 }
 
+export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, res: ResLike) {
+  const payload = req.body || {};
+  const requestId = String(payload.linkedTravelerRequestId || payload.bookingId || "").trim();
+  const driverId = String(payload.driverId || payload.threadData?.driverId || "").trim();
+  const rideId = String(
+    payload.rideId || payload.threadData?.rideId || `driver-negotiation-${driverId}-${requestId}`
+  ).trim();
+
+  if (!requestId || !driverId) {
+    return res.status(400).json({
+      error: "Traveler request id and driver id are required to start negotiation.",
+    });
+  }
+
+  try {
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+    const user = await verifyTokenFromHeader(authHeader);
+    if (user.id !== driverId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: requestRow, error: requestError } = await supabaseAdmin
+      .from("bookings")
+      .select("*")
+      .eq("id", requestId)
+      .maybeSingle();
+
+    if (requestError) throw requestError;
+    if (!requestRow) {
+      return res.status(404).json({ error: "Traveler request not found." });
+    }
+
+    const requestData = getBookingThreadSource(requestRow);
+    const existingDriverId = String(requestRow.driver_id || requestData.driverId || "").trim();
+    if (existingDriverId && existingDriverId !== driverId) {
+      return res.status(409).json({
+        error: "This traveler request is already linked to another driver.",
+      });
+    }
+
+    const consumerId = String(
+      requestRow.consumer_id || requestData.consumerId || payload.threadData?.consumerId || ""
+    ).trim();
+    if (!consumerId) {
+      return res.status(409).json({
+        error: "Traveler request cannot be negotiated because traveler identity is missing.",
+      });
+    }
+
+    const now = new Date().toISOString();
+    const threadData = payload.threadData || {};
+    const ridePayload = payload.ridePayload || {};
+    const listedFare = Number(
+      threadData.listedFare ||
+        threadData.fare ||
+        requestData.fare ||
+        ridePayload.price ||
+        0
+    );
+    const negotiatedFare = Number(
+      threadData.negotiatedFare || ridePayload.price || listedFare || 0
+    );
+
+    const nextData = {
+      ...requestData,
+      ...threadData,
+      id: requestId,
+      rideId,
+      ride_id: rideId,
+      consumerId,
+      consumer_id: consumerId,
+      driverId,
+      driver_id: driverId,
+      origin: threadData.origin || ridePayload.origin || requestData.origin || "",
+      destination: threadData.destination || ridePayload.destination || requestData.destination || "",
+      requestedOrigin:
+        threadData.requestedOrigin || requestData.requestedOrigin || requestData.origin || "",
+      requestedDestination:
+        threadData.requestedDestination ||
+        requestData.requestedDestination ||
+        requestData.destination ||
+        "",
+      listedOrigin: threadData.listedOrigin || ridePayload.origin || requestData.origin || "",
+      listedDestination:
+        threadData.listedDestination || ridePayload.destination || requestData.destination || "",
+      fare: listedFare,
+      listedFare,
+      negotiatedFare,
+      totalPrice: listedFare,
+      negotiationStatus: "pending",
+      negotiationActor: "driver",
+      driverCounterPending: true,
+      status: "negotiating",
+      linkedTravelerRequestId: requestId,
+      matchedRideId: rideId,
+      matchedDriverId: driverId,
+      matchedAt: requestData.matchedAt || threadData.matchedAt || now,
+      departureDay: threadData.departureDay || requestData.departureDay || ridePayload.departureDay,
+      departureDayLabel:
+        threadData.departureDayLabel || requestData.departureDayLabel || ridePayload.departureDayLabel,
+      departureClock:
+        threadData.departureClock || requestData.departureClock || ridePayload.departureClock,
+      departureNote:
+        threadData.departureNote || requestData.departureNote || ridePayload.departureNote,
+      departureTime:
+        threadData.departureTime || requestData.departureTime || ridePayload.departureTime || now,
+      createdAt: requestData.createdAt || requestRow.created_at || now,
+      updatedAt: now,
+    };
+
+    const { data: updatedRow, error: updateError } = await supabaseAdmin
+      .from("bookings")
+      .update({
+        ride_id: rideId,
+        driver_id: driverId,
+        status: "negotiating",
+        updated_at: now,
+        data: nextData,
+      })
+      .eq("id", requestId)
+      .select("*")
+      .single();
+
+    if (updateError) throw updateError;
+
+    return res.status(200).json({
+      message: "Negotiation started.",
+      bookingId: updatedRow.id,
+      rideId,
+      booking: mapBookingRow(updatedRow),
+    });
+  } catch (error: any) {
+    console.error("Error starting matched traveler negotiation:", error);
+    return res.status(error?.status || 500).json({
+      error: extractErrorMessage(error, "Failed to start negotiation."),
+    });
+  }
+}
+
 function mapTravelerRequestRow(row: any) {
   const data = row?.data || {};
   return {
@@ -2254,6 +2404,8 @@ export async function handleUserCounterBooking(req: ReqLike, res: ResLike) {
       }
     }
 
+    let responseRow: any = null;
+
     await Promise.all(
       targetRows.map(async (row: any) => {
         const rowData = row.data || {};
@@ -2267,20 +2419,28 @@ export async function handleUserCounterBooking(req: ReqLike, res: ResLike) {
           updatedAt,
         };
 
-        const { error } = await supabaseAdmin
+        const { data: updatedRow, error } = await supabaseAdmin
           .from("bookings")
           .update({
             status: "negotiating",
             updated_at: updatedAt,
             data: nextData,
           })
-          .eq("id", row.id);
+          .eq("id", row.id)
+          .select("*")
+          .single();
 
         if (error) throw error;
+        if (updatedRow && (!responseRow || updatedRow.id === bookingRow.id)) {
+          responseRow = updatedRow;
+        }
       })
     );
 
-    return res.status(200).json({ message: "Counter offer sent to traveler." });
+    return res.status(200).json({
+      message: "Counter offer sent to traveler.",
+      booking: responseRow ? mapBookingRow(responseRow) : mapBookingRow(bookingRow),
+    });
   } catch (error: any) {
     console.error("Error countering booking:", error);
     return res.status(error?.status || 500).json({

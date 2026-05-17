@@ -142,6 +142,14 @@ export interface Ride {
   driverRating?: number;
   origin: string;
   destination: string;
+  originLocation?: {
+    lat: number;
+    lng: number;
+  };
+  destinationLocation?: {
+    lat: number;
+    lng: number;
+  };
   departureTime: string;
   departureDay?: 'today' | 'tomorrow' | 'dayAfter';
   departureDayLabel?: string;
@@ -260,6 +268,7 @@ export interface AppConfig {
 export interface Booking {
   id: string;
   rideId: string;
+  ride_id?: string;
   consumerId: string;
   consumerName: string;
   consumerPhone?: string;
@@ -306,6 +315,7 @@ export interface Booking {
   negotiationStatus?: 'pending' | 'accepted' | 'rejected';
   negotiationActor?: 'consumer' | 'driver';
   driverCounterPending?: boolean;
+  rideRetired?: boolean;
   rideLifecycleStatus?: 'awaiting_start_otp' | 'in_progress' | 'completed';
   rideStartOtp?: string;
   rideStartOtpGeneratedAt?: string;

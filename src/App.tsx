@@ -132,6 +132,7 @@ import {
   Bell,
   Smartphone
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
 
 declare global {
@@ -570,6 +571,16 @@ const normalizeSearchText = (value?: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+type RouteCoordinate = { lat: number; lng: number };
+type RideRouteLike = Partial<Omit<Ride, 'status' | 'originLocation' | 'destinationLocation'>> & {
+  status?: string;
+  origin?: string;
+  destination?: string;
+  originLocation?: RouteCoordinate | null;
+  destinationLocation?: RouteCoordinate | null;
+  fare?: number;
+};
+
 const routeTextMatches = (candidate: string, searchValue: string) => {
   if (!searchValue) return true;
   if (!candidate) return false;
@@ -590,7 +601,7 @@ const routeTextMatches = (candidate: string, searchValue: string) => {
   );
 };
 
-const getRideDuplicateKey = (ride: Partial<Ride>) => {
+const getRideDuplicateKey = (ride: RideRouteLike) => {
   const origin = normalizeSearchText(ride.origin || '');
   const destination = normalizeSearchText(ride.destination || '');
   const driverId = String(ride.driverId || '');
@@ -727,7 +738,7 @@ type PlatformFeePaymentEvent = {
   revenue: number;
   gst: number;
   total: number;
-  paymentMode: 'maicoins' | 'online' | 'manual';
+  paymentMode: 'maicoins' | 'online' | 'hybrid' | 'manual';
 };
 
 const hasLockedRideLifecycle = (booking: Partial<Booking>) =>
@@ -2131,8 +2142,11 @@ const openAndroidAppSettings = async () => {
 
   try {
     if (Capacitor.isNativePlatform()) {
-      await CapacitorApp.openSettings();
-      return true;
+      const openSettings = (CapacitorApp as unknown as { openSettings?: () => Promise<void> | void }).openSettings;
+      if (typeof openSettings === 'function') {
+        await openSettings();
+        return true;
+      }
     }
   } catch {
     // Fall through to Android intent fallback.
@@ -2199,7 +2213,7 @@ const downloadAndOpenAndroidApk = async (apkUrl: string) => {
       });
 
       const resolvedUri =
-        String(downloadResult?.path || downloadResult?.uri || '').trim() ||
+        String(downloadResult?.path || (downloadResult as Partial<{ uri: string }>)?.uri || '').trim() ||
         String((await Filesystem.getUri({ path: targetFileName, directory }))?.uri || '').trim();
 
       if (!resolvedUri) {
@@ -3719,7 +3733,7 @@ const submitBookingReview = async (
         targetUpdate['driverDetails.rating'] = nextAverage;
       }
 
-      tx.set(targetUserRef, targetUpdate, { merge: true });
+      tx.update(targetUserRef, targetUpdate);
     }
 
     return { review: reviewPayload, workflow: nextWorkflow };
@@ -4998,7 +5012,7 @@ const ContactUnlockCard = ({
   );
 };
 
-const formatRideDeparture = (ride: Partial<Ride>) => {
+const formatRideDeparture = (ride: RideRouteLike) => {
   const dayLabel = ride.departureDayLabel?.trim();
   const clock = ride.departureClock?.trim();
 
@@ -5038,14 +5052,14 @@ if (typeof globalThis !== 'undefined' && !(globalThis as any).withTimeout) {
   (globalThis as any).withTimeout = withTimeout;
 }
 
-const isFutureRide = (ride: Partial<Ride>) => {
+const isFutureRide = (ride: RideRouteLike) => {
   if (!ride.departureTime) return false;
   const departure = new Date(ride.departureTime);
   if (Number.isNaN(departure.getTime())) return false;
   return departure.getTime() > Date.now();
 };
 
-const isRideWithinPlanningWindow = (ride: Partial<Ride>) => {
+const isRideWithinPlanningWindow = (ride: RideRouteLike) => {
   if (!ride.departureTime) return true;
   const departure = new Date(ride.departureTime);
   if (Number.isNaN(departure.getTime())) return true;
@@ -9895,8 +9909,8 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
         throw new Error('Booking request not found.');
       }
       const token = await getAccessToken();
-      await axios.post(
-        '/api/user?action=counter-booking',
+      const { data } = await axios.post(
+        apiPath('/api/user?action=counter-booking'),
         {
           bookingId: request.id,
           driverId: profile.uid,
@@ -10998,10 +11012,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     let availableRides: Ride[] = [];
     let allBookings: Booking[] = [];
     if (isLocalDevFirestoreMode()) {
-      const [ridesSnapshot, bookingsSnapshot] = await Promise.all([
-        getDocs(query(collection(db, 'rides'), where('status', '==', 'available'))),
-        getDocs(collection(db, 'bookings')),
-      ]);
+      const ridesSnapshot = await getDocs(query(collection(db, 'rides'), where('status', '==', 'available')));
+      const bookingsSnapshot = await getDocs(query(collection(db, 'bookings')));
       availableRides = ridesSnapshot.docs.map((snapshotDoc) => ({
         id: snapshotDoc.id,
         ...(snapshotDoc.data() as Ride),
@@ -11264,10 +11276,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       let allBookings: Booking[] = [];
 
       if (isLocalDevFirestoreMode()) {
-        const [querySnapshot, bookingsSnapshot] = await Promise.all([
-          getDocs(query(collection(db, 'rides'), where('status', '==', 'available'))),
-          getDocs(collection(db, 'bookings')),
-        ]);
+        const querySnapshot = await getDocs(query(collection(db, 'rides'), where('status', '==', 'available')));
+        const bookingsSnapshot = await getDocs(query(collection(db, 'bookings')));
         availableRides = querySnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
         allBookings = bookingsSnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
       } else {
@@ -13381,6 +13391,34 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       ridePayload,
       driverId,
     });
+
+    if (!isLocalDevFirestoreMode()) {
+      const token = await getAccessToken();
+      const { data } = await axios.post(
+        apiPath('/api/user?action=start-matched-traveler-negotiation'),
+        {
+          bookingId,
+          linkedTravelerRequestId: request.id,
+          rideId,
+          driverId,
+          ridePayload,
+          threadData: threadPayload,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      const canonicalThread = normalizeNegotiationBooking((data?.booking || threadPayload) as Booking);
+      try {
+        await setDoc(doc(db, 'bookings', canonicalThread.id || bookingId), canonicalThread, { merge: true });
+      } catch (compatSyncError) {
+        console.warn('Driver negotiation compatibility sync skipped after canonical update.', compatSyncError);
+      }
+      return canonicalThread;
+    }
+
     await setDoc(doc(db, 'bookings', bookingId), threadPayload, { merge: true });
     return threadPayload;
   };
@@ -13998,8 +14036,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
     try {
       const token = await getAccessToken();
-      await axios.post(
-        '/api/user?action=counter-booking',
+      const { data } = await axios.post(
+        apiPath('/api/user?action=counter-booking'),
         {
           bookingId: request.id,
           driverId: profile.uid,
@@ -14013,25 +14051,41 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       );
 
       const updatedAt = new Date().toISOString();
+      const canonicalThread = data?.booking
+        ? normalizeNegotiationBooking(data.booking as Booking)
+        : null;
+      const updatedThread = canonicalThread || {
+        ...request,
+        negotiatedFare: fare,
+        negotiationStatus: 'pending' as const,
+        negotiationActor: 'driver' as const,
+        driverCounterPending: true,
+        status: 'negotiating' as const,
+        updatedAt,
+      };
       await persistCounterOfferThroughCompatStore(request, 'driver', fare);
       setRequests((prev) =>
-        prev.map((booking) =>
-          getBookingThreadKey(booking) === getBookingThreadKey(request)
-            ? {
-                ...booking,
-                negotiatedFare: fare,
-                negotiationStatus: 'pending',
-                negotiationActor: 'driver',
-                driverCounterPending: true,
-                status: 'negotiating',
-                updatedAt,
-              }
-            : booking
-        )
+        dedupeBookingsByThread([
+          updatedThread,
+          ...prev.map((booking) =>
+            getBookingThreadKey(booking) === getBookingThreadKey(request) ? updatedThread : booking
+          ),
+        ])
+      );
+      setDriverBookings((prev) =>
+        dedupeBookingsByThread([
+          updatedThread,
+          ...prev.map((booking) =>
+            getBookingThreadKey(booking) === getBookingThreadKey(request) ? updatedThread : booking
+          ),
+        ])
+      );
+      setDriverNegotiationPreview((current) =>
+        current && getBookingThreadKey(current) === getBookingThreadKey(request) ? updatedThread : current
       );
       await upsertTripSession({
         booking: {
-          ...request,
+          ...updatedThread,
           negotiatedFare: fare,
           negotiationStatus: 'pending',
           negotiationActor: 'driver',
@@ -14046,6 +14100,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       });
       showAppDialog('Counter offer sent to traveler.', 'success');
     } catch (error) {
+      if (!isLocalDevFirestoreMode()) {
+        handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
+        return;
+      }
       try {
         const updatedAt = await persistCounterOfferThroughCompatStore(request, 'driver', fare);
         setRequests((prev) =>

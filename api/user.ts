@@ -11,6 +11,7 @@ import {
   handleUserRejectBooking,
   handleUserRespondBooking,
   handleUserSearchRides,
+  handleUserStartMatchedTravelerNegotiation,
   handleUserTravelerCounterBooking,
   handleUserTravelerRespondBooking,
   handleUserUploadDriverDoc,
@@ -61,6 +62,10 @@ export default async function handler(req: any, res: any) {
 
     if (action === "counter-booking") {
       return handleUserCounterBooking(req, res);
+    }
+
+    if (action === "start-matched-traveler-negotiation") {
+      return handleUserStartMatchedTravelerNegotiation(req, res);
     }
 
     if (action === "traveler-counter-booking") {
@@ -117,6 +122,10 @@ export default async function handler(req: any, res: any) {
 
     if (req.url?.endsWith("/counter-booking")) {
       return handleUserCounterBooking(req, res);
+    }
+
+    if (req.url?.endsWith("/start-matched-traveler-negotiation")) {
+      return handleUserStartMatchedTravelerNegotiation(req, res);
     }
 
     if (req.url?.endsWith("/traveler-counter-booking")) {
