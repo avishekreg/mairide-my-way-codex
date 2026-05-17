@@ -1379,17 +1379,38 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
 
 function mapTravelerRequestRow(row: any) {
   const data = row?.data || {};
+  const topLevelStatus = String(row?.status || "").trim().toLowerCase();
+  const nestedStatus = String(data.status || "").trim().toLowerCase();
+  const normalizedStatus =
+    topLevelStatus === "negotiating" || nestedStatus === "negotiating"
+      ? "negotiating"
+      : topLevelStatus === "traveler_request_matched" || nestedStatus === "matched"
+        ? "matched"
+        : topLevelStatus === "traveler_request_cancelled" || nestedStatus === "cancelled"
+          ? "cancelled"
+          : "open";
   return {
     id: row?.id,
     consumerId: row?.consumer_id || data.consumerId || "",
     consumerName: data.consumerName || "",
     consumerPhone: data.consumerPhone || "",
+    driverId: row?.driver_id || data.driverId || data.matchedDriverId || "",
+    driverName: data.driverName || "",
+    driverPhotoUrl: data.driverPhotoUrl || "",
+    rideId: row?.ride_id || data.rideId || data.matchedRideId || "",
     origin: data.origin || "",
     destination: data.destination || "",
+    listedOrigin: data.listedOrigin || data.origin || "",
+    listedDestination: data.listedDestination || data.destination || "",
+    requestedOrigin: data.requestedOrigin || data.origin || "",
+    requestedDestination: data.requestedDestination || data.destination || "",
     originLocation: data.originLocation || null,
     destinationLocation: data.destinationLocation || null,
     fare: Number(data.fare || 0),
+    listedFare: Number(data.listedFare || data.fare || 0),
+    negotiatedFare: Number(data.negotiatedFare || 0),
     seatsNeeded: Number(data.seatsNeeded || 1),
+    seatsBooked: Number(data.seatsBooked || data.seatsNeeded || 1),
     departureTime: data.departureTime || row?.created_at || new Date().toISOString(),
     departureDay: data.departureDay || "today",
     departureDayLabel: data.departureDayLabel || "Today",
@@ -1397,16 +1418,21 @@ function mapTravelerRequestRow(row: any) {
     departureNote:
       data.departureNote ||
       "Planned departure time may vary due to traffic, road, and operational conditions.",
-    status:
-      data.status ||
-      (row?.status === "traveler_request_matched"
-        ? "matched"
-        : row?.status === "traveler_request_cancelled"
-          ? "cancelled"
-          : "open"),
-    matchedRideId: data.matchedRideId || null,
-    matchedDriverId: data.matchedDriverId || null,
+    status: normalizedStatus,
+    negotiationStatus: data.negotiationStatus || null,
+    negotiationActor: data.negotiationActor || null,
+    driverCounterPending: data.driverCounterPending === true,
+    travelerCounterPending: data.travelerCounterPending === true,
+    requiresDetour: data.requiresDetour === true,
+    matchedRideId: data.matchedRideId || row?.ride_id || data.rideId || null,
+    matchedDriverId: data.matchedDriverId || row?.driver_id || data.driverId || null,
     matchedAt: data.matchedAt || null,
+    data: {
+      ...data,
+      status: normalizedStatus,
+      rideId: row?.ride_id || data.rideId || data.matchedRideId || "",
+      driverId: row?.driver_id || data.driverId || data.matchedDriverId || "",
+    },
     createdAt: row?.created_at || new Date().toISOString(),
     updatedAt: row?.updated_at || row?.created_at || new Date().toISOString(),
   };
@@ -1721,14 +1747,20 @@ export async function handleUserListTravelerRequests(req: any, res: ResLike) {
     if (scope === "own" && !currentUserId) {
       return res.status(200).json({ requests: [] });
     }
+    const visibleStatuses =
+      scope === "own"
+        ? [
+            "traveler_request_open",
+            "traveler_request_matched",
+            "traveler_request_cancelled",
+            "negotiating",
+          ]
+        : ["traveler_request_open"];
+
     let queryBuilder = getSupabaseAdmin()
       .from("bookings")
-      .select("id, consumer_id, status, data, created_at, updated_at")
-      .in("status", [
-        "traveler_request_open",
-        "traveler_request_matched",
-        "traveler_request_cancelled",
-      ])
+      .select("id, ride_id, driver_id, consumer_id, status, data, created_at, updated_at")
+      .in("status", visibleStatuses)
       .order("created_at", { ascending: false });
 
     if (scope === "own" && currentUserId) {

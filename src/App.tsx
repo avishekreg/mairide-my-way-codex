@@ -14080,9 +14080,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           ),
         ])
       );
-      setDriverNegotiationPreview((current) =>
-        current && getBookingThreadKey(current) === getBookingThreadKey(request) ? updatedThread : current
-      );
+      setDriverNegotiationPreview(null);
+      setDriverSmartMatchPrompt(null);
+      setShowOfferForm(false);
+      setLinkedTravelerRequestId(null);
       await upsertTripSession({
         booking: {
           ...updatedThread,
@@ -14106,25 +14107,38 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       }
       try {
         const updatedAt = await persistCounterOfferThroughCompatStore(request, 'driver', fare);
+        const updatedThread = {
+          ...request,
+          negotiatedFare: fare,
+          negotiationStatus: 'pending' as const,
+          negotiationActor: 'driver' as const,
+          driverCounterPending: true,
+          status: 'negotiating' as const,
+          updatedAt,
+        };
         setRequests((prev) =>
-          prev.map((booking) =>
-            getBookingThreadKey(booking) === getBookingThreadKey(request)
-              ? {
-                  ...booking,
-                  negotiatedFare: fare,
-                  negotiationStatus: 'pending',
-                  negotiationActor: 'driver',
-                  driverCounterPending: true,
-                  status: 'negotiating',
-                  updatedAt,
-                }
-              : booking
-          )
+          dedupeBookingsByThread([
+            updatedThread,
+            ...prev.map((booking) =>
+              getBookingThreadKey(booking) === getBookingThreadKey(request) ? updatedThread : booking
+            ),
+          ])
         );
+        setDriverBookings((prev) =>
+          dedupeBookingsByThread([
+            updatedThread,
+            ...prev.map((booking) =>
+              getBookingThreadKey(booking) === getBookingThreadKey(request) ? updatedThread : booking
+            ),
+          ])
+        );
+        setDriverNegotiationPreview(null);
+        setDriverSmartMatchPrompt(null);
+        setShowOfferForm(false);
+        setLinkedTravelerRequestId(null);
         await upsertTripSession({
           booking: {
-            ...request,
-            negotiatedFare: fare,
+            ...updatedThread,
             negotiationStatus: 'pending',
             negotiationActor: 'driver',
             status: 'negotiating',
@@ -14858,6 +14872,15 @@ const finalizeDriverDashboardRazorpayPayment = async (
                               className="w-full rounded-2xl border border-mairide-secondary bg-white py-4 pl-12 pr-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
                               value={counterValue}
                               onChange={(e) => setCounterFares((prev) => ({ ...prev, [driverNegotiationPreview.id]: e.target.value }))}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'Enter' && event.key !== 'NumpadEnter') {
+                                  return;
+                                }
+                                event.preventDefault();
+                                if (counterValue && Number(counterValue) > 0) {
+                                  void handleDriverCounterOffer(driverNegotiationPreview, Number(counterValue));
+                                }
+                              }}
                             />
                           </div>
                           <button
