@@ -9,7 +9,7 @@ const TIER2_REWARD = 5;
 const EMAIL_OTP_SESSION_PREFIX = "emailotp_";
 const PASSWORD_RESET_SESSION_PREFIX = "pwdreset_";
 const PASSWORD_RESET_TOKEN_PREFIX = "pwdtoken_";
-const SUPABASE_AUTH_TIMEOUT_MS = 25000;
+const SUPABASE_AUTH_TIMEOUT_MS = 12000;
 const inMemoryOtpSessions = new Map<string, {
   email: string;
   otpHash: string;
@@ -108,6 +108,11 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
   } finally {
     clearTimeout(timer);
   }
+}
+
+function isAuthTimeoutError(error: unknown) {
+  const message = error instanceof Error ? `${error.name} ${error.message}` : String(error || "");
+  return /abort|timeout|timed out/i.test(message);
 }
 
 function normalizeOtpValue(value: unknown) {
@@ -1145,7 +1150,11 @@ async function handlePasswordLogin(req: any, res: any) {
     });
   } catch (error: any) {
     console.error("Password login fallback failed:", error);
-    return res.status(500).json({ error: error.message || "Failed to login" });
+    const isTimeout = isAuthTimeoutError(error);
+    return res.status(isTimeout ? 504 : 500).json({
+      error: error.message || (isTimeout ? "Authentication service timed out. Please retry." : "Failed to login"),
+      code: isTimeout ? "AUTH_UPSTREAM_TIMEOUT" : "AUTH_LOGIN_FAILED",
+    });
   }
 }
 

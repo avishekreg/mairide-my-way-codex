@@ -246,12 +246,12 @@ const buildOriginCandidates = (path?: string) => {
 
   if (isAndroidWebViewLikeRuntime() && isAuthPath) {
     // Android WebView auth is sensitive to host-level HTML fallbacks/challenges.
-    // Pin to API-capable public origins first.
-    return Array.from(new Set([WEB_API_ORIGIN_FAILOVER, WEB_API_ORIGIN_FALLBACK].filter(Boolean)));
+    // Prefer the canonical public domain, then fall back to the Vercel deployment.
+    return Array.from(new Set([WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER].filter(Boolean)));
   }
 
   const appPreferred = isAndroidWebViewLikeRuntime()
-    ? [WEB_API_ORIGIN_FAILOVER, WEB_API_ORIGIN_FALLBACK, currentOrigin, primary]
+    ? [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER, currentOrigin, primary]
     : [currentOrigin, primary, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
   return Array.from(
     new Set(appPreferred.filter(Boolean))
@@ -268,8 +268,8 @@ const isHtmlResponse = (response: Response) => {
   return contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
 };
 
-const AUTH_REQUEST_TIMEOUT_MS = 30000;
-const SUPABASE_CLIENT_AUTH_TIMEOUT_MS = 25000;
+const AUTH_REQUEST_TIMEOUT_MS = 15000;
+const SUPABASE_CLIENT_AUTH_TIMEOUT_MS = 18000;
 const PROFILE_SETUP_TIMEOUT_MS = 25000;
 
 const withRejectingTimeout = async <T,>(
@@ -346,7 +346,7 @@ const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) =
 };
 
 const forceDirectAuthFetch = async (path: string, requestInit: RequestInit) => {
-  const directOrigins = [WEB_API_ORIGIN_FAILOVER, WEB_API_ORIGIN_FALLBACK];
+  const directOrigins = [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
   let lastError: any = null;
   for (const origin of directOrigins) {
     const url = `${origin}${path}`;
@@ -3609,6 +3609,24 @@ const parseApiResponse = async (response: Response, fallback: string) => {
   return payload;
 };
 
+const signInWithDirectSupabasePassword = async (email: string, password: string) => {
+  const { data, error } = await withRejectingTimeout(
+    supabase.auth.signInWithPassword({ email, password }),
+    SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
+    'Authentication service timed out. Please retry.'
+  );
+
+  if (error) {
+    throw new Error(error.message || 'Failed to login');
+  }
+
+  if (!data?.session?.access_token || !data?.session?.refresh_token) {
+    throw new Error('Login session could not be established.');
+  }
+
+  return data;
+};
+
 const hasSubmittedBookingReview = (booking: Booking, reviewerRole: 'consumer' | 'driver') =>
   reviewerRole === 'consumer'
     ? Boolean(booking.consumerReview || booking.reviewWorkflow?.consumerSubmittedAt)
@@ -5649,30 +5667,65 @@ const findUserProfileByPhone = async (value: string) => {
       } else {
         // Email/Password Login
         if (isAndroidWebViewRuntime) {
-          const fallbackResponse = await postAuthAction(
-            'password-login',
-            { email: normalizeEmailValue(normalizedUsername), password },
-            '/api/auth/password-login'
-          );
-          const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
-          const accessToken = String(fallbackData?.session?.access_token || '');
-          const refreshToken = String(fallbackData?.session?.refresh_token || '');
+          const loginEmail = normalizeEmailValue(normalizedUsername);
+          type AndroidLoginAttempt =
+            | { ok: true; source: 'direct' | 'proxy' }
+            | { ok: false; source: 'direct' | 'proxy'; error: unknown };
 
-          if (!accessToken || !refreshToken) {
-            throw new Error('Login session could not be established.');
-          }
+          const directAttempt = signInWithDirectSupabasePassword(loginEmail, password)
+            .then((): AndroidLoginAttempt => ({ ok: true, source: 'direct' }))
+            .catch((error): AndroidLoginAttempt => ({ ok: false, source: 'direct', error }));
 
-          const { error: setSessionError } = await withRejectingTimeout(
-            supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            }),
-            SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
-            'Login session setup timed out. Please retry.'
-          );
+          const proxyAttempt = (async (): Promise<AndroidLoginAttempt> => {
+            try {
+              const fallbackResponse = await postAuthAction(
+                'password-login',
+                { email: loginEmail, password },
+                '/api/auth/password-login'
+              );
+              const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
+              const accessToken = String(fallbackData?.session?.access_token || '');
+              const refreshToken = String(fallbackData?.session?.refresh_token || '');
 
-          if (setSessionError) {
-            throw new Error(setSessionError.message || 'Failed to set login session.');
+              if (!accessToken || !refreshToken) {
+                throw new Error('Login session could not be established.');
+              }
+
+              const { error: setSessionError } = await withRejectingTimeout(
+                supabase.auth.setSession({
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                }),
+                SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
+                'Login session setup timed out. Please retry.'
+              );
+
+              if (setSessionError) {
+                throw new Error(setSessionError.message || 'Failed to set login session.');
+              }
+
+              return { ok: true, source: 'proxy' };
+            } catch (error) {
+              return { ok: false, source: 'proxy', error };
+            }
+          })();
+
+          const firstAttempt = await Promise.race([directAttempt, proxyAttempt]);
+          if (!firstAttempt.ok) {
+            const secondAttempt = firstAttempt.source === 'direct' ? await proxyAttempt : await directAttempt;
+            if (!secondAttempt.ok) {
+              console.warn('Android login failed through both auth paths.', {
+                firstSource: firstAttempt.source,
+                firstError: firstAttempt.error,
+                secondSource: secondAttempt.source,
+                secondError: secondAttempt.error,
+              });
+              throw (
+                secondAttempt.error ||
+                firstAttempt.error ||
+                new Error('Authentication service timed out. Please retry.')
+              );
+            }
           }
 
           window.location.reload();
