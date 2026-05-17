@@ -268,9 +268,9 @@ const isHtmlResponse = (response: Response) => {
   return contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
 };
 
-const AUTH_REQUEST_TIMEOUT_MS = 15000;
-const SUPABASE_CLIENT_AUTH_TIMEOUT_MS = 12000;
-const PROFILE_SETUP_TIMEOUT_MS = 12000;
+const AUTH_REQUEST_TIMEOUT_MS = 30000;
+const SUPABASE_CLIENT_AUTH_TIMEOUT_MS = 25000;
+const PROFILE_SETUP_TIMEOUT_MS = 25000;
 
 const withRejectingTimeout = async <T,>(
   promise: Promise<T>,
@@ -5692,7 +5692,11 @@ const findUserProfileByPhone = async (value: string) => {
           );
         } catch (loginError: any) {
           const loginMessage = String(loginError?.message || "").toLowerCase();
-          const canUseServerFallback = loginMessage.includes("failed to fetch") || loginMessage.includes("network");
+          const canUseServerFallback =
+            loginMessage.includes("failed to fetch") ||
+            loginMessage.includes("network") ||
+            loginMessage.includes("timed out") ||
+            loginMessage.includes("timeout");
 
           if (!canUseServerFallback) {
             throw loginError;
