@@ -9,7 +9,8 @@ const TIER2_REWARD = 5;
 const EMAIL_OTP_SESSION_PREFIX = "emailotp_";
 const PASSWORD_RESET_SESSION_PREFIX = "pwdreset_";
 const PASSWORD_RESET_TOKEN_PREFIX = "pwdtoken_";
-const SUPABASE_AUTH_TIMEOUT_MS = 12000;
+const SUPABASE_AUTH_TIMEOUT_MS = 25000;
+const EXTERNAL_FETCH_TIMEOUT_MS = 15000;
 const inMemoryOtpSessions = new Map<string, {
   email: string;
   otpHash: string;
@@ -401,31 +402,47 @@ async function sendEmailOtpViaResend(emailConfig: Awaited<ReturnType<typeof getE
   };
 }
 
-async function fetchJson(url: string, method: "GET" | "POST" = "GET") {
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Accept: "application/json",
-    },
-  });
-
-  const rawText = await response.text();
-  let payload: any = null;
+async function fetchJson(url: string, method: "GET" | "POST" = "GET", timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    payload = rawText ? JSON.parse(rawText) : null;
-  } catch {
-    payload = rawText;
-  }
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Accept: "application/json",
+      },
+      signal: controller.signal,
+    });
 
-  if (!response.ok) {
-    throw Object.assign(
-      new Error(typeof payload === "string" ? payload : payload?.Details || `Request failed with status ${response.status}`),
-      { payload, status: response.status }
-    );
-  }
+    const rawText = await response.text();
+    let payload: any = null;
 
-  return payload;
+    try {
+      payload = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      payload = rawText;
+    }
+
+    if (!response.ok) {
+      throw Object.assign(
+        new Error(typeof payload === "string" ? payload : payload?.Details || `Request failed with status ${response.status}`),
+        { payload, status: response.status }
+      );
+    }
+
+    return payload;
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      throw Object.assign(new Error("External request timed out. Please retry."), {
+        status: 504,
+        code: "EXTERNAL_REQUEST_TIMEOUT",
+      });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function sendSmsOtpToPhone(phoneNumber: string, purpose: "login" | "password_reset" = "login") {
@@ -829,35 +846,84 @@ export async function handleResolvePhoneLogin(req: any, res: any) {
   const { phoneNumber } = req.body || {};
   const supabaseAdmin = getSupabaseAdmin();
   const variants = buildPhoneVariants(phoneNumber);
+  const digits = normalizePhone(phoneNumber);
+  const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
 
   if (!variants.length) {
     return res.status(400).json({ error: "A valid phone number is required." });
   }
 
   try {
-    const { data, error } = await supabaseAdmin
-      .from("users")
-      .select("id,role,email,phone_number,data")
-      .limit(5000);
-
-    if (error) {
-      throw error;
-    }
-
+    const selectFields = "id,role,email,phone_number,data";
     const normalizedVariants = new Set(variants.map((value) => normalizePhone(value)));
-    const profile = (data || []).find((row: any) => {
+    const matchesPhone = (row: any) => {
       const rowData = (row?.data as Record<string, any>) || {};
       const storedDigits = normalizePhone(row?.phone_number || rowData.phoneNumber || "");
       if (!storedDigits) return false;
-      const tail = storedDigits.slice(-10);
+      const storedTail = storedDigits.slice(-10);
       return (
         normalizedVariants.has(storedDigits) ||
-        normalizedVariants.has(tail) ||
-        Array.from(normalizedVariants).some(
-          (candidate) => storedDigits.endsWith(candidate) || candidate.endsWith(storedDigits)
-        )
+        normalizedVariants.has(storedTail) ||
+        (last10.length >= 10 && storedTail === last10)
       );
-    });
+    };
+
+    const { data: exactRows, error: exactError } = await supabaseAdmin
+      .from("users")
+      .select(selectFields)
+      .in("phone_number", variants)
+      .limit(1);
+
+    if (exactError) {
+      throw exactError;
+    }
+
+    let profile = (exactRows || [])[0] || null;
+
+    if (!profile) {
+      const quotedVariants = variants
+        .map((value) => `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+        .join(",");
+      const { data: legacyRows, error: legacyError } = await supabaseAdmin
+        .from("users")
+        .select(selectFields)
+        .filter("data->>phoneNumber", "in", `(${quotedVariants})`)
+        .limit(1);
+
+      if (legacyError) {
+        throw legacyError;
+      }
+
+      profile = (legacyRows || [])[0] || null;
+    }
+
+    if (!profile && last10.length >= 10) {
+      const { data: suffixRows, error: suffixError } = await supabaseAdmin
+        .from("users")
+        .select(selectFields)
+        .ilike("phone_number", `%${last10}`)
+        .limit(10);
+
+      if (suffixError) {
+        throw suffixError;
+      }
+
+      profile = (suffixRows || []).find(matchesPhone) || null;
+    }
+
+    if (!profile && last10.length >= 10) {
+      const { data: legacySuffixRows, error: legacySuffixError } = await supabaseAdmin
+        .from("users")
+        .select(selectFields)
+        .filter("data->>phoneNumber", "ilike", `%${last10}`)
+        .limit(10);
+
+      if (legacySuffixError) {
+        throw legacySuffixError;
+      }
+
+      profile = (legacySuffixRows || []).find(matchesPhone) || null;
+    }
 
     if (!profile) {
       return res.status(404).json({ error: "NOT_REGISTERED" });

@@ -2431,11 +2431,7 @@ const getHybridPaymentBreakdown = (booking: Booking, balance: number, useCoins: 
   };
 };
 let razorpayScriptPromise: Promise<boolean> | null = null;
-const GOOGLE_MAPS_API_KEY =
-  import.meta.env.VITE_GOOGLE_MAPS_API_KEY &&
-  import.meta.env.VITE_GOOGLE_MAPS_API_KEY.length > 10
-    ? import.meta.env.VITE_GOOGLE_MAPS_API_KEY
-    : "";
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 const UI_LANGUAGE_STORAGE_KEY = 'mairide_ui_language';
 const UI_LANGUAGE_PROMPT_SEEN_KEY = 'mairide_ui_language_prompt_seen';
 const UI_LANGUAGE_PROMPT_SESSION_KEY = 'mairide_ui_language_prompt_session';
@@ -10328,12 +10324,12 @@ const finalizeDriverRazorpayPayment = async (
                   <span className="font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm text-mairide-secondary">
-                    {travelerCounterPending ? 'Traveler offered fare' : driverCounterPending ? 'Your counter fare' : 'Current request fare'}
-                  </span>
-                  <span className={cn("font-bold", showNegotiatedFareLine ? "text-mairide-accent text-xl" : "text-mairide-primary text-lg")}>
-                    {formatCurrency(displayFare)}
-                  </span>
+	                  <span className="text-sm text-mairide-secondary">
+	                    {travelerCounterPending ? 'Traveler counter fare' : driverCounterPending ? 'Your counter fare' : 'Current request fare'}
+	                  </span>
+	                  <span className={cn("font-bold", showNegotiatedFareLine ? "text-mairide-accent text-xl" : "text-mairide-primary text-lg")}>
+	                    {formatCurrency(displayFare)}
+	                  </span>
                 </div>
               </div>
 
@@ -10357,27 +10353,45 @@ const finalizeDriverRazorpayPayment = async (
                 </div>
               )}
 
-              {driverCounterPending ? (
-                <div className="bg-mairide-bg p-6 rounded-2xl flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <Clock className="w-5 h-5 text-mairide-accent" />
-                    <div>
-                      <p className="font-bold text-mairide-primary">Your counter offer has been sent.</p>
-                      <p className="text-xs text-mairide-secondary">Waiting for the traveler to accept or reject {formatCurrency(displayFare)}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => handleAction(request.id, 'rejected', request.fare, request.driverId)}
-                    className="text-xs font-bold text-red-600 hover:underline"
-                  >
-                    Cancel Request
-                  </button>
-                </div>
-              ) : (request.status === 'pending' || travelerCounterPending) ? (
-                <div className="space-y-4">
-                  <div className="flex space-x-4">
-                    <button 
-                      onClick={() => handleAction(request.id, 'confirmed', request.fare, request.driverId)}
+	              {request.status === 'negotiating' ? (
+	                <>
+	                  {travelerCounterPending && (
+	                    <div className="mb-6 p-6 bg-mairide-accent/10 border border-mairide-accent rounded-2xl">
+	                      <p className="font-bold text-mairide-primary mb-2">Counter offer received: {formatCurrency(displayFare)}</p>
+	                      <div className="flex flex-col sm:flex-row gap-3">
+	                        <button
+	                          onClick={() => handleAction(request.id, 'confirmed', request.fare, request.driverId)}
+	                          className={cn("flex-1 bg-mairide-primary text-white py-3 text-sm", primaryActionButtonClass)}
+	                        >
+	                          Accept Counter Offer
+	                        </button>
+	                        <button
+	                          onClick={() => handleAction(request.id, 'rejected', request.fare, request.driverId)}
+	                          className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3 text-sm", secondaryActionButtonClass)}
+	                        >
+	                          Reject
+	                        </button>
+	                      </div>
+	                    </div>
+	                  )}
+
+	                  {driverCounterPending && (
+	                    <div className={cn(
+	                      "mb-6 p-6 rounded-2xl",
+	                      "bg-mairide-accent/10 border border-mairide-accent"
+	                    )}>
+	                      <p className="font-bold text-mairide-primary">Your counter offer has been sent.</p>
+	                      <p className="mt-2 text-sm text-mairide-secondary">
+	                        Waiting for the traveler to accept or reject <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>.
+	                      </p>
+	                    </div>
+	                  )}
+	                </>
+	              ) : request.status === 'pending' ? (
+	                <div className="space-y-4">
+	                  <div className="flex space-x-4">
+	                    <button 
+	                      onClick={() => handleAction(request.id, 'confirmed', request.fare, request.driverId)}
                       className="flex-1 bg-green-600 text-white py-4 rounded-2xl font-bold hover:bg-green-700 transition-colors shadow-lg shadow-green-100"
                     >
                       {travelerCounterPending ? 'Accept Offer' : 'Accept Request'}

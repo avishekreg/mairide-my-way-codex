@@ -1,0 +1,10 @@
+<svg width="1400" height="560" viewBox="0 0 1400 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1400" height="560" rx="52" fill="#F7F8FA"/>
+  <g transform="translate(70,80)">
+    <image href="file:///Users/avishek/Documents/Playground/mairide-my-way/.codex-previews/mairide-icon.svg" x="0" y="0" width="340" height="340"/>
+  </g>
+  <g transform="translate(460,78)">
+    <text x="0" y="200" fill="#111111" font-family="Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif" font-size="250" letter-spacing="1">MaiRide</text>
+    <text x="4" y="410" fill="#111111" font-family="Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif" font-size="165" letter-spacing="1">my way</text>
+  </g>
+</svg>
