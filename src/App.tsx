@@ -34,7 +34,6 @@ import {
   doc, 
   getDoc, 
   setDoc, 
-  onSnapshot,
   collection,
   query,
   where,
@@ -677,6 +676,31 @@ const generateRideOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 
 const TRIP_SESSION_STALE_AFTER_MS = 60_000;
 const TRIP_SIGNAL_UPDATE_INTERVAL_MS = 3_000;
+const LOCATION_DB_UPDATE_INTERVAL_MS = 10_000;
+const INTERNAL_DEBUG_LOG_KEY = 'mairide_internal_debug_events';
+
+type FirestoreFetchState<T> = {
+  data: T;
+  loading: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+};
+
+type AppConfigState = {
+  config: AppConfig | null;
+  loading: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+};
+
+const emptyAppConfigState: AppConfigState = {
+  config: null,
+  loading: false,
+  error: null,
+  refresh: async () => undefined,
+};
+
+const AppConfigContext = React.createContext<AppConfigState | null>(null);
 const TRIP_AUDIT_MAX_ITEMS = 40;
 const TRIP_MAX_VALID_SPEED_KMPH = 170;
 
@@ -1756,6 +1780,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   }
+  recordInternalDebugEvent('firestore_error', errInfo);
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   
   if (errInfo.error.includes('the client is offline')) {
@@ -1763,6 +1788,49 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   }
   
   throw new Error(JSON.stringify(errInfo));
+}
+
+function recordInternalDebugEvent(event: string, payload: unknown) {
+  const entry = {
+    event,
+    payload,
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    if (typeof window !== 'undefined') {
+      const existing = safeStorageGet('session', INTERNAL_DEBUG_LOG_KEY);
+      const parsed = existing ? JSON.parse(existing) : [];
+      const next = Array.isArray(parsed) ? parsed.slice(-49) : [];
+      next.push(entry);
+      safeStorageSet('session', INTERNAL_DEBUG_LOG_KEY, JSON.stringify(next));
+    }
+  } catch {
+    // Debug logging must never block the product flow.
+  }
+}
+
+function reportFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  recordInternalDebugEvent('firestore_error', errInfo);
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  return errInfo;
 }
 
 async function testConnection() {
@@ -2813,16 +2881,15 @@ const loadNegotiationThreadBookings = async (seedBooking: Booking) => {
   const rideId = seedBooking.rideId;
   const consumerId = seedBooking.consumerId;
 
-  if (!rideId || !consumerId) {
+  if (!rideId && !consumerId) {
     return [seedBooking];
   }
 
+  const threadQuery = rideId
+    ? query(collection(db, 'bookings'), where('rideId', '==', rideId))
+    : query(collection(db, 'bookings'), where('consumerId', '==', consumerId));
   const snapshot = await getDocs(
-    query(
-      collection(db, 'bookings'),
-      where('rideId', '==', rideId),
-      where('consumerId', '==', consumerId)
-    )
+    threadQuery
   );
 
   const rows = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
@@ -2882,17 +2949,35 @@ const persistNegotiationResolutionThroughCompatStore = async (
     normalizedAction === 'accepted'
       ? options?.acceptedFare ?? getNegotiationDisplayFare(seedBooking)
       : undefined;
+  const nextFareBreakdown =
+    normalizedAction === 'accepted' && Number.isFinite(nextFare)
+      ? calculateServiceFee(Number(nextFare))
+      : null;
 
   await Promise.all(
     threadRows.map((booking) =>
       updateDoc(doc(db, 'bookings', booking.id), {
         ...(normalizedAction === 'accepted' && Number.isFinite(nextFare) ? { fare: nextFare } : {}),
+        ...(normalizedAction === 'accepted' && Number.isFinite(nextFare) && nextFareBreakdown
+          ? {
+              serviceFee: nextFareBreakdown.baseFee,
+              gstAmount: nextFareBreakdown.gstAmount,
+              totalPrice: Number(nextFare) + nextFareBreakdown.totalFee,
+            }
+          : {}),
         status: nextStatus,
         negotiationStatus: nextNegotiationStatus,
         negotiationActor: actor,
         driverCounterPending: false,
         rideRetired: normalizedAction === 'rejected',
         ...(normalizedAction === 'accepted' && Number.isFinite(nextFare) ? { 'data.fare': nextFare } : {}),
+        ...(normalizedAction === 'accepted' && Number.isFinite(nextFare) && nextFareBreakdown
+          ? {
+              'data.serviceFee': nextFareBreakdown.baseFee,
+              'data.gstAmount': nextFareBreakdown.gstAmount,
+              'data.totalPrice': Number(nextFare) + nextFareBreakdown.totalFee,
+            }
+          : {}),
         'data.status': nextStatus,
         'data.negotiationStatus': nextNegotiationStatus,
         'data.negotiationActor': actor,
@@ -5710,15 +5795,17 @@ const findUserProfileByPhone = async (value: string) => {
           if (!firstAttempt.ok) {
             const secondAttempt = firstAttempt.source === 'direct' ? await proxyAttempt : await directAttempt;
             if (!secondAttempt.ok) {
+              const firstError = 'error' in firstAttempt ? firstAttempt.error : undefined;
+              const secondError = 'error' in secondAttempt ? secondAttempt.error : undefined;
               console.warn('Android login failed through both auth paths.', {
                 firstSource: firstAttempt.source,
-                firstError: firstAttempt.error,
+                firstError,
                 secondSource: secondAttempt.source,
-                secondError: secondAttempt.error,
+                secondError,
               });
               throw (
-                secondAttempt.error ||
-                firstAttempt.error ||
+                secondError ||
+                firstError ||
                 new Error('Authentication service timed out. Please retry.')
               );
             }
@@ -8772,36 +8859,52 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
   const [paymentBooking, setPaymentBooking] = useState<Booking | null>(null);
   const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
-
-  useEffect(() => {
-    const q = query(
-      collection(db, 'bookings'),
-      where('consumerId', '==', profile.uid)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-      setBookings(
-        dedupeBookingsByThread(list)
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  const bookingsFetch = useFirestoreFetch<any[]>(
+    async () => {
+      const q = query(
+        collection(db, 'bookings'),
+        where('consumerId', '==', profile.uid)
       );
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [profile.uid]);
+      const snapshot = await getDocs(q);
+      const list = snapshot.docs.map((docSnapshot) =>
+        normalizeNegotiationBooking({ id: docSnapshot.id, ...(docSnapshot.data() as Booking) })
+      );
+      return dedupeBookingsByThread(list)
+        .sort(
+          (a, b) =>
+            new Date((b as any).updatedAt || b.createdAt).getTime() -
+            new Date((a as any).updatedAt || a.createdAt).getTime()
+        );
+    },
+    [profile.uid],
+    [],
+    { operationType: OperationType.GET, path: 'bookings' }
+  );
+  const transactionsFetch = useFirestoreFetch<Transaction[]>(
+    async () => {
+      const q = query(
+        collection(db, 'transactions'),
+        where('userId', '==', profile.uid)
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs
+        .map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }))
+        .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime())
+        .slice(0, 50);
+    },
+    [profile.uid],
+    [],
+    { operationType: OperationType.GET, path: 'transactions' }
+  );
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'transactions'),
-      where('userId', '==', profile.uid),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }));
-      setTransactions(list);
-    });
-    return () => unsubscribe();
-  }, [profile.uid]);
+    setBookings(bookingsFetch.data);
+    setLoading(bookingsFetch.loading);
+  }, [bookingsFetch.data, bookingsFetch.loading]);
+
+  useEffect(() => {
+    setTransactions(transactionsFetch.data);
+  }, [transactionsFetch.data]);
 
   const submitTravelerPaymentProof = async (
     booking: Booking,
@@ -8971,6 +9074,10 @@ const finalizeTravelerRazorpayPayment = async (
         action === 'accepted'
           ? negotiatedFare ?? getNegotiationDisplayFare(booking)
           : undefined;
+      const acceptedFareBreakdown =
+        action === 'accepted' && acceptedFare
+          ? calculateServiceFee(acceptedFare, config || undefined)
+          : null;
       let updatedAt = new Date().toISOString();
       try {
         updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
@@ -8983,10 +9090,17 @@ const finalizeTravelerRazorpayPayment = async (
         prev.map((candidate) =>
           getBookingThreadKey(candidate) === getBookingThreadKey(booking)
             ? {
-                ...candidate,
-                status: action === 'accepted' ? 'confirmed' : 'rejected',
-                ...(action === 'accepted' && acceptedFare ? { fare: acceptedFare } : {}),
-                negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+	                ...candidate,
+	                status: action === 'accepted' ? 'confirmed' : 'rejected',
+	                ...(action === 'accepted' && acceptedFare
+                    ? {
+                        fare: acceptedFare,
+                        serviceFee: acceptedFareBreakdown?.baseFee ?? candidate.serviceFee,
+                        gstAmount: acceptedFareBreakdown?.gstAmount ?? candidate.gstAmount,
+                        totalPrice: acceptedFare + (acceptedFareBreakdown?.totalFee ?? 0),
+                      }
+                    : {}),
+	                negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
                 negotiationActor: 'driver',
                 driverCounterPending: false,
                 updatedAt,
@@ -9001,19 +9115,30 @@ const finalizeTravelerRazorpayPayment = async (
       try {
         const booking = bookings.find((candidate) => candidate.id === bookingId);
         if (!booking) throw error;
-        const acceptedFare =
-          action === 'accepted' ? negotiatedFare ?? getNegotiationDisplayFare(booking) : undefined;
-        const updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
+	        const acceptedFare =
+	          action === 'accepted' ? negotiatedFare ?? getNegotiationDisplayFare(booking) : undefined;
+          const acceptedFareBreakdown =
+            action === 'accepted' && acceptedFare
+              ? calculateServiceFee(acceptedFare, config || undefined)
+              : null;
+	        const updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
           acceptedFare,
         });
         setBookings((prev) =>
           prev.map((candidate) =>
             getBookingThreadKey(candidate) === getBookingThreadKey(booking)
               ? {
-                  ...candidate,
-                  status: action === 'accepted' ? 'confirmed' : 'rejected',
-                  ...(action === 'accepted' && acceptedFare ? { fare: acceptedFare } : {}),
-                  negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+	                  ...candidate,
+	                  status: action === 'accepted' ? 'confirmed' : 'rejected',
+	                  ...(action === 'accepted' && acceptedFare
+                      ? {
+                          fare: acceptedFare,
+                          serviceFee: acceptedFareBreakdown?.baseFee ?? candidate.serviceFee,
+                          gstAmount: acceptedFareBreakdown?.gstAmount ?? candidate.gstAmount,
+                          totalPrice: acceptedFare + (acceptedFareBreakdown?.totalFee ?? 0),
+                        }
+                      : {}),
+	                  negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
                   negotiationActor: 'driver',
                   driverCounterPending: false,
                   rideRetired: action === 'rejected',
@@ -9051,6 +9176,60 @@ const finalizeTravelerRazorpayPayment = async (
     } finally {
       setIsSubmittingReview(false);
     }
+  };
+
+  const NegotiationCard = ({
+    booking,
+    displayFare,
+    hasDriverCounterOffer,
+    hasTravelerCounterOffer,
+  }: {
+    booking: Booking;
+    displayFare: number;
+    hasDriverCounterOffer: boolean;
+    hasTravelerCounterOffer: boolean;
+  }) => {
+    if (hasDriverCounterOffer) {
+      return (
+        <div className="mb-6 p-6 bg-mairide-accent/10 border border-mairide-accent rounded-2xl">
+          <p className="font-bold text-mairide-primary mb-2">Counter offer received: {formatCurrency(displayFare)}</p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => handleNegotiation(booking.id, 'accepted', booking.negotiatedFare)}
+              className={cn("flex-1 bg-mairide-primary text-white py-3 text-sm", primaryActionButtonClass)}
+            >
+              Accept Counter Offer
+            </button>
+            <button
+              onClick={() => handleNegotiation(booking.id, 'rejected')}
+              className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3 text-sm", secondaryActionButtonClass)}
+            >
+              Reject
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (booking.status === 'confirmed') return null;
+
+    return (
+      <div className={cn(
+        "mb-6 p-6 rounded-2xl",
+        hasTravelerCounterOffer ? "bg-mairide-accent/10 border border-mairide-accent" : "bg-mairide-bg border border-mairide-secondary/20"
+      )}>
+        {hasTravelerCounterOffer ? (
+          <>
+            <p className="font-bold text-mairide-primary">Your counter offer has been sent.</p>
+            <p className="mt-2 text-sm text-mairide-secondary">
+              Waiting for the driver to accept or reject <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>.
+            </p>
+          </>
+        ) : (
+          <p className="font-bold text-mairide-primary">You can update your offer while the booking is still pending.</p>
+        )}
+      </div>
+    );
   };
 
   const savingsEligibleBookings = bookings.filter((booking) => ['confirmed', 'completed'].includes(booking.status));
@@ -9141,7 +9320,7 @@ const finalizeTravelerRazorpayPayment = async (
             const listedFare = getListedFare(booking);
             const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
             const statusLabel = getBookingStateLabel(booking);
-            const consumerFeeBreakdown = getBookingPaymentBreakdown(booking as Booking, 'consumer', config);
+            const consumerFeeBreakdown = getBookingPaymentBreakdown({ ...(booking as Booking), fare: displayFare }, 'consumer', config);
 
             return (
             <div key={booking.id} className="bg-white p-4 md:p-8 rounded-[32px] border border-mairide-secondary shadow-sm hover:shadow-md transition-all min-w-0">
@@ -9193,43 +9372,12 @@ const finalizeTravelerRazorpayPayment = async (
                 </div>
               </div>
 
-              {hasDriverCounterOffer && (
-                <div className="mb-6 p-6 bg-mairide-accent/10 border border-mairide-accent rounded-2xl">
-                  <p className="font-bold text-mairide-primary mb-2">Counter offer received: {formatCurrency(displayFare)}</p>
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <button 
-                      onClick={() => handleNegotiation(booking.id, 'accepted', booking.negotiatedFare)}
-                      className={cn("flex-1 bg-mairide-primary text-white py-3 text-sm", primaryActionButtonClass)}
-                    >
-                      Accept Counter Offer
-                    </button>
-                    <button 
-                      onClick={() => handleNegotiation(booking.id, 'rejected')}
-                      className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3 text-sm", secondaryActionButtonClass)}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {!hasDriverCounterOffer && booking.status !== 'confirmed' && (
-                <div className={cn(
-                  "mb-6 p-6 rounded-2xl",
-                  hasTravelerCounterOffer ? "bg-mairide-accent/10 border border-mairide-accent" : "bg-mairide-bg border border-mairide-secondary/20"
-                )}>
-                  {hasTravelerCounterOffer ? (
-                    <>
-                      <p className="font-bold text-mairide-primary">Your counter offer has been sent.</p>
-                      <p className="mt-2 text-sm text-mairide-secondary">
-                        Waiting for the driver to accept or reject <span className="font-bold text-mairide-accent">{formatCurrency(displayFare)}</span>.
-                      </p>
-                    </>
-                  ) : (
-                    <p className="font-bold text-mairide-primary">You can update your offer while the booking is still pending.</p>
-                  )}
-                </div>
-              )}
+	              <NegotiationCard
+	                booking={booking as Booking}
+	                displayFare={displayFare}
+	                hasDriverCounterOffer={hasDriverCounterOffer}
+	                hasTravelerCounterOffer={hasTravelerCounterOffer}
+	              />
 
               <div className="bg-mairide-bg p-6 rounded-2xl mb-6">
                 <div className="flex justify-between items-center mb-2">
@@ -9399,59 +9547,80 @@ const MyRides = ({
   );
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'rides'),
-      where('driverId', '==', profile.uid)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const byRouteKey = new Map<string, any>();
-      snapshot.forEach((docSnapshot) => {
-        const nextRide = { id: docSnapshot.id, ...docSnapshot.data() } as any;
-        if (nextRide.status === 'cancelled' || hiddenRideIds.includes(nextRide.id)) return;
-        const dedupeKey = getRideDuplicateKey(nextRide);
-        const existing = byRouteKey.get(dedupeKey);
-        if (!existing) {
-          byRouteKey.set(dedupeKey, nextRide);
-          return;
-        }
-        const nextTime = new Date(String(nextRide.createdAt || 0)).getTime();
-        const existingTime = new Date(String(existing.createdAt || 0)).getTime();
-        if (nextTime >= existingTime) {
-          byRouteKey.set(dedupeKey, nextRide);
-        }
-      });
-      setRides(
-        Array.from(byRouteKey.values()).sort(
-          (a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime()
-        )
-      );
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    let active = true;
+    const loadDriverRides = async () => {
+      setLoading(true);
+      try {
+        const q = query(
+          collection(db, 'rides'),
+          where('driverId', '==', profile.uid)
+        );
+        const snapshot = await getDocs(q);
+        const byRouteKey = new Map<string, any>();
+        snapshot.forEach((docSnapshot) => {
+          const nextRide = { id: docSnapshot.id, ...docSnapshot.data() } as any;
+          if (nextRide.status === 'cancelled' || hiddenRideIds.includes(nextRide.id)) return;
+          const dedupeKey = getRideDuplicateKey(nextRide);
+          const existing = byRouteKey.get(dedupeKey);
+          if (!existing) {
+            byRouteKey.set(dedupeKey, nextRide);
+            return;
+          }
+          const nextTime = new Date(String(nextRide.createdAt || 0)).getTime();
+          const existingTime = new Date(String(existing.createdAt || 0)).getTime();
+          if (nextTime >= existingTime) {
+            byRouteKey.set(dedupeKey, nextRide);
+          }
+        });
+        if (!active) return;
+        setRides(
+          Array.from(byRouteKey.values()).sort(
+            (a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime()
+          )
+        );
+      } catch (error) {
+        reportFirestoreError(error, OperationType.GET, 'rides');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void loadDriverRides();
+    return () => {
+      active = false;
+    };
   }, [profile.uid, hiddenRideIds]);
 
   useEffect(() => {
-    const bookingQuery = query(collection(db, 'bookings'), where('driverId', '==', profile.uid));
-    const unsubscribe = onSnapshot(bookingQuery, (snapshot) => {
-      const rideIds = new Set<string>();
-      snapshot.forEach((bookingDoc) => {
-        const booking = bookingDoc.data() as Booking;
-        const isNegotiationActive =
-          ['pending', 'negotiating'].includes(String(booking.status || '')) &&
-          booking.negotiationStatus !== 'rejected' &&
-          !booking.rideRetired &&
-          !booking.feePaid &&
-          !booking.driverFeePaid &&
-          !booking.rideStartedAt &&
-          !booking.rideEndedAt;
+    let active = true;
+    const loadActiveNegotiations = async () => {
+      try {
+        const bookingQuery = query(collection(db, 'bookings'), where('driverId', '==', profile.uid));
+        const snapshot = await getDocs(bookingQuery);
+        const rideIds = new Set<string>();
+        snapshot.forEach((bookingDoc) => {
+          const booking = bookingDoc.data() as Booking;
+          const isNegotiationActive =
+            ['pending', 'negotiating'].includes(String(booking.status || '')) &&
+            booking.negotiationStatus !== 'rejected' &&
+            !booking.rideRetired &&
+            !booking.feePaid &&
+            !booking.driverFeePaid &&
+            !booking.rideStartedAt &&
+            !booking.rideEndedAt;
 
-        if (isNegotiationActive && booking.rideId) {
-          rideIds.add(booking.rideId);
-        }
-      });
-      setActiveNegotiationRideIds(Array.from(rideIds));
-    });
-    return () => unsubscribe();
+          if (isNegotiationActive && booking.rideId) {
+            rideIds.add(booking.rideId);
+          }
+        });
+        if (active) setActiveNegotiationRideIds(Array.from(rideIds));
+      } catch (error) {
+        reportFirestoreError(error, OperationType.GET, 'bookings');
+      }
+    };
+    void loadActiveNegotiations();
+    return () => {
+      active = false;
+    };
   }, [profile.uid]);
 
   const confirmCancelRideOffer = async (ride: any) => {
@@ -9680,42 +9849,62 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
   useEffect(() => {
-    const ridesQuery = query(collection(db, 'rides'), where('driverId', '==', profile.uid));
-    const unsubscribeRides = onSnapshot(ridesQuery, (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((docSnapshot) => list.push({ id: docSnapshot.id, ...docSnapshot.data() }));
-      setRides(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-      setLoadingRides(false);
-    });
-
-    const bookingsQuery = query(collection(db, 'bookings'), where('driverId', '==', profile.uid));
-    const unsubscribeBookings = onSnapshot(bookingsQuery, (snapshot) => {
-      const list: Booking[] = [];
-      snapshot.forEach((docSnapshot) => list.push({ id: docSnapshot.id, ...(docSnapshot.data() as Booking) }));
-      setBookings(
-        dedupeBookingsByThread(list)
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      );
-      setLoadingBookings(false);
-    });
-
+    let active = true;
+    const loadHistory = async () => {
+      setLoadingRides(true);
+      setLoadingBookings(true);
+      try {
+        const [ridesSnapshot, bookingsSnapshot] = await Promise.all([
+          getDocs(query(collection(db, 'rides'), where('driverId', '==', profile.uid))),
+          getDocs(query(collection(db, 'bookings'), where('driverId', '==', profile.uid))),
+        ]);
+        if (!active) return;
+        const rideList = ridesSnapshot.docs
+          .map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() }))
+          .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
+        const bookingList = bookingsSnapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Booking) }));
+        setRides(rideList);
+        setBookings(
+          dedupeBookingsByThread(bookingList)
+            .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime())
+        );
+      } catch (error) {
+        reportFirestoreError(error, OperationType.GET, 'driver-history');
+      } finally {
+        if (active) {
+          setLoadingRides(false);
+          setLoadingBookings(false);
+        }
+      }
+    };
+    void loadHistory();
     return () => {
-      unsubscribeRides();
-      unsubscribeBookings();
+      active = false;
     };
   }, [profile.uid]);
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'transactions'),
-      where('userId', '==', profile.uid),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }));
-      setTransactions(list);
-    });
-    return () => unsubscribe();
+    let active = true;
+    const loadTransactions = async () => {
+      try {
+        const q = query(
+          collection(db, 'transactions'),
+          where('userId', '==', profile.uid)
+        );
+        const snapshot = await getDocs(q);
+        const list = snapshot.docs
+          .map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }))
+          .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime())
+          .slice(0, 50);
+        if (active) setTransactions(list);
+      } catch (error) {
+        reportFirestoreError(error, OperationType.GET, 'transactions');
+      }
+    };
+    void loadTransactions();
+    return () => {
+      active = false;
+    };
   }, [profile.uid]);
 
   if (loadingRides || loadingBookings) return <LoadingScreen />;
@@ -9938,16 +10127,16 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
 
   const loadRequestThread = async (seedBooking: Booking) => {
+    const threadQuery = seedBooking.rideId
+      ? query(collection(db, 'bookings'), where('rideId', '==', seedBooking.rideId))
+      : query(collection(db, 'bookings'), where('consumerId', '==', seedBooking.consumerId));
     const threadSnapshot = await getDocs(
-      query(
-        collection(db, 'bookings'),
-        where('rideId', '==', seedBooking.rideId),
-        where('consumerId', '==', seedBooking.consumerId)
-      )
+      threadQuery
     );
 
     return threadSnapshot.docs
       .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+      .filter((booking) => booking.consumerId === seedBooking.consumerId)
       .filter((booking) => getBookingThreadKey(booking) === getBookingThreadKey(seedBooking));
   };
 
@@ -10022,44 +10211,54 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
   };
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'bookings'),
-      where('driverId', '==', profile.uid),
-      where('status', 'in', ['pending', 'confirmed', 'negotiating'])
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((doc) =>
-        list.push(normalizeNegotiationBooking({ id: doc.id, ...(doc.data() as Booking) }))
-      );
-      setRequests(
-        dedupeBookingsByThread(list)
-          .filter(
-            (booking) =>
-              !(booking as any).rideRetired &&
-              booking.negotiationStatus !== 'rejected' &&
-              ['pending', 'confirmed', 'negotiating'].includes(booking.status)
-          )
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      );
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'bookings');
-    });
-    return () => unsubscribe();
+    let isMounted = true;
+    const loadRequests = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'bookings'), where('driverId', '==', profile.uid)));
+        if (!isMounted) return;
+        const list = snapshot.docs.map((snapshotDoc) =>
+          normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) })
+        );
+        setRequests(
+          dedupeBookingsByThread(list)
+            .filter(
+              (booking) =>
+                !(booking as any).rideRetired &&
+                booking.negotiationStatus !== 'rejected' &&
+                ['pending', 'confirmed', 'negotiating'].includes(booking.status)
+            )
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        );
+        setLoading(false);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, 'bookings');
+        setLoading(false);
+      }
+    };
+    void loadRequests();
+    return () => {
+      isMounted = false;
+    };
   }, [profile.uid]);
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'transactions'),
-      where('userId', '==', profile.uid),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }));
-      setTransactions(list);
-    });
-    return () => unsubscribe();
+    let isMounted = true;
+    const loadTransactions = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'transactions'), where('userId', '==', profile.uid)));
+        if (!isMounted) return;
+        const list = snapshot.docs
+          .map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Transaction) }))
+          .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime());
+        setTransactions(list);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, 'transactions');
+      }
+    };
+    void loadTransactions();
+    return () => {
+      isMounted = false;
+    };
   }, [profile.uid]);
 
   const handleAction = async (requestId: string, status: 'confirmed' | 'rejected', fare: number, driverId: string) => {
@@ -10089,6 +10288,8 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
         hasPendingTravelerCounterOffer(bookingData) && bookingData.negotiatedFare
           ? bookingData.negotiatedFare
           : fare;
+      const acceptedFareBreakdown =
+        status === 'confirmed' ? calculateServiceFee(acceptedFare, config || undefined) : null;
 
       setRequests((prev) =>
         status === 'rejected'
@@ -10096,10 +10297,17 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
           : prev.map((booking) =>
               getBookingThreadKey(booking) === getBookingThreadKey(bookingData)
                 ? {
-                    ...booking,
-                    status,
-                    fare: acceptedFare,
-                    driverPhone: profile.phoneNumber || '',
+	                    ...booking,
+	                    status,
+	                    fare: acceptedFare,
+	                    ...(status === 'confirmed' && acceptedFareBreakdown
+                        ? {
+                            serviceFee: acceptedFareBreakdown.baseFee,
+                            gstAmount: acceptedFareBreakdown.gstAmount,
+                            totalPrice: acceptedFare + acceptedFareBreakdown.totalFee,
+                          }
+                        : {}),
+	                    driverPhone: profile.phoneNumber || '',
                     driverCounterPending: false,
                     negotiationStatus:
                       booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
@@ -10559,6 +10767,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   );
   const seenDriverCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedDriverCountersRef = useRef(false);
+  const lastTravelerLocationWriteRef = useRef(0);
   const travelerFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -10597,37 +10806,26 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, []);
 
   useEffect(() => {
-    if (isLocalDevFirestoreMode()) {
-      const q = query(collection(db, 'bookings'), where('consumerId', '==', profile.uid));
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const list: Booking[] = [];
-        snapshot.forEach((snapshotDoc) =>
-          list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-        );
-        setDashboardBookings(
-          dedupeBookingsByThread(
-            list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          )
-        );
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, 'bookings');
-      });
-      return () => unsubscribe();
-    }
-
     let isMounted = true;
-    let pollTimer: number | null = null;
 
     const loadDashboardBookings = async () => {
       try {
-        const token = await getAccessToken();
-        const { data } = await axios.get(apiPath('/api/user?action=list-bookings&scope=consumer'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        let list: Booking[] = [];
+        if (isLocalDevFirestoreMode()) {
+          const snapshot = await getDocs(query(collection(db, 'bookings'), where('consumerId', '==', profile.uid)));
+          list = snapshot.docs.map((snapshotDoc) =>
+            normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) })
+          );
+        } else {
+          const token = await getAccessToken();
+          const { data } = await axios.get(apiPath('/api/user?action=list-bookings&scope=consumer'), {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
+        }
         if (!isMounted) return;
-        const list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
         const normalized = dedupeBookingsByThread(
           list
             .map((booking) => normalizeNegotiationBooking(booking))
@@ -10646,52 +10844,34 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     };
 
     void loadDashboardBookings();
-    pollTimer = window.setInterval(() => {
-      void loadDashboardBookings();
-    }, 8000);
 
     return () => {
       isMounted = false;
-      if (pollTimer) window.clearInterval(pollTimer);
     };
   }, [profile.uid]);
 
   useEffect(() => {
-    if (isLocalDevFirestoreMode()) {
-      const q = query(collection(db, 'travelerRideRequests'), where('consumerId', '==', profile.uid));
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          const list: TravelerRideRequest[] = snapshot.docs.map((snapshotDoc) => ({
-            id: snapshotDoc.id,
-            ...(snapshotDoc.data() as TravelerRideRequest),
-          }));
-          setTravelerRequests(
-            list
-              .filter((item) => isRideWithinPlanningWindow(item))
-              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          );
-        },
-        (error) => {
-          handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
-        }
-      );
-      return () => unsubscribe();
-    }
-
     let isMounted = true;
-    let pollTimer: number | null = null;
 
     const loadTravelerRequests = async () => {
       try {
-        const token = await getAccessToken();
-        const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=own'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        let list: TravelerRideRequest[] = [];
+        if (isLocalDevFirestoreMode()) {
+          const snapshot = await getDocs(query(collection(db, 'travelerRideRequests'), where('consumerId', '==', profile.uid)));
+          list = snapshot.docs.map((snapshotDoc) => ({
+            id: snapshotDoc.id,
+            ...(snapshotDoc.data() as TravelerRideRequest),
+          }));
+        } else {
+          const token = await getAccessToken();
+          const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=own'), {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          list = Array.isArray(data?.requests) ? data.requests as TravelerRideRequest[] : [];
+        }
         if (!isMounted) return;
-        const list = Array.isArray(data?.requests) ? data.requests as TravelerRideRequest[] : [];
         setTravelerRequests(
           list
             .filter((item) => isRideWithinPlanningWindow(item))
@@ -10709,41 +10889,36 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     };
 
     void loadTravelerRequests();
-    pollTimer = window.setInterval(() => {
-      void loadTravelerRequests();
-    }, 8000);
 
     return () => {
       isMounted = false;
-      if (pollTimer) window.clearInterval(pollTimer);
     };
   }, [profile.uid]);
 
   useEffect(() => {
     if (!isLocalDevFirestoreMode()) return;
-    const q = query(collection(db, 'tripSessions'), where('consumerId', '==', profile.uid));
-    let unsubscribe: (() => void) | null = null;
-    unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
+    let isMounted = true;
+    const loadTripSessions = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'tripSessions'), where('consumerId', '==', profile.uid)));
+        if (!isMounted) return;
         const next: Record<string, TripSession> = {};
         snapshot.docs.forEach((snapshotDoc) => {
           const data = snapshotDoc.data() as TripSession;
           next[data.bookingId || snapshotDoc.id] = { ...data, id: snapshotDoc.id };
         });
         setTripSessions(next);
-      },
-      (error) => {
+      } catch (error) {
         if (isMissingSupabaseTableError(error)) {
           console.warn('Trip sessions table missing; pausing traveler session polling.');
-          if (unsubscribe) unsubscribe();
           return;
         }
         console.error('Trip session subscription error (traveler):', error);
       }
-    );
+    };
+    void loadTripSessions();
     return () => {
-      if (unsubscribe) unsubscribe();
+      isMounted = false;
     };
   }, [profile.uid]);
 
@@ -10791,19 +10966,26 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, [dashboardBookings, dismissedReviewIds, reviewBooking]);
 
   useEffect(() => {
-    const q = query(collection(db, 'rides'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ridesList = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
-      const nextStatusMap = ridesList.reduce((acc: Record<string, Ride['status']>, ride: Ride) => {
-        acc[ride.id] = ride.status;
-        return acc;
-      }, {});
-      setRideStatusById(nextStatusMap);
-      setRidesResolved(true);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'rides');
-    });
-    return () => unsubscribe();
+    let isMounted = true;
+    const loadRideStatuses = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'rides')));
+        if (!isMounted) return;
+        const ridesList = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
+        const nextStatusMap = ridesList.reduce((acc: Record<string, Ride['status']>, ride: Ride) => {
+          acc[ride.id] = ride.status;
+          return acc;
+        }, {});
+        setRideStatusById(nextStatusMap);
+        setRidesResolved(true);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, 'rides');
+      }
+    };
+    void loadRideStatuses();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -10841,6 +11023,18 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
   };
 
+  const persistTravelerLocation = (newLocation: { lat: number; lng: number }) => {
+    const now = Date.now();
+    if (now - lastTravelerLocationWriteRef.current < LOCATION_DB_UPDATE_INTERVAL_MS) return;
+    lastTravelerLocationWriteRef.current = now;
+    updateDoc(doc(db, 'users', profile.uid), {
+      location: {
+        ...newLocation,
+        lastUpdated: new Date().toISOString()
+      }
+    }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
+  };
+
   useEffect(() => {
     if (userLocation || isAppWebViewRuntime() || isAndroidWebViewLikeRuntime()) return;
     const fallbackLocation = extractLatLng(profile.location);
@@ -10857,13 +11051,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           const newLocation = { lat: latitude, lng: longitude };
           setUserLocation(newLocation);
           reverseGeocode(latitude, longitude);
-          
-          updateDoc(doc(db, 'users', profile.uid), {
-            location: {
-              ...newLocation,
-              lastUpdated: new Date().toISOString()
-            }
-          }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
+          persistTravelerLocation(newLocation);
         },
         (error) => {
           logGeolocationIssue('Traveler', error);
@@ -10880,13 +11068,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           const { latitude, longitude } = position.coords;
           const newLocation = { lat: latitude, lng: longitude };
           setUserLocation(newLocation);
-          
-          updateDoc(doc(db, 'users', profile.uid), {
-            location: {
-              ...newLocation,
-              lastUpdated: new Date().toISOString()
-            }
-          }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
+          persistTravelerLocation(newLocation);
         },
         (error) => {
           logGeolocationIssue('Traveler', error);
@@ -10963,26 +11145,32 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   useEffect(() => {
     // Listen for online drivers within the local dashboard radius only.
-    const q = query(collection(db, 'users'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const driverList: UserProfile[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data() as UserProfile;
-        const driverOriginLocation = getFeedItemOriginLocation(data);
-        if (
-          data.role === 'driver' &&
-          data.driverDetails?.isOnline &&
-          isWithinDashboardMatchRadius(travelerFeedLocation, driverOriginLocation)
-        ) {
-          driverList.push(data);
-        }
-      });
-      setDrivers(driverList);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'users');
-    });
-    return () => unsubscribe();
-  }, [travelerFeedLocation]);
+    let isMounted = true;
+    const loadOnlineDrivers = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'driver')));
+        if (!isMounted) return;
+        const driverList: UserProfile[] = [];
+        snapshot.forEach((snapshotDoc) => {
+          const data = snapshotDoc.data() as UserProfile;
+          const driverOriginLocation = getFeedItemOriginLocation(data);
+          if (
+            data.driverDetails?.isOnline &&
+            isWithinDashboardMatchRadius(travelerFeedLocation, driverOriginLocation)
+          ) {
+            driverList.push(data);
+          }
+        });
+        setDrivers(driverList);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, 'users');
+      }
+    };
+    void loadOnlineDrivers();
+    return () => {
+      isMounted = false;
+    };
+  }, [profile.uid]);
 
   const geocodeAddress = async (address: string) => {
     if (!window.google || !window.google.maps) return null;
@@ -11520,14 +11708,11 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       };
 
       const existingThreadSnapshot = await getDocs(
-        query(
-          collection(db, 'bookings'),
-          where('rideId', '==', ride.id),
-          where('consumerId', '==', profile.uid)
-        )
+        query(collection(db, 'bookings'), where('rideId', '==', ride.id))
       );
       const activeThreadBookings = existingThreadSnapshot.docs
         .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        .filter((booking) => booking.consumerId === profile.uid)
         .filter((booking) => ['pending', 'confirmed', 'negotiating'].includes(booking.status));
 
       if (activeThreadBookings.length) {
@@ -11539,8 +11724,32 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
             })
           )
         );
+        const updatedBookings = activeThreadBookings.map((booking) =>
+          normalizeNegotiationBooking({
+            ...booking,
+            ...bookingData,
+            id: booking.id,
+            updatedAt,
+          } as Booking)
+        );
+        setDashboardBookings((prev) =>
+          dedupeBookingsByThread([
+            ...updatedBookings,
+            ...prev.map((candidate) =>
+              activeThreadBookings.some((booking) => getBookingThreadKey(booking) === getBookingThreadKey(candidate))
+                ? normalizeNegotiationBooking({ ...candidate, ...bookingData, updatedAt } as Booking)
+                : candidate
+            ),
+          ])
+        );
       } else {
-        await addDoc(collection(db, 'bookings'), bookingData);
+        const bookingRef = await addDoc(collection(db, 'bookings'), bookingData);
+        setDashboardBookings((prev) =>
+          dedupeBookingsByThread([
+            normalizeNegotiationBooking({ ...bookingData, id: bookingRef.id } as Booking),
+            ...prev,
+          ])
+        );
       }
       if (requestedFare && requestedFare > 0 && requestedFare !== ride.price) {
         void sendBrowserNotification(
@@ -11599,6 +11808,10 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         action === 'accepted'
           ? booking.negotiatedFare ?? getNegotiationDisplayFare(booking)
           : undefined;
+      const acceptedFareBreakdown =
+        action === 'accepted' && acceptedFare
+          ? calculateServiceFee(acceptedFare, config || undefined)
+          : null;
       let updatedAt = new Date().toISOString();
       try {
         updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
@@ -11611,10 +11824,17 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         prev.map((candidate) =>
           getBookingThreadKey(candidate) === getBookingThreadKey(booking)
             ? {
-                ...candidate,
-                status: action === 'accepted' ? 'confirmed' : 'rejected',
-                ...(action === 'accepted' && acceptedFare ? { fare: acceptedFare } : {}),
-                negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+	                ...candidate,
+	                status: action === 'accepted' ? 'confirmed' : 'rejected',
+	                ...(action === 'accepted' && acceptedFare
+                    ? {
+                        fare: acceptedFare,
+                        serviceFee: acceptedFareBreakdown?.baseFee ?? candidate.serviceFee,
+                        gstAmount: acceptedFareBreakdown?.gstAmount ?? candidate.gstAmount,
+                        totalPrice: acceptedFare + (acceptedFareBreakdown?.totalFee ?? 0),
+                      }
+                    : {}),
+	                negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
                 negotiationActor: 'driver',
                 driverCounterPending: false,
                 updatedAt,
@@ -11625,19 +11845,30 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       showAppDialog(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.', 'success');
     } catch (error: any) {
       try {
-        const acceptedFare =
-          action === 'accepted' ? booking.negotiatedFare ?? getNegotiationDisplayFare(booking) : undefined;
-        const updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
+	        const acceptedFare =
+	          action === 'accepted' ? booking.negotiatedFare ?? getNegotiationDisplayFare(booking) : undefined;
+          const acceptedFareBreakdown =
+            action === 'accepted' && acceptedFare
+              ? calculateServiceFee(acceptedFare, config || undefined)
+              : null;
+	        const updatedAt = await persistNegotiationResolutionThroughCompatStore(booking, 'driver', action, {
           acceptedFare,
         });
         setDashboardBookings((prev) =>
           prev.map((candidate) =>
             getBookingThreadKey(candidate) === getBookingThreadKey(booking)
               ? {
-                  ...candidate,
-                  status: action === 'accepted' ? 'confirmed' : 'rejected',
-                  ...(action === 'accepted' && acceptedFare ? { fare: acceptedFare } : {}),
-                  negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+	                  ...candidate,
+	                  status: action === 'accepted' ? 'confirmed' : 'rejected',
+	                  ...(action === 'accepted' && acceptedFare
+                      ? {
+                          fare: acceptedFare,
+                          serviceFee: acceptedFareBreakdown?.baseFee ?? candidate.serviceFee,
+                          gstAmount: acceptedFareBreakdown?.gstAmount ?? candidate.gstAmount,
+                          totalPrice: acceptedFare + (acceptedFareBreakdown?.totalFee ?? 0),
+                        }
+                      : {}),
+	                  negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
                   negotiationActor: 'driver',
                   driverCounterPending: false,
                   rideRetired: action === 'rejected',
@@ -12846,6 +13077,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   } | null>(null);
   const seenTravelerCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedTravelerCountersRef = useRef(false);
+  const lastDriverLocationWriteRef = useRef(0);
   const driverFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -12892,28 +13124,35 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   );
 
   useEffect(() => {
-    // Listen for online travelers
-    const q = query(collection(db, 'users'), where('role', '==', 'consumer'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const travelerList: UserProfile[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data() as UserProfile;
-        if (data.location) {
-          travelerList.push(data);
-        }
-      });
-      setConsumers(travelerList);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'users');
-    });
-    return () => unsubscribe();
+    let isMounted = true;
+    const loadTravelers = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'consumer')));
+        if (!isMounted) return;
+        const travelerList: UserProfile[] = [];
+        snapshot.forEach((snapshotDoc) => {
+          const data = snapshotDoc.data() as UserProfile;
+          if (data.location) {
+            travelerList.push(data);
+          }
+        });
+        setConsumers(travelerList);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, 'users');
+      }
+    };
+    void loadTravelers();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'rides'), where('driverId', '==', profile.uid));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
+    let isMounted = true;
+    const loadDriverRideRoutes = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'rides'), where('driverId', '==', profile.uid)));
+        if (!isMounted) return;
         const nextRoutes = snapshot.docs
           .map((snapshotDoc) => snapshotDoc.data() as Ride)
           .filter((ride) => String(ride.status || '') === 'available')
@@ -12925,50 +13164,38 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             } => Boolean(route)
           );
         setDriverAvailableRideRoutes(nextRoutes);
-      },
-      (error) => {
+      } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'rides');
       }
-    );
-    return () => unsubscribe();
+    };
+    void loadDriverRideRoutes();
+    return () => {
+      isMounted = false;
+    };
   }, [profile.uid]);
 
   useEffect(() => {
-    if (isLocalDevFirestoreMode()) {
-      const q = query(collection(db, 'travelerRideRequests'), where('status', '==', 'open'));
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          const list: TravelerRideRequest[] = snapshot.docs.map((snapshotDoc) => ({
-            id: snapshotDoc.id,
-            ...(snapshotDoc.data() as TravelerRideRequest),
-          }));
-          setTravelerRideRequests(
-            list
-              .filter((item) => isRideWithinPlanningWindow(item))
-              .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime())
-          );
-        },
-        (error) => {
-          handleFirestoreError(error, OperationType.GET, 'travelerRideRequests');
-        }
-      );
-      return () => unsubscribe();
-    }
-
     let isMounted = true;
-    let pollTimer: number | null = null;
 
     const loadOpenTravelerRequests = async () => {
       try {
-        const token = await getAccessToken();
-        const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=open'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        let list: TravelerRideRequest[] = [];
+        if (isLocalDevFirestoreMode()) {
+          const snapshot = await getDocs(query(collection(db, 'travelerRideRequests'), where('status', '==', 'open')));
+          list = snapshot.docs.map((snapshotDoc) => ({
+            id: snapshotDoc.id,
+            ...(snapshotDoc.data() as TravelerRideRequest),
+          }));
+        } else {
+          const token = await getAccessToken();
+          const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=open'), {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          list = Array.isArray(data?.requests) ? data.requests as TravelerRideRequest[] : [];
+        }
         if (!isMounted) return;
-        const list = Array.isArray(data?.requests) ? data.requests as TravelerRideRequest[] : [];
         setTravelerRideRequests(
           list
             .filter((item) => isRideWithinPlanningWindow(item))
@@ -12986,58 +13213,33 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     };
 
     void loadOpenTravelerRequests();
-    pollTimer = window.setInterval(() => {
-      void loadOpenTravelerRequests();
-    }, 8000);
 
     return () => {
       isMounted = false;
-      if (pollTimer) window.clearInterval(pollTimer);
     };
   }, [profile.uid]);
 
   useEffect(() => {
-    if (isLocalDevFirestoreMode()) {
-      const q = query(
-        collection(db, 'bookings'),
-        where('driverId', '==', profile.uid),
-        where('status', 'in', ['pending', 'confirmed', 'negotiating'])
-      );
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const list: Booking[] = [];
-        snapshot.forEach((snapshotDoc) =>
-          list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-        );
-        setRequests(
-          dedupeBookingsByThread(list)
-            .filter(
-              (booking) =>
-                !retiredRideIds.includes(booking.rideId) &&
-                !(booking as any).rideRetired &&
-                booking.negotiationStatus !== 'rejected' &&
-                ['pending', 'confirmed', 'negotiating'].includes(booking.status)
-            )
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        );
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, 'bookings');
-      });
-      return () => unsubscribe();
-    }
-
     let isMounted = true;
-    let pollTimer: number | null = null;
 
     const loadDriverBookings = async () => {
       try {
-        const token = await getAccessToken();
-        const { data } = await axios.get(apiPath('/api/user?action=list-bookings&scope=driver'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        let list: Booking[] = [];
+        if (isLocalDevFirestoreMode()) {
+          const snapshot = await getDocs(query(collection(db, 'bookings'), where('driverId', '==', profile.uid)));
+          list = snapshot.docs
+            .map((snapshotDoc) => normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+            .filter((booking) => ['pending', 'confirmed', 'negotiating', 'completed'].includes(booking.status));
+        } else {
+          const token = await getAccessToken();
+          const { data } = await axios.get(apiPath('/api/user?action=list-bookings&scope=driver'), {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
+        }
         if (!isMounted) return;
-        const list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
         const normalized = dedupeBookingsByThread(
           list
             .map((booking) => normalizeNegotiationBooking(booking))
@@ -13066,50 +13268,46 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     };
 
     void loadDriverBookings();
-    pollTimer = window.setInterval(() => {
-      void loadDriverBookings();
-    }, 8000);
 
     return () => {
       isMounted = false;
-      if (pollTimer) window.clearInterval(pollTimer);
     };
   }, [profile.uid, retiredRideIds]);
 
   useEffect(() => {
     if (!isLocalDevFirestoreMode()) return;
-    const q = query(collection(db, 'tripSessions'), where('driverId', '==', profile.uid));
-    let unsubscribe: (() => void) | null = null;
-    unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
+    let isMounted = true;
+    const loadTripSessions = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'tripSessions'), where('driverId', '==', profile.uid)));
+        if (!isMounted) return;
         const next: Record<string, TripSession> = {};
         snapshot.docs.forEach((snapshotDoc) => {
           const data = snapshotDoc.data() as TripSession;
           next[data.bookingId || snapshotDoc.id] = { ...data, id: snapshotDoc.id };
         });
         setTripSessions(next);
-      },
-      (error) => {
+      } catch (error) {
         if (isMissingSupabaseTableError(error)) {
           console.warn('Trip sessions table missing; pausing driver session polling.');
-          if (unsubscribe) unsubscribe();
           return;
         }
         console.error('Trip session subscription error (driver):', error);
       }
-    );
+    };
+    void loadTripSessions();
     return () => {
-      if (unsubscribe) unsubscribe();
+      isMounted = false;
     };
   }, [profile.uid]);
 
   useEffect(() => {
     if (!isLocalDevFirestoreMode()) return;
-    const q = query(collection(db, 'bookings'), where('driverId', '==', profile.uid));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
+    let isMounted = true;
+    const loadDriverBookingHistory = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'bookings'), where('driverId', '==', profile.uid)));
+        if (!isMounted) return;
         const list: Booking[] = [];
         snapshot.forEach((snapshotDoc) =>
           list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
@@ -13119,12 +13317,14 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             (a, b) => new Date((b as any).updatedAt || b.createdAt).getTime() - new Date((a as any).updatedAt || a.createdAt).getTime()
           )
         );
-      },
-      (error) => {
+      } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'bookings');
       }
-    );
-    return () => unsubscribe();
+    };
+    void loadDriverBookingHistory();
+    return () => {
+      isMounted = false;
+    };
   }, [profile.uid]);
 
   useEffect(() => {
@@ -13198,6 +13398,18 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   useEffect(() => {
     if ("geolocation" in navigator) {
+      const persistDriverLocation = (newLocation: { lat: number; lng: number }) => {
+        const now = Date.now();
+        if (now - lastDriverLocationWriteRef.current < LOCATION_DB_UPDATE_INTERVAL_MS) return;
+        lastDriverLocationWriteRef.current = now;
+        updateDoc(doc(db, 'users', profile.uid), {
+          location: {
+            ...newLocation,
+            lastUpdated: new Date().toISOString()
+          }
+        }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
+      };
+
       const watchId = navigator.geolocation.watchPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
@@ -13210,14 +13422,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             heading: Number.isFinite(position.coords.heading as number) ? Number(position.coords.heading) : undefined,
             speedKmph: Number.isFinite(position.coords.speed as number) ? Number(position.coords.speed) * 3.6 : undefined,
           });
-          
-          // Update location in Firestore
-          updateDoc(doc(db, 'users', profile.uid), {
-            location: {
-              ...newLocation,
-              lastUpdated: new Date().toISOString()
-            }
-          }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
+          persistDriverLocation(newLocation);
         },
         (error) => {
           logGeolocationIssue('Driver', error);
@@ -13622,16 +13827,13 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const loadRelatedBookingThread = async (seedBooking: Booking) => {
     const snapshot = await getDocs(
-      query(
-        collection(db, 'bookings'),
-        where('consumerId', '==', seedBooking.consumerId),
-        where('driverId', '==', seedBooking.driverId)
-      )
+      query(collection(db, 'bookings'), where('consumerId', '==', seedBooking.consumerId))
     );
 
     const threadKey = getBookingThreadKey(seedBooking);
     const threadBookings = snapshot.docs
       .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+      .filter((booking) => booking.driverId === seedBooking.driverId)
       .filter((booking) => getBookingThreadKey(booking) === threadKey)
       .filter((booking) => ['pending', 'confirmed', 'negotiating'].includes(booking.status));
 
@@ -13998,6 +14200,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         hasPendingTravelerCounterOffer(request) && request.negotiatedFare
           ? request.negotiatedFare
           : request.fare;
+      const acceptedFareBreakdown =
+        status === 'confirmed' ? calculateServiceFee(acceptedFare, config || undefined) : null;
       const negotiationActor = hasPendingTravelerCounterOffer(request) ? 'consumer' : 'driver';
       let updatedAt = new Date().toISOString();
       try {
@@ -14016,9 +14220,16 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
               getBookingThreadKey(booking) === getBookingThreadKey(request)
                 ? {
                     ...booking,
-                    status,
-                    fare: acceptedFare,
-                    negotiationStatus:
+	                    status,
+	                    fare: acceptedFare,
+	                    ...(status === 'confirmed' && acceptedFareBreakdown
+                        ? {
+                            serviceFee: acceptedFareBreakdown.baseFee,
+                            gstAmount: acceptedFareBreakdown.gstAmount,
+                            totalPrice: acceptedFare + acceptedFareBreakdown.totalFee,
+                          }
+                        : {}),
+	                    negotiationStatus:
                       booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
                     driverCounterPending: false,
                     driverPhone: profile.phoneNumber || '',
@@ -14047,11 +14258,13 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       showAppDialog(status === 'confirmed' ? 'Booking confirmed.' : 'Traveler offer rejected.', 'success');
     } catch (error) {
       try {
-        const acceptedFare =
-          hasPendingTravelerCounterOffer(request) && request.negotiatedFare
-            ? request.negotiatedFare
-            : getNegotiationDisplayFare(request);
-        const updatedAt = await persistNegotiationResolutionThroughCompatStore(
+	        const acceptedFare =
+	          hasPendingTravelerCounterOffer(request) && request.negotiatedFare
+	            ? request.negotiatedFare
+	            : getNegotiationDisplayFare(request);
+          const acceptedFareBreakdown =
+            status === 'confirmed' ? calculateServiceFee(acceptedFare, config || undefined) : null;
+	        const updatedAt = await persistNegotiationResolutionThroughCompatStore(
           request,
           hasPendingTravelerCounterOffer(request) ? 'consumer' : 'driver',
           status,
@@ -14067,9 +14280,16 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
                 getBookingThreadKey(booking) === getBookingThreadKey(request)
                   ? {
                       ...booking,
-                      status,
-                      fare: acceptedFare,
-                      negotiationStatus:
+	                      status,
+	                      fare: acceptedFare,
+	                      ...(status === 'confirmed' && acceptedFareBreakdown
+                          ? {
+                              serviceFee: acceptedFareBreakdown.baseFee,
+                              gstAmount: acceptedFareBreakdown.gstAmount,
+                              totalPrice: acceptedFare + acceptedFareBreakdown.totalFee,
+                            }
+                          : {}),
+	                      negotiationStatus:
                         booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
                       driverCounterPending: false,
                       driverPhone: profile.phoneNumber || '',
@@ -18175,92 +18395,97 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [forceCancellingRideId, setForceCancellingRideId] = useState<string | null>(null);
   const selectedDriverMarkers = buildVerificationMarkers(selectedDriver?.driverDetails);
   const adminTransactionsCacheKey = `mairide_admin_transactions_cache_${profile.uid}`;
+  const lastAdminLocationWriteRef = useRef(0);
   const isPageVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
 
   useEffect(() => {
-    if (window.location.hostname !== 'localhost') {
-      let active = true;
-      let intervalId: number | null = null;
-
-      const loadAdminUsers = async () => {
-        if (!isPageVisible()) return;
-        try {
+    let active = true;
+    const loadAdminUsers = async () => {
+      if (!isPageVisible()) return;
+      setIsLoading(true);
+      try {
+        if (window.location.hostname !== 'localhost') {
           const headers = await getAdminRequestHeaders(profile.email);
           const response = await axios.get(adminUsersPath, { headers });
-          if (!active) return;
-          setUsers((response.data?.users || []) as UserProfile[]);
-          setIsLoading(false);
-        } catch (error) {
-          if (!active) return;
-          handleFirestoreError(error, OperationType.GET, 'users');
+          if (active) setUsers((response.data?.users || []) as UserProfile[]);
+          return;
         }
-      };
 
-      void loadAdminUsers();
-      intervalId = window.setInterval(() => {
-        void loadAdminUsers();
-      }, 20000);
+        const snapshot = await getDocs(query(collection(db, 'users')));
+        const usersData = snapshot.docs.map(doc => doc.data() as UserProfile);
+        if (active) setUsers(usersData);
+      } catch (error) {
+        reportFirestoreError(error, OperationType.GET, 'users');
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    };
+    void loadAdminUsers();
+    return () => {
+      active = false;
+    };
+  }, [profile.email]);
 
-      return () => {
-        active = false;
-        if (intervalId) window.clearInterval(intervalId);
-      };
-    }
-
-    const q = query(collection(db, 'users'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const usersData = snapshot.docs.map(doc => doc.data() as UserProfile);
-      setUsers(usersData);
-      setIsLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'users');
-    });
-    return () => unsubscribe();
+  useEffect(() => {
+    let active = true;
+    const loadBookings = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'bookings')));
+        const bookingsData = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .sort((a, b) => new Date(String((b as any).createdAt || 0)).getTime() - new Date(String((a as any).createdAt || 0)).getTime());
+        if (active) setBookings(bookingsData);
+      } catch (error) {
+        reportFirestoreError(error, OperationType.GET, 'bookings');
+      }
+    };
+    void loadBookings();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const bookingsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setBookings(bookingsData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'bookings');
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const q = query(collection(db, 'rides'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ridesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Ride));
-      setRides(ridesData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'rides');
-    });
-    return () => unsubscribe();
+    let active = true;
+    const loadRides = async () => {
+      try {
+        const snapshot = await getDocs(query(collection(db, 'rides')));
+        const ridesData = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as Ride))
+          .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
+        if (active) setRides(ridesData);
+      } catch (error) {
+        reportFirestoreError(error, OperationType.GET, 'rides');
+      }
+    };
+    void loadRides();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
     if (!isLocalDevFirestoreMode()) return;
-    const q = query(collection(db, 'tripSessions'), orderBy('updatedAt', 'desc'), limit(200));
-    let unsubscribe: (() => void) | null = null;
-    unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const list = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as TripSession) }));
-        setTripSessions(list);
-      },
-      (error) => {
+    let active = true;
+    const loadTripSessions = async () => {
+      try {
+        const q = query(collection(db, 'tripSessions'), limit(200));
+        const snapshot = await getDocs(q);
+        const list = snapshot.docs
+          .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as TripSession) }))
+          .sort((a, b) => new Date(String(b.updatedAt || 0)).getTime() - new Date(String(a.updatedAt || 0)).getTime());
+        if (active) setTripSessions(list);
+      } catch (error) {
         if (isMissingSupabaseTableError(error)) {
-          console.warn('Trip sessions table missing; pausing admin session polling.');
-          if (unsubscribe) unsubscribe();
+          console.warn('Trip sessions table missing; pausing admin session load.');
           return;
         }
-        console.error('Admin trip session monitor error:', error);
+        reportFirestoreError(error, OperationType.GET, 'tripSessions');
       }
-    );
+    };
+    void loadTripSessions();
     return () => {
-      if (unsubscribe) unsubscribe();
+      active = false;
     };
   }, []);
 
@@ -18382,6 +18607,9 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         setAdminLocation(nextLocation);
       }
 
+      const now = Date.now();
+      if (now - lastAdminLocationWriteRef.current < LOCATION_DB_UPDATE_INTERVAL_MS) return;
+      lastAdminLocationWriteRef.current = now;
       updateDoc(doc(db, 'users', profile.uid), {
         location: {
           ...nextLocation,
@@ -20710,13 +20938,82 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 const LIBRARIES: ("places" | "drawing" | "geometry" | "visualization")[] = ["places", "geometry"];
 
 // --- Hooks ---
-const useAppConfig = () => {
-  const [config, setConfig] = useState<AppConfig | null>(null);
+function useFirestoreFetch<T>(
+  loader: () => Promise<T>,
+  deps: React.DependencyList,
+  initialData: T,
+  errorMeta?: { operationType: OperationType; path: string | null }
+): FirestoreFetchState<T> {
+  const [data, setData] = useState<T>(initialData);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const nextData = await loader();
+      setData(nextData);
+    } catch (nextError) {
+      const normalizedError = nextError instanceof Error ? nextError : new Error(String(nextError));
+      setError(normalizedError);
+      if (errorMeta) {
+        reportFirestoreError(nextError, errorMeta.operationType, errorMeta.path);
+      } else {
+        recordInternalDebugEvent('firestore_fetch_error', normalizedError.message);
+        console.error(normalizedError);
+      }
+    } finally {
+      setLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    loader()
+      .then((nextData) => {
+        if (!active) return;
+        setData(nextData);
+      })
+      .catch((nextError) => {
+        if (!active) return;
+        const normalizedError = nextError instanceof Error ? nextError : new Error(String(nextError));
+        setError(normalizedError);
+        if (errorMeta) {
+          reportFirestoreError(nextError, errorMeta.operationType, errorMeta.path);
+        } else {
+          recordInternalDebugEvent('firestore_fetch_error', normalizedError.message);
+          console.error(normalizedError);
+        }
+      })
+      .finally(() => {
+        if (!active) return;
+        setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  return { data, loading, error, refresh };
+}
+
+const useAppConfigSource = (): AppConfigState => {
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const refresh = useCallback(async () => {
     const configRef = doc(db, 'app_config', 'global');
-    const unsubscribe = onSnapshot(configRef, (snapshot) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const snapshot = await getDoc(configRef);
       if (snapshot.exists()) {
         const nextConfig = { id: snapshot.id, ...snapshot.data() } as AppConfig;
         [
@@ -20739,20 +21036,27 @@ const useAppConfig = () => {
         });
         setConfig(nextConfig);
       }
+    } catch (nextError) {
+      const normalizedError = nextError instanceof Error ? nextError : new Error(String(nextError));
+      setError(normalizedError);
+      reportFirestoreError(nextError, OperationType.GET, 'app_config/global');
+    } finally {
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'app_config/global');
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    }
   }, []);
 
-  return { config, loading };
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return { config, loading, error, refresh };
 };
+
+const useAppConfig = () => React.useContext(AppConfigContext) || emptyAppConfigState;
 
 const App = () => {
   console.log("🚀 App component initialization started");
-  const appConfigState = useAppConfig();
+  const appConfigState = useAppConfigSource();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20927,26 +21231,21 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    let unsubProfile: (() => void) | null = null;
-    
+    let active = true;
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setLoading(true);
       setUser(u);
       setProfile(null);
-      
-      // Clean up previous profile listener if it exists
-      if (unsubProfile) {
-        unsubProfile();
-        unsubProfile = null;
-      }
 
       if (u) {
         const mappedPhoneProfileId = u.isAnonymous ? safeStorageGet('session', PHONE_LOGIN_PROFILE_KEY) : null;
         const pendingPhoneLogin = u.isAnonymous ? safeStorageGet('session', PHONE_LOGIN_NUMBER_KEY) : null;
         const profileDocId = mappedPhoneProfileId || u.uid;
 
-        // Listen to profile changes
-        unsubProfile = onSnapshot(doc(db, 'users', profileDocId), async (snapshot) => {
+        try {
+          const snapshot = await getDoc(doc(db, 'users', profileDocId));
+          if (!active) return;
           if (snapshot.exists()) {
             setProfile(snapshot.data() as UserProfile);
             if (u.isAnonymous) {
@@ -21047,11 +21346,11 @@ const App = () => {
             setProfile(null);
             setLoading(false);
           }
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${profileDocId}`);
+        } catch (error) {
+          reportFirestoreError(error, OperationType.GET, `users/${profileDocId}`);
           setProfile(null);
           setLoading(false);
-        });
+        }
       } else {
         safeStorageRemove('session', PHONE_LOGIN_PROFILE_KEY);
         safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
@@ -21061,8 +21360,8 @@ const App = () => {
     });
 
     return () => {
+      active = false;
       unsubscribe();
-      if (unsubProfile) unsubProfile();
     };
   }, []);
 
@@ -21574,12 +21873,17 @@ const App = () => {
   ) : null;
 
   const cookieConsentManager = <CookieConsentManager onChange={setCookieConsent} />;
+  const withAppConfigProvider = (content: React.ReactElement) => (
+    <AppConfigContext.Provider value={appConfigState}>
+      {content}
+    </AppConfigContext.Provider>
+  );
 
-  if (loading) return <ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>;
+  if (loading) return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
 
-  if (user && !profile) return <ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>;
+  if (user && !profile) return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
 
-  if (!user) return (
+  if (!user) return withAppConfigProvider(
     <ErrorBoundary>
       <div className="min-h-screen flex flex-col bg-mairide-bg">
         <div className="flex-1">
@@ -21652,18 +21956,18 @@ const App = () => {
 
   if (profile && profile.role === 'driver') {
     if (!profile.onboardingComplete) {
-      return <ErrorBoundary><DriverOnboarding profile={profile} onComplete={() => window.location.reload()} isLoaded={isLoaded} />{cookieConsentManager}</ErrorBoundary>;
+      return withAppConfigProvider(<ErrorBoundary><DriverOnboarding profile={profile} onComplete={() => window.location.reload()} isLoaded={isLoaded} />{cookieConsentManager}</ErrorBoundary>);
     }
     if (profile.verificationStatus === 'pending') {
-      return <ErrorBoundary><DriverPendingApproval profile={profile} />{cookieConsentManager}</ErrorBoundary>;
+      return withAppConfigProvider(<ErrorBoundary><DriverPendingApproval profile={profile} />{cookieConsentManager}</ErrorBoundary>);
     }
     if (profile.verificationStatus === 'rejected') {
-      return <ErrorBoundary><DriverRejected profile={profile} />{cookieConsentManager}</ErrorBoundary>;
+      return withAppConfigProvider(<ErrorBoundary><DriverRejected profile={profile} />{cookieConsentManager}</ErrorBoundary>);
     }
   }
 
   if (profile && profile.role === 'admin') {
-    return (
+    return withAppConfigProvider(
       <ErrorBoundary>
         {profile.forcePasswordChange && <ForcePasswordChangeModal profile={profile} />}
         <div className="min-h-screen bg-mairide-bg flex flex-col">
@@ -21683,7 +21987,7 @@ const App = () => {
     );
   }
 
-  return (
+  return withAppConfigProvider(
     <ErrorBoundary>
       <Router>
         <div className="min-h-screen bg-mairide-bg">
