@@ -677,6 +677,7 @@ const generateRideOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 const TRIP_SESSION_STALE_AFTER_MS = 60_000;
 const TRIP_SIGNAL_UPDATE_INTERVAL_MS = 3_000;
 const LOCATION_DB_UPDATE_INTERVAL_MS = 10_000;
+const RIDE_MATCHING_REFRESH_INTERVAL_MS = 5_000;
 const INTERNAL_DEBUG_LOG_KEY = 'mairide_internal_debug_events';
 
 type FirestoreFetchState<T> = {
@@ -2818,11 +2819,110 @@ const getBookingNegotiationField = <T,>(booking: Booking, key: string): T | unde
   return undefined;
 };
 
+const getFirstBookingNegotiationField = <T,>(booking: Booking, keys: string[]): T | undefined => {
+  for (const key of keys) {
+    const value = getBookingNegotiationField<T>(booking, key);
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return undefined;
+};
+
+const getRealtimeRowData = <T extends { id?: string }>(row: any): T => {
+  const base = row?.data && typeof row.data === 'object' ? row.data : {};
+  return {
+    ...base,
+    ...(row?.id ? { id: row.id } : {}),
+    ...(row?.uid ? { uid: row.uid } : {}),
+    ...(row?.ride_id ? { rideId: row.ride_id } : {}),
+    ...(row?.consumer_id ? { consumerId: row.consumer_id } : {}),
+    ...(row?.driver_id ? { driverId: row.driver_id } : {}),
+    ...(row?.status ? { status: row.status } : {}),
+    ...(row?.created_at ? { createdAt: row.created_at } : {}),
+    ...(row?.updated_at ? { updatedAt: row.updated_at } : {}),
+    ...(row?.driver_bid !== undefined ? { driverBid: row.driver_bid } : {}),
+    ...(row?.consumer_bid !== undefined ? { consumerBid: row.consumer_bid } : {}),
+  } as T;
+};
+
+const firstFiniteNumber = (...values: unknown[]) => {
+  for (const value of values) {
+    const next = Number(value);
+    if (Number.isFinite(next)) return next;
+  }
+  return 0;
+};
+
+const isTravelerRequestStorageStatus = (status: unknown) =>
+  ['traveler_request_open', 'traveler_request_matched', 'traveler_request_cancelled'].includes(
+    String(status || '').trim().toLowerCase()
+  );
+
+const normalizeTravelerRideRequest = (row: any): TravelerRideRequest => {
+  const data = row?.data && typeof row.data === 'object' ? row.data : row || {};
+  const topLevelStatus = String(row?.status || '').trim().toLowerCase();
+  const nestedStatus = String(data.status || '').trim().toLowerCase();
+  const status: TravelerRideRequest['status'] =
+    topLevelStatus === 'traveler_request_cancelled' || nestedStatus === 'cancelled'
+      ? 'cancelled'
+      : topLevelStatus === 'traveler_request_matched' || nestedStatus === 'matched' || topLevelStatus === 'negotiating'
+        ? 'matched'
+        : 'open';
+  const fare = firstFiniteNumber(data.fare, row?.fare, data.listedFare, data.negotiatedFare, data.totalPrice);
+  const now = new Date().toISOString();
+
+  return {
+    ...data,
+    id: String(row?.id || data.id || ''),
+    consumerId: String(row?.consumer_id || row?.consumerId || data.consumerId || data.consumer_id || ''),
+    consumerName: String(data.consumerName || data.displayName || data.userName || 'Traveler'),
+    consumerPhone: String(data.consumerPhone || data.phoneNumber || ''),
+    origin: String(data.origin || row?.origin || ''),
+    destination: String(data.destination || row?.destination || ''),
+    originLocation: data.originLocation || null,
+    destinationLocation: data.destinationLocation || null,
+    fare,
+    seatsNeeded: Math.max(1, firstFiniteNumber(data.seatsNeeded, data.seatsBooked, 1)),
+    departureTime: String(data.departureTime || row?.departure_time || row?.created_at || now),
+    departureDay: data.departureDay || 'today',
+    departureDayLabel: data.departureDayLabel || 'Today',
+    departureClock: data.departureClock || '09:00',
+    departureNote:
+      data.departureNote ||
+      'Planned departure time may vary due to traffic, road, and operational conditions.',
+    status,
+    matchedRideId: data.matchedRideId || row?.ride_id || data.rideId || undefined,
+    matchedDriverId: data.matchedDriverId || row?.driver_id || data.driverId || undefined,
+    matchedAt: data.matchedAt,
+    createdAt: String(data.createdAt || row?.created_at || now),
+    updatedAt: String(data.updatedAt || row?.updated_at || row?.created_at || now),
+  };
+};
+
 const normalizeNegotiationBooking = <T extends Booking>(booking: T): T => {
   const data = (booking as any)?.data || {};
+  const actor = data.negotiationActor || (booking as any).negotiationActor;
+  const driverBid =
+    data.driverBid ?? data.driver_bid ?? (booking as any).driverBid ?? (booking as any).driver_bid;
+  const consumerBid =
+    data.consumerBid ??
+    data.consumer_bid ??
+    data.riderOffer ??
+    data.rider_offer ??
+    (booking as any).consumerBid ??
+    (booking as any).consumer_bid ??
+    (booking as any).riderOffer ??
+    (booking as any).rider_offer;
+  const activeNegotiatedFare =
+    actor === 'driver' && driverBid !== undefined
+      ? driverBid
+      : actor === 'consumer' && consumerBid !== undefined
+        ? consumerBid
+        : data.negotiatedFare ?? (booking as any).negotiatedFare;
   return {
     ...booking,
-    ...(data.negotiatedFare !== undefined ? { negotiatedFare: data.negotiatedFare } : {}),
+    ...(activeNegotiatedFare !== undefined ? { negotiatedFare: activeNegotiatedFare } : {}),
+    ...(driverBid !== undefined ? { driverBid } : {}),
+    ...(consumerBid !== undefined ? { consumerBid } : {}),
     ...(data.negotiationStatus ? { negotiationStatus: data.negotiationStatus } : {}),
     ...(data.negotiationActor ? { negotiationActor: data.negotiationActor } : {}),
     ...(data.driverCounterPending !== undefined ? { driverCounterPending: data.driverCounterPending } : {}),
@@ -2911,12 +3011,14 @@ const persistCounterOfferThroughCompatStore = async (
     threadRows.map((booking) =>
       updateDoc(doc(db, 'bookings', booking.id), {
         negotiatedFare: fare,
+        ...(actor === 'driver' ? { driverBid: fare } : { consumerBid: fare }),
         negotiationStatus: 'pending',
         negotiationActor: actor,
         driverCounterPending: actor === 'driver',
         status: 'negotiating',
         rideRetired: false,
         'data.negotiatedFare': fare,
+        ...(actor === 'driver' ? { 'data.driverBid': fare } : { 'data.consumerBid': fare }),
         'data.negotiationStatus': 'pending',
         'data.negotiationActor': actor,
         'data.driverCounterPending': actor === 'driver',
@@ -3033,9 +3135,20 @@ const applyThreadNegotiationState = (
 };
 
 const getNegotiationDisplayFare = (booking: Booking) => {
+  const negotiationActor = String(getBookingNegotiationField<string>(booking, 'negotiationActor') || '');
+  const driverBid = Number(getFirstBookingNegotiationField<number | string>(booking, ['driverBid', 'driver_bid']));
+  const consumerBid = Number(getFirstBookingNegotiationField<number | string>(booking, ['consumerBid', 'consumer_bid', 'riderOffer', 'rider_offer']));
   const negotiatedFare = Number(getBookingNegotiationField<number | string>(booking, 'negotiatedFare'));
   const negotiationStatus = String(getBookingNegotiationField<string>(booking, 'negotiationStatus') || '');
   const fare = Number(getBookingNegotiationField<number | string>(booking, 'fare'));
+
+  if (negotiationStatus === 'pending' && negotiationActor === 'driver' && Number.isFinite(driverBid)) {
+    return driverBid;
+  }
+
+  if (negotiationStatus === 'pending' && negotiationActor === 'consumer' && Number.isFinite(consumerBid)) {
+    return consumerBid;
+  }
 
   if (Number.isFinite(negotiatedFare) && negotiationStatus === 'pending') {
     return negotiatedFare;
@@ -8906,6 +9019,45 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     setTransactions(transactionsFetch.data);
   }, [transactionsFetch.data]);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel(`my-bookings:${profile.uid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings', filter: `consumer_id=eq.${profile.uid}` },
+        (payload: any) => {
+          const booking = normalizeNegotiationBooking(getRealtimeRowData<Booking>(payload.new || payload.old));
+          if (!booking.id) return;
+          setBookings((prev) => {
+            const next =
+              payload.eventType === 'DELETE'
+                ? prev.filter((item) => item.id !== booking.id)
+                : prev.some((item) => item.id === booking.id)
+                  ? prev.map((item) => (item.id === booking.id ? normalizeNegotiationBooking({ ...item, ...booking }) : item))
+                  : [booking, ...prev];
+            return dedupeBookingsByThread(
+              next
+                .map((item) => normalizeNegotiationBooking(item))
+                .sort(
+                  (a, b) =>
+                    new Date((b as any).updatedAt || b.createdAt).getTime() -
+                    new Date((a as any).updatedAt || a.createdAt).getTime()
+                )
+            );
+          });
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          recordInternalDebugEvent('my_bookings_realtime_error', { userId: profile.uid });
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [profile.uid]);
+
   const submitTravelerPaymentProof = async (
     booking: Booking,
     payload: { transactionId: string; receiptDataUrl: string }
@@ -9585,8 +9737,14 @@ const MyRides = ({
       }
     };
     void loadDriverRides();
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadDriverRides();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       active = false;
+      window.clearInterval(refreshTimer);
     };
   }, [profile.uid, hiddenRideIds]);
 
@@ -9618,8 +9776,14 @@ const MyRides = ({
       }
     };
     void loadActiveNegotiations();
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadActiveNegotiations();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       active = false;
+      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -10768,6 +10932,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const seenDriverCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedDriverCountersRef = useRef(false);
   const lastTravelerLocationWriteRef = useRef(0);
+  const activeRideFeedRef = useRef<Ride[]>([]);
+  const activeRideBookingsRef = useRef<Booking[]>([]);
   const travelerFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -10844,9 +11010,15 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     };
 
     void loadDashboardBookings();
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadDashboardBookings();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
 
     return () => {
       isMounted = false;
+      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -10858,10 +11030,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         let list: TravelerRideRequest[] = [];
         if (isLocalDevFirestoreMode()) {
           const snapshot = await getDocs(query(collection(db, 'travelerRideRequests'), where('consumerId', '==', profile.uid)));
-          list = snapshot.docs.map((snapshotDoc) => ({
-            id: snapshotDoc.id,
-            ...(snapshotDoc.data() as TravelerRideRequest),
-          }));
+          list = snapshot.docs.map((snapshotDoc) =>
+            normalizeTravelerRideRequest({ id: snapshotDoc.id, ...(snapshotDoc.data() as TravelerRideRequest) })
+          );
         } else {
           const token = await getAccessToken();
           const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=own'), {
@@ -10869,7 +11040,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
               Authorization: `Bearer ${token}`,
             },
           });
-          list = Array.isArray(data?.requests) ? data.requests as TravelerRideRequest[] : [];
+          list = Array.isArray(data?.requests) ? data.requests.map(normalizeTravelerRideRequest) : [];
         }
         if (!isMounted) return;
         setTravelerRequests(
@@ -10889,9 +11060,15 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     };
 
     void loadTravelerRequests();
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadTravelerRequests();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
 
     return () => {
       isMounted = false;
+      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -11383,15 +11560,17 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       ...draft,
       action: 'create-traveler-request',
     };
+    let persistedRequest: TravelerRideRequest | null = null;
 
     if (isLocalDevFirestoreMode()) {
       const now = new Date().toISOString();
-      await addDoc(collection(db, 'travelerRideRequests'), {
+      const requestRef = await addDoc(collection(db, 'travelerRideRequests'), {
         ...draft,
         status: 'open',
         createdAt: now,
         updatedAt: now,
       } as Omit<TravelerRideRequest, 'id'>);
+      persistedRequest = normalizeTravelerRideRequest({ ...draft, id: requestRef.id, status: 'open', createdAt: now, updatedAt: now });
     } else {
       const token = await withTimeout(getAccessToken(), 8000, '');
       if (!token) {
@@ -11401,23 +11580,40 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         Authorization: `Bearer ${token}`,
       };
       try {
-        await axios.post(apiPath('/api/user?action=create-traveler-request'), requestBody, {
+        const response = await axios.post(apiPath('/api/user?action=create-traveler-request'), requestBody, {
           headers,
           timeout: 15000,
         });
+        persistedRequest = response.data?.request
+          ? normalizeTravelerRideRequest(response.data.request)
+          : normalizeTravelerRideRequest({ ...draft, id: response.data?.id, status: 'open' });
       } catch {
         try {
-          await axios.post(apiPath('/api/user/create-traveler-request'), requestBody, {
+          const response = await axios.post(apiPath('/api/user/create-traveler-request'), requestBody, {
             headers,
             timeout: 15000,
           });
+          persistedRequest = response.data?.request
+            ? normalizeTravelerRideRequest(response.data.request)
+            : normalizeTravelerRideRequest({ ...draft, id: response.data?.id, status: 'open' });
         } catch {
-          await axios.post(apiPath('/api/user'), requestBody, {
+          const response = await axios.post(apiPath('/api/user'), requestBody, {
             headers,
             timeout: 15000,
           });
+          persistedRequest = response.data?.request
+            ? normalizeTravelerRideRequest(response.data.request)
+            : normalizeTravelerRideRequest({ ...draft, id: response.data?.id, status: 'open' });
         }
       }
+    }
+
+    if (persistedRequest?.id) {
+      setTravelerRequests((prev) =>
+        [persistedRequest!, ...prev.filter((request) => request.id !== persistedRequest!.id)]
+          .filter((item) => isRideWithinPlanningWindow(item))
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
     }
 
     void trackPlatformUsageEvent('ride_requested', {
@@ -11523,12 +11719,100 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
   };
 
-  useEffect(() => {
-    if (activeTab !== 'search') return;
-    void handleSearch();
-  }, [activeTab, dashboardBookings.length, travelerFeedLocation, travelerRequests.length]);
+  const applyActiveRideFeed = useCallback((
+    availableRides: Ride[] = activeRideFeedRef.current,
+    allBookings: Booking[] = activeRideBookingsRef.current
+  ) => {
+    const lockedRideIds = getLockedRideIds(allBookings);
+    const rideMap = new Map<string, any>();
+    const partialRideMap = new Map<string, any>();
+    availableRides.forEach((data) => {
+      if (!data?.id || lockedRideIds.has(data.id)) return;
+      if (String(data.status || '') !== 'available') return;
 
-  const handleSearch = async () => {
+      const normalizedSearchFrom = normalizeSearchText(search.from);
+      const normalizedSearchTo = normalizeSearchText(search.to);
+      const normalizedOrigin = normalizeSearchText(data.origin);
+      const normalizedDestination = normalizeSearchText(data.destination);
+
+      const originDistance =
+        searchLocationFrom && data.originLocation
+          ? getDistance(searchLocationFrom.lat, searchLocationFrom.lng, data.originLocation.lat, data.originLocation.lng)
+          : null;
+      const destinationDistance =
+        searchLocationTo && data.destinationLocation
+          ? getDistance(searchLocationTo.lat, searchLocationTo.lng, data.destinationLocation.lat, data.destinationLocation.lng)
+          : null;
+
+      const corridorMatch =
+        (searchLocationFrom || searchLocationTo) &&
+        data.originLocation &&
+        data.destinationLocation
+          ? routeCorridorMatch({
+              rideOriginLocation: data.originLocation,
+              rideDestinationLocation: data.destinationLocation,
+              travelerOriginLocation: searchLocationFrom,
+              travelerDestinationLocation: searchLocationTo,
+              ...getAdaptiveDetourToleranceKm(
+                getDistance(
+                  data.originLocation.lat,
+                  data.originLocation.lng,
+                  data.destinationLocation.lat,
+                  data.destinationLocation.lng
+                )
+              ),
+            })
+          : false;
+
+      const originMatches =
+        !search.from ||
+        corridorMatch ||
+        (originDistance !== null
+          ? originDistance <= 120
+          : routeTextMatches(normalizedOrigin, normalizedSearchFrom));
+      const destinationMatches =
+        !search.to ||
+        corridorMatch ||
+        (destinationDistance !== null
+          ? destinationDistance <= 120
+          : routeTextMatches(normalizedDestination, normalizedSearchTo));
+
+      const route = getFeedItemRoute(data);
+      const matchesActiveTravelerCorridor = isWithinAnyDashboardCorridor(route, activeTravelerRequestRoutes);
+      const matchesTravelerPartialCorridor = isWithinAnyPartialDashboardCorridor(route, activeTravelerRequestRoutes);
+
+      if (originMatches && destinationMatches && isRideWithinPlanningWindow(data)) {
+        const nextRide = { ...data };
+        const dedupeKey = getRideDuplicateKey(nextRide);
+        if (matchesActiveTravelerCorridor) {
+          const existingRide = rideMap.get(dedupeKey);
+          if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {
+            rideMap.set(dedupeKey, nextRide);
+          }
+          partialRideMap.delete(dedupeKey);
+          return;
+        }
+        if (matchesTravelerPartialCorridor) {
+          const existingRide = partialRideMap.get(dedupeKey);
+          if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {
+            partialRideMap.set(dedupeKey, { ...nextRide, matchTier: 'partial' });
+          }
+        }
+      }
+    });
+    setRides(
+      Array.from(rideMap.values()).sort(
+        (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
+      )
+    );
+    setPartialRides(
+      Array.from(partialRideMap.values()).sort(
+        (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
+      )
+    );
+  }, [activeTravelerRequestRoutes, search.from, search.to, searchLocationFrom, searchLocationTo]);
+
+  const handleSearch = useCallback(async () => {
     setIsLoading(true);
     try {
       let availableRides: Ride[] = [];
@@ -11538,129 +11822,129 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         const querySnapshot = await getDocs(query(collection(db, 'rides'), where('status', '==', 'available')));
         const bookingsSnapshot = await getDocs(query(collection(db, 'bookings')));
         availableRides = querySnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
-        allBookings = bookingsSnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }));
+        allBookings = bookingsSnapshot.docs.map((snapshotDoc) =>
+          normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) })
+        );
       } else {
         const { data } = await axios.get(apiPath('/api/health?action=search-rides'));
         availableRides = Array.isArray(data?.rides) ? data.rides : [];
-        allBookings = Array.isArray(data?.bookings) ? data.bookings : [];
+        allBookings = Array.isArray(data?.bookings) ? data.bookings.map((booking: Booking) => normalizeNegotiationBooking(booking)) : [];
       }
 
-      const lockedRideIds = getLockedRideIds(allBookings);
-      const rideMap = new Map<string, any>();
-      const partialRideMap = new Map<string, any>();
-      availableRides.forEach((data) => {
-        if (!data?.id || lockedRideIds.has(data.id)) {
-          return;
-        }
-        if (String(data.status || '') !== 'available') {
-          return;
-        }
-
-        const normalizedSearchFrom = normalizeSearchText(search.from);
-        const normalizedSearchTo = normalizeSearchText(search.to);
-        const normalizedOrigin = normalizeSearchText(data.origin);
-        const normalizedDestination = normalizeSearchText(data.destination);
-
-        const originDistance =
-          searchLocationFrom && data.originLocation
-            ? getDistance(
-                searchLocationFrom.lat,
-                searchLocationFrom.lng,
-                data.originLocation.lat,
-                data.originLocation.lng
-              )
-            : null;
-
-        const destinationDistance =
-          searchLocationTo && data.destinationLocation
-            ? getDistance(
-                searchLocationTo.lat,
-                searchLocationTo.lng,
-                data.destinationLocation.lat,
-                data.destinationLocation.lng
-              )
-            : null;
-
-        const corridorMatch =
-          (searchLocationFrom || searchLocationTo) &&
-          data.originLocation &&
-          data.destinationLocation
-            ? routeCorridorMatch({
-                rideOriginLocation: data.originLocation,
-                rideDestinationLocation: data.destinationLocation,
-                travelerOriginLocation: searchLocationFrom,
-                travelerDestinationLocation: searchLocationTo,
-                ...getAdaptiveDetourToleranceKm(
-                  getDistance(
-                    data.originLocation.lat,
-                    data.originLocation.lng,
-                    data.destinationLocation.lat,
-                    data.destinationLocation.lng
-                  )
-                ),
-              })
-            : false;
-
-        const originMatches =
-          !search.from ||
-          corridorMatch ||
-          (originDistance !== null
-            ? originDistance <= 120
-            : routeTextMatches(normalizedOrigin, normalizedSearchFrom));
-
-        const destinationMatches =
-          !search.to ||
-          corridorMatch ||
-          (destinationDistance !== null
-            ? destinationDistance <= 120
-            : routeTextMatches(normalizedDestination, normalizedSearchTo));
-
-        const matchesActiveTravelerCorridor = isWithinAnyDashboardCorridor(
-          getFeedItemRoute(data),
-          activeTravelerRequestRoutes
-        );
-        const matchesTravelerPartialCorridor = isWithinAnyPartialDashboardCorridor(
-          getFeedItemRoute(data),
-          activeTravelerRequestRoutes
-        );
-
-        const withinPlanningWindow = isRideWithinPlanningWindow(data);
-        if (originMatches && destinationMatches && withinPlanningWindow) {
-          const nextRide = { ...data };
-          const dedupeKey = getRideDuplicateKey(nextRide);
-          if (matchesActiveTravelerCorridor) {
-            const existingRide = rideMap.get(dedupeKey);
-            if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {
-              rideMap.set(dedupeKey, nextRide);
-            }
-            partialRideMap.delete(dedupeKey);
-            return;
-          }
-          if (matchesTravelerPartialCorridor) {
-            const existingRide = partialRideMap.get(dedupeKey);
-            if (!existingRide || new Date(nextRide.createdAt).getTime() > new Date(existingRide.createdAt).getTime()) {
-              partialRideMap.set(dedupeKey, { ...nextRide, matchTier: 'partial' });
-            }
-          }
-        }
-      });
-      setRides(
-        Array.from(rideMap.values()).sort(
-          (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
-        )
-      );
-      setPartialRides(
-        Array.from(partialRideMap.values()).sort(
-          (a, b) => new Date(a.departureTime).getTime() - new Date(b.departureTime).getTime()
-        )
-      );
+      activeRideFeedRef.current = availableRides;
+      activeRideBookingsRef.current = allBookings;
+      applyActiveRideFeed(availableRides, allBookings);
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, 'rides');
       setPartialRides([]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [applyActiveRideFeed]);
+
+  useEffect(() => {
+    if (activeTab !== 'search') return;
+    void handleSearch();
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void handleSearch();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(refreshTimer);
+  }, [activeTab, handleSearch, dashboardBookings.length, travelerFeedLocation, travelerRequests.length]);
+
+  useEffect(() => {
+    const upsertById = <T extends { id?: string }>(items: T[], nextItem: T) => {
+      if (!nextItem.id) return items;
+      const exists = items.some((item) => item.id === nextItem.id);
+      return exists
+        ? items.map((item) => (item.id === nextItem.id ? { ...item, ...nextItem } : item))
+        : [nextItem, ...items];
+    };
+
+    const channel = supabase
+      .channel(`active-ride-feed:${profile.uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, (payload: any) => {
+        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
+        const ride = getRealtimeRowData<Ride>(row);
+        if (!ride.id) return;
+        activeRideFeedRef.current =
+          payload.eventType === 'DELETE'
+            ? activeRideFeedRef.current.filter((item) => item.id !== ride.id)
+            : upsertById(activeRideFeedRef.current, ride);
+        setRideStatusById((prev) => ({
+          ...prev,
+          [ride.id]: ride.status,
+        }));
+        applyActiveRideFeed();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload: any) => {
+        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
+        if (isTravelerRequestStorageStatus(row?.status)) {
+          const request = normalizeTravelerRideRequest(row);
+          if (!request.id || request.consumerId !== profile.uid) return;
+          setTravelerRequests((prev) => {
+            const next =
+              payload.eventType === 'DELETE' || request.status === 'cancelled'
+                ? prev.filter((item) => item.id !== request.id)
+                : upsertById(prev, request);
+            return next
+              .filter((item) => isRideWithinPlanningWindow(item))
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          });
+          return;
+        }
+
+        const booking = normalizeNegotiationBooking(getRealtimeRowData<Booking>(row));
+        if (!booking.id) return;
+        activeRideBookingsRef.current =
+          payload.eventType === 'DELETE'
+            ? activeRideBookingsRef.current.filter((item) => item.id !== booking.id)
+            : upsertById(activeRideBookingsRef.current, booking);
+
+        if (booking.consumerId === profile.uid) {
+          setDashboardBookings((prev) => {
+            const next =
+              payload.eventType === 'DELETE'
+                ? prev.filter((item) => item.id !== booking.id)
+                : upsertById(prev, booking);
+            return dedupeBookingsByThread(
+              next
+                .map((item) => normalizeNegotiationBooking(item))
+                .sort(
+                  (a, b) =>
+                    new Date((b as any).updatedAt || b.createdAt).getTime() -
+                    new Date((a as any).updatedAt || a.createdAt).getTime()
+                )
+            );
+          });
+        }
+        applyActiveRideFeed();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'travelerRideRequests' }, (payload: any) => {
+        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
+        const request = getRealtimeRowData<TravelerRideRequest>(row);
+        if (!request.id || request.consumerId !== profile.uid) return;
+        setTravelerRequests((prev) => {
+          const next =
+            payload.eventType === 'DELETE'
+              ? prev.filter((item) => item.id !== request.id)
+              : upsertById(prev, request);
+          return next
+            .filter((item) => isRideWithinPlanningWindow(item))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        });
+      })
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          recordInternalDebugEvent('active_ride_feed_realtime_error', { userId: profile.uid });
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [applyActiveRideFeed, profile.uid]);
 
   const handleBookRide = async (ride: any, requestedFare?: number) => {
     setIsBooking(true);
@@ -13078,6 +13362,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const seenTravelerCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedTravelerCountersRef = useRef(false);
   const lastDriverLocationWriteRef = useRef(0);
+  const driverRideFeedRef = useRef<Ride[]>([]);
   const driverFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -13109,7 +13394,11 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         .filter((request) => request.status === 'open')
         .filter((request) => request.consumerId !== profile.uid)
         .filter((request) => !linkedTravelerRequestIds.has(request.id))
-        .filter((request) => isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
+        .filter(
+          (request) =>
+            driverAvailableRideRoutes.length === 0 ||
+            isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)
+        ),
     [driverAvailableRideRoutes, travelerRideRequests, profile.uid, linkedTravelerRequestIds]
   );
   const partialTravelerRideRequests = useMemo(
@@ -13118,6 +13407,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         .filter((request) => request.status === 'open')
         .filter((request) => request.consumerId !== profile.uid)
         .filter((request) => !linkedTravelerRequestIds.has(request.id))
+        .filter(() => driverAvailableRideRoutes.length > 0)
         .filter((request) => !isWithinAnyDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes))
         .filter((request) => isWithinAnyPartialDashboardCorridor(getFeedItemRoute(request), driverAvailableRideRoutes)),
     [driverAvailableRideRoutes, travelerRideRequests, profile.uid, linkedTravelerRequestIds]
@@ -13153,8 +13443,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       try {
         const snapshot = await getDocs(query(collection(db, 'rides'), where('driverId', '==', profile.uid)));
         if (!isMounted) return;
-        const nextRoutes = snapshot.docs
-          .map((snapshotDoc) => snapshotDoc.data() as Ride)
+        const driverRides = snapshot.docs
+          .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
+        driverRideFeedRef.current = driverRides;
+        const nextRoutes = driverRides
           .filter((ride) => String(ride.status || '') === 'available')
           .map((ride) => getFeedItemRoute(ride as any))
           .filter(
@@ -13169,8 +13461,14 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       }
     };
     void loadDriverRideRoutes();
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadDriverRideRoutes();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       isMounted = false;
+      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -13182,10 +13480,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         let list: TravelerRideRequest[] = [];
         if (isLocalDevFirestoreMode()) {
           const snapshot = await getDocs(query(collection(db, 'travelerRideRequests'), where('status', '==', 'open')));
-          list = snapshot.docs.map((snapshotDoc) => ({
-            id: snapshotDoc.id,
-            ...(snapshotDoc.data() as TravelerRideRequest),
-          }));
+          list = snapshot.docs.map((snapshotDoc) =>
+            normalizeTravelerRideRequest({ id: snapshotDoc.id, ...(snapshotDoc.data() as TravelerRideRequest) })
+          );
         } else {
           const token = await getAccessToken();
           const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=open'), {
@@ -13193,7 +13490,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
               Authorization: `Bearer ${token}`,
             },
           });
-          list = Array.isArray(data?.requests) ? data.requests as TravelerRideRequest[] : [];
+          list = Array.isArray(data?.requests) ? data.requests.map(normalizeTravelerRideRequest) : [];
         }
         if (!isMounted) return;
         setTravelerRideRequests(
@@ -13213,9 +13510,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     };
 
     void loadOpenTravelerRequests();
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadOpenTravelerRequests();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
 
     return () => {
       isMounted = false;
+      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -13268,9 +13571,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     };
 
     void loadDriverBookings();
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadDriverBookings();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
 
     return () => {
       isMounted = false;
+      window.clearInterval(refreshTimer);
     };
   }, [profile.uid, retiredRideIds]);
 
@@ -13326,6 +13635,115 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       isMounted = false;
     };
   }, [profile.uid]);
+
+  useEffect(() => {
+    const upsertById = <T extends { id?: string }>(items: T[], nextItem: T) => {
+      if (!nextItem.id) return items;
+      const exists = items.some((item) => item.id === nextItem.id);
+      return exists
+        ? items.map((item) => (item.id === nextItem.id ? { ...item, ...nextItem } : item))
+        : [nextItem, ...items];
+    };
+    const sortByUpdated = <T extends { createdAt?: string; updatedAt?: string }>(items: T[]) =>
+      [...items].sort(
+        (a, b) =>
+          new Date((b as any).updatedAt || b.createdAt || 0).getTime() -
+          new Date((a as any).updatedAt || a.createdAt || 0).getTime()
+      );
+    const toDriverRoutes = (ridesList: Ride[]) =>
+      ridesList
+        .filter((ride) => ride.driverId === profile.uid)
+        .filter((ride) => String(ride.status || '') === 'available')
+        .map((ride) => getFeedItemRoute(ride as any))
+        .filter(
+          (route): route is {
+            originLocation: { lat: number; lng: number };
+            destinationLocation: { lat: number; lng: number };
+          } => Boolean(route)
+        );
+
+    const channel = supabase
+      .channel(`driver-live-matching:${profile.uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'travelerRideRequests' }, (payload: any) => {
+        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
+        const request = getRealtimeRowData<TravelerRideRequest>(row);
+        if (!request.id) return;
+        setTravelerRideRequests((prev) => {
+          const next =
+            payload.eventType === 'DELETE'
+              ? prev.filter((item) => item.id !== request.id)
+              : upsertById(prev, request);
+          return next
+            .filter((item) => isRideWithinPlanningWindow(item))
+            .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime());
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload: any) => {
+        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
+        if (isTravelerRequestStorageStatus(row?.status)) {
+          const request = normalizeTravelerRideRequest(row);
+          if (!request.id) return;
+          setTravelerRideRequests((prev) => {
+            const next =
+              payload.eventType === 'DELETE' || request.status === 'cancelled'
+                ? prev.filter((item) => item.id !== request.id)
+                : upsertById(prev, request);
+            return next
+              .filter((item) => isRideWithinPlanningWindow(item))
+              .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime());
+          });
+          return;
+        }
+
+        const booking = normalizeNegotiationBooking(getRealtimeRowData<Booking>(row));
+        if (!booking.id || booking.driverId !== profile.uid) return;
+
+        setDriverBookings((prev) => {
+          const next =
+            payload.eventType === 'DELETE'
+              ? prev.filter((item) => item.id !== booking.id)
+              : upsertById(prev, booking).map((item) => normalizeNegotiationBooking(item));
+          return dedupeBookingsByThread(sortByUpdated(next));
+        });
+        setRequests((prev) => {
+          const next =
+            payload.eventType === 'DELETE'
+              ? prev.filter((item) => item.id !== booking.id)
+              : upsertById(prev, booking).map((item) => normalizeNegotiationBooking(item));
+          return dedupeBookingsByThread(sortByUpdated(next)).filter(
+            (item) =>
+              !retiredRideIds.includes(item.rideId) &&
+              !(item as any).rideRetired &&
+              item.negotiationStatus !== 'rejected' &&
+              ['pending', 'confirmed', 'negotiating'].includes(item.status)
+          );
+        });
+        setDriverNegotiationPreview((current) =>
+          current && getBookingThreadKey(current) === getBookingThreadKey(booking)
+            ? normalizeNegotiationBooking({ ...current, ...booking })
+            : current
+        );
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, (payload: any) => {
+        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
+        const ride = getRealtimeRowData<Ride>(row);
+        if (!ride.id || ride.driverId !== profile.uid) return;
+        driverRideFeedRef.current =
+          payload.eventType === 'DELETE'
+            ? driverRideFeedRef.current.filter((item) => item.id !== ride.id)
+            : upsertById(driverRideFeedRef.current, ride);
+        setDriverAvailableRideRoutes(toDriverRoutes(driverRideFeedRef.current));
+      })
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          recordInternalDebugEvent('driver_live_matching_realtime_error', { userId: profile.uid });
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [profile.uid, retiredRideIds]);
 
   useEffect(() => {
     if (reviewBooking) return;
@@ -13500,6 +13918,45 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       setDriverNegotiationPreview(null);
     }
   }, [driverNegotiationPreview, requests]);
+
+  useEffect(() => {
+    const rideId = driverNegotiationPreview?.rideId;
+    if (!rideId) return;
+
+    const channel = supabase
+      .channel(`negotiation-card:${rideId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings', filter: `ride_id=eq.${rideId}` },
+        (payload: any) => {
+          const booking = normalizeNegotiationBooking(getRealtimeRowData<Booking>(payload.new || payload.old));
+          if (!booking.id || booking.driverId !== profile.uid) return;
+          setDriverNegotiationPreview((current) =>
+            current && getBookingThreadKey(current) === getBookingThreadKey(booking)
+              ? normalizeNegotiationBooking({ ...current, ...booking })
+              : current
+          );
+          setRequests((prev) =>
+            dedupeBookingsByThread(
+              prev.map((item) =>
+                getBookingThreadKey(item) === getBookingThreadKey(booking)
+                  ? normalizeNegotiationBooking({ ...item, ...booking })
+                  : item
+              )
+            )
+          );
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          recordInternalDebugEvent('negotiation_card_realtime_error', { rideId, userId: profile.uid });
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [driverNegotiationPreview?.rideId, profile.uid]);
 
   const toggleOnline = async () => {
     const newState = !isOnline;
@@ -14074,6 +14531,26 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       createdRideId ||
       String((linkedTravelerRequest as any)?.matchedRideId || '') ||
       String((existingThread as any)?.rideId || '');
+
+    if (resolvedRideId) {
+      const optimisticRide = { ...ridePayload, id: resolvedRideId, status: 'available' as const, updatedAt: new Date().toISOString() };
+      driverRideFeedRef.current = [
+        optimisticRide as Ride,
+        ...driverRideFeedRef.current.filter((ride) => ride.id !== resolvedRideId),
+      ];
+      setDriverAvailableRideRoutes(
+        driverRideFeedRef.current
+          .filter((ride) => ride.driverId === profile.uid)
+          .filter((ride) => String(ride.status || '') === 'available')
+          .map((ride) => getFeedItemRoute(ride as any))
+          .filter(
+            (route): route is {
+              originLocation: { lat: number; lng: number };
+              destinationLocation: { lat: number; lng: number };
+            } => Boolean(route)
+          )
+      );
+    }
 
     if (linkedRequestIdOverride) {
       const matchedAt = new Date().toISOString();
@@ -18440,8 +18917,14 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       }
     };
     void loadBookings();
+    const refreshTimer = window.setInterval(() => {
+      if (isPageVisible()) {
+        void loadBookings();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       active = false;
+      window.clearInterval(refreshTimer);
     };
   }, []);
 
@@ -18459,8 +18942,14 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       }
     };
     void loadRides();
+    const refreshTimer = window.setInterval(() => {
+      if (isPageVisible()) {
+        void loadRides();
+      }
+    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       active = false;
+      window.clearInterval(refreshTimer);
     };
   }, []);
 
@@ -19761,7 +20250,18 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-mairide-secondary">
-                  {pagedAdminBookings.map(booking => (
+                  {pagedAdminBookings.map(booking => {
+                    const bookingData = (booking as any).data || {};
+                    const adminDisplayFare = firstFiniteNumber(
+                      booking.totalPrice,
+                      booking.fare,
+                      (booking as any).listedFare,
+                      booking.negotiatedFare,
+                      bookingData.totalPrice,
+                      bookingData.fare
+                    );
+                    const adminDisplayFee = firstFiniteNumber(booking.serviceFee, bookingData.serviceFee);
+                    return (
                     <tr key={booking.id} className="hover:bg-mairide-bg/50 transition-colors">
                       <td className="px-8 py-6">
                         <p className="font-bold text-sm text-mairide-primary">{booking.origin}</p>
@@ -19775,8 +20275,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                         <p className="font-bold text-sm text-mairide-primary">{booking.driverName}</p>
                       </td>
                       <td className="px-8 py-6">
-                        <p className="font-bold text-mairide-accent">{formatCurrency(booking.totalPrice)}</p>
-                        <p className="text-[10px] text-mairide-secondary">Fee: {formatCurrency(booking.serviceFee)}</p>
+                        <p className="font-bold text-mairide-accent">{formatCurrency(adminDisplayFare)}</p>
+                        <p className="text-[10px] text-mairide-secondary">Fee: {formatCurrency(adminDisplayFee)}</p>
                       </td>
                       <td className="px-8 py-6">
                         <span className={cn(
@@ -19807,7 +20307,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                         )}
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                   {!pagedAdminBookings.length && (
                     <tr>
                       <td colSpan={7} className="px-8 py-12 text-center text-mairide-secondary italic">

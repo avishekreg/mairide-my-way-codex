@@ -6,11 +6,12 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatCurrency(amount: number) {
+  const safeAmount = Number.isFinite(Number(amount)) ? Number(amount) : 0;
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(safeAmount);
 }
 
 export const GST_RATE = 0.18; // 18% GST in India
