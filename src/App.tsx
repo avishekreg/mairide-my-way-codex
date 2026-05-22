@@ -11210,23 +11210,6 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         { enableHighAccuracy: true, timeout: 5000 }
       );
 
-      const watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          const newLocation = { lat: latitude, lng: longitude };
-          setUserLocation(newLocation);
-          persistTravelerLocation(newLocation);
-        },
-        (error) => {
-          logGeolocationIssue('Traveler', error);
-          const fallbackLocation = extractLatLng(profile.location);
-          if (fallbackLocation) {
-            setUserLocation((prev) => prev || fallbackLocation);
-          }
-        },
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
-      );
-      return () => navigator.geolocation.clearWatch(watchId);
     }
   }, [profile.uid, profile.location?.lat, profile.location?.lng]);
 
@@ -13572,7 +13555,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
       };
 
-      const watchId = navigator.geolocation.watchPosition(
+      navigator.geolocation.getCurrentPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
           const newLocation = { lat: latitude, lng: longitude };
@@ -13594,9 +13577,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             setDriverSignalLocation((prev) => prev || { lat: fallbackLocation.lat, lng: fallbackLocation.lng });
           }
         },
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
       );
-      return () => navigator.geolocation.clearWatch(watchId);
     }
   }, [profile.uid, profile.location?.lat, profile.location?.lng]);
 
@@ -18700,37 +18682,64 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   }, [activeTab, profile.email, adminTransactionsCacheKey]);
 
   const handleAdminForceCancelRide = async (booking: any) => {
-    const rideId = booking.rideId || booking.ride_id;
+    const rideId = booking.rideId || booking.ride_id || booking.data?.rideId || '';
+    const actionId = rideId || booking.id;
 
-    setForceCancellingRideId(rideId || booking.id);
+    setForceCancellingRideId(actionId);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
-      await axios.post(adminApiPath('force-cancel-ride'), {
+      const response = await axios.post(adminApiPath('force-cancel-ride'), {
         rideId,
         bookingId: booking.id,
         reason: 'Cancelled by MaiRide customer support',
       }, { headers });
+      const payload = response.data || {};
+      const cancelledAt = payload.updatedAt || new Date().toISOString();
+      const resolvedRideId = payload.rideId || rideId || '';
+      const cancelledBookingIds = new Set<string>(
+        Array.isArray(payload.bookingIds) && payload.bookingIds.length
+          ? payload.bookingIds.map(String)
+          : [booking.id]
+      );
+      const shouldCancelBooking = (currentBooking: any) => {
+        const currentRideId = currentBooking.rideId || currentBooking.ride_id || currentBooking.data?.rideId || '';
+        return cancelledBookingIds.has(String(currentBooking.id)) || Boolean(resolvedRideId && currentRideId === resolvedRideId);
+      };
 
       setBookings((prev) =>
         prev.map((currentBooking) =>
-          (currentBooking.rideId || currentBooking.ride_id) === rideId
-          || currentBooking.id === booking.id
+          shouldCancelBooking(currentBooking)
             ? {
                 ...currentBooking,
                 status: 'cancelled',
                 rideRetired: true,
                 negotiationStatus: 'rejected',
                 forceCancelledByAdmin: true,
+                updatedAt: cancelledAt,
+                data: {
+                  ...(currentBooking as any).data,
+                  status: 'cancelled',
+                  rideRetired: true,
+                  negotiationStatus: 'rejected',
+                  forceCancelledByAdmin: true,
+                  updatedAt: cancelledAt,
+                },
               }
             : currentBooking
         )
       );
       setRides((prev) =>
         prev.map((ride) =>
-          rideId && ride.id === rideId
+          resolvedRideId && ride.id === resolvedRideId
             ? {
                 ...ride,
                 status: 'cancelled',
+                updatedAt: cancelledAt,
+                data: {
+                  ...(ride as any).data,
+                  status: 'cancelled',
+                  updatedAt: cancelledAt,
+                },
               }
             : ride
         )
@@ -18780,17 +18789,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
 
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        syncLocation(position.coords.latitude, position.coords.longitude);
-      },
-      (error) => logGeolocationIssue('Admin', error),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }
-    );
-
     return () => {
       isMounted = false;
-      navigator.geolocation.clearWatch(watchId);
     };
   }, [profile.uid]);
 
@@ -19920,6 +19920,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                 <tbody className="divide-y divide-mairide-secondary">
                   {pagedAdminBookings.map(booking => {
                     const bookingData = (booking as any).data || {};
+                    const forceCancelActionId = booking.rideId || (booking as any).ride_id || bookingData.rideId || booking.id;
                     const lifecycle = getUnifiedRideLifecycle(booking);
                     const adminDisplayFare = firstFiniteNumber(
                       booking.totalPrice,
@@ -19964,10 +19965,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                           <button
                             type="button"
                             onClick={() => handleAdminForceCancelRide(booking)}
-                            disabled={forceCancellingRideId === (booking.rideId || booking.ride_id || booking.id)}
+                            disabled={forceCancellingRideId === forceCancelActionId}
                             className="rounded-xl border border-red-200 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-red-600 hover:bg-red-50 disabled:opacity-50"
                           >
-                            {forceCancellingRideId === (booking.rideId || booking.ride_id || booking.id) ? 'Cancelling...' : 'Force cancel'}
+                            {forceCancellingRideId === forceCancelActionId ? 'Cancelling...' : 'Force cancel'}
                           </button>
                         ) : (
                           <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">

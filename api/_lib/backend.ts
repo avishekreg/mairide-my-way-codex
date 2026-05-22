@@ -2989,7 +2989,13 @@ export async function handleAdminForceCancelRide(req: ReqLike, res: ResLike) {
           .eq("id", bookingRow.id);
         if (error) throw error;
 
-        return res.status(200).json({ message: "Unlinked ride request cancelled by customer support." });
+        return res.status(200).json({
+          message: "Unlinked ride request cancelled by customer support.",
+          status: "cancelled",
+          rideId: null,
+          bookingIds: [bookingRow.id],
+          updatedAt,
+        });
       }
 
       const { data: resolvedRide, error: rideError } = await supabaseAdmin
@@ -3064,7 +3070,13 @@ export async function handleAdminForceCancelRide(req: ReqLike, res: ResLike) {
 
     if (rideUpdateError) throw rideUpdateError;
 
-    return res.status(200).json({ message: "Ride cancelled by customer support." });
+    return res.status(200).json({
+      message: "Ride cancelled by customer support.",
+      status: "cancelled",
+      rideId: resolvedRideId,
+      bookingIds: (bookingRows || []).map((bookingRow: any) => bookingRow.id),
+      updatedAt,
+    });
   } catch (error: any) {
     console.error("Error force cancelling ride:", error);
     return res.status(error?.status || 500).json({
