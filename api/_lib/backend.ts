@@ -84,6 +84,70 @@ function isActiveBookingStatus(status: string | null | undefined) {
   return ["pending", "confirmed", "negotiating"].includes(String(status || ""));
 }
 
+function getUnifiedRideLifecycleStatus(record: any): "active" | "completed" | "cancelled" {
+  const data = record?.data || record || {};
+  const status = String(record?.status || data.status || "").trim().toLowerCase();
+  const lifecycle = String(data.rideLifecycleStatus || "").trim().toLowerCase();
+
+  if (status === "completed" || lifecycle === "completed" || data.rideEndedAt) {
+    return "completed";
+  }
+  if (
+    status === "cancelled" ||
+    status === "rejected" ||
+    status === "traveler_request_cancelled" ||
+    data.rideRetired === true
+  ) {
+    return "cancelled";
+  }
+  return "active";
+}
+
+async function setRideStatusFromBookingState(
+  supabaseAdmin: any,
+  rideId: string | null | undefined,
+  status: "available" | "negotiating" | "full" | "completed" | "cancelled",
+  patch: Record<string, any> = {}
+) {
+  const resolvedRideId = String(rideId || "").trim();
+  if (!resolvedRideId) return null;
+
+  const { data: rideRow, error: readError } = await supabaseAdmin
+    .from("rides")
+    .select("*")
+    .eq("id", resolvedRideId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!rideRow) return null;
+
+  const updatedAt = String(patch.updatedAt || new Date().toISOString());
+  const currentData = rideRow.data || {};
+  const nextData = {
+    ...currentData,
+    ...patch,
+    status,
+    unifiedLifecycleStatus: getUnifiedRideLifecycleStatus({ ...rideRow, status, data: { ...currentData, ...patch, status } }),
+    updatedAt,
+  };
+
+  const { error: updateError } = await supabaseAdmin
+    .from("rides")
+    .update({
+      status,
+      updated_at: updatedAt,
+      data: nextData,
+    })
+    .eq("id", resolvedRideId);
+  if (updateError) throw updateError;
+
+  return {
+    ...rideRow,
+    status,
+    updated_at: updatedAt,
+    data: nextData,
+  };
+}
+
 function getSupabaseAdmin(): any {
   if (supabaseAdmin) return supabaseAdmin;
 
@@ -1177,6 +1241,13 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
         if (linkedUpdateError) throw linkedUpdateError;
         if ((linkedRows || []).length > 0) {
           linkedBookingId = linkedTravelerRequestId;
+          await setRideStatusFromBookingState(getSupabaseAdmin(), rideId, "negotiating", {
+            linkedTravelerRequestId,
+            matchedBookingId: linkedTravelerRequestId,
+            negotiationStatus: "pending",
+            negotiationActor: "driver",
+            updatedAt: now,
+          });
         } else {
           const { data: latestBooking } = await getSupabaseAdmin()
             .from("bookings")
@@ -1225,7 +1296,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       id: rideId,
       rideId,
       bookingId: linkedBookingId,
-      ride: rideData,
+      ride: linkedBookingId ? { ...rideData, status: "negotiating", updatedAt: now } : rideData,
     });
   } catch (error: any) {
     console.error("Error creating ride:", error);
@@ -1362,6 +1433,14 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
       .single();
 
     if (updateError) throw updateError;
+
+    await setRideStatusFromBookingState(supabaseAdmin, rideId, "negotiating", {
+      linkedTravelerRequestId: requestId,
+      matchedBookingId: requestId,
+      negotiationStatus: "pending",
+      negotiationActor: "driver",
+      updatedAt: now,
+    });
 
     return res.status(200).json({
       message: "Negotiation started.",
@@ -2469,6 +2548,13 @@ export async function handleUserCounterBooking(req: ReqLike, res: ResLike) {
       })
     );
 
+    await setRideStatusFromBookingState(supabaseAdmin, seedData.rideId || bookingRow.ride_id, "negotiating", {
+      matchedBookingId: bookingRow.id,
+      negotiationStatus: "pending",
+      negotiationActor: "driver",
+      updatedAt,
+    });
+
     return res.status(200).json({
       message: "Counter offer sent to traveler.",
       booking: responseRow ? mapBookingRow(responseRow) : mapBookingRow(bookingRow),
@@ -2558,6 +2644,13 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
         if (error) throw error;
       })
     );
+
+    await setRideStatusFromBookingState(supabaseAdmin, seedData.rideId || bookingRow.ride_id, "negotiating", {
+      matchedBookingId: bookingRow.id,
+      negotiationStatus: "pending",
+      negotiationActor: "consumer",
+      updatedAt,
+    });
 
     return res.status(200).json({ message: "Counter offer sent to the driver." });
   } catch (error: any) {
@@ -2870,7 +2963,33 @@ export async function handleAdminForceCancelRide(req: ReqLike, res: ResLike) {
 
       resolvedRideId = bookingRow.ride_id || bookingRow.data?.rideId || "";
       if (!resolvedRideId) {
-        return res.status(404).json({ error: "Linked ride not found" });
+        const updatedAt = new Date().toISOString();
+        const adminEmail = req.user?.email || req.profile?.email || "";
+        const nextData = {
+          ...(bookingRow.data || {}),
+          status: "cancelled",
+          negotiationStatus: "rejected",
+          negotiationActor: "admin",
+          driverCounterPending: false,
+          rideRetired: true,
+          retiredAt: updatedAt,
+          forceCancelledByAdmin: true,
+          forceCancelledBy: adminEmail,
+          cancellationReason: reason || "Cancelled by MaiRide support",
+          updatedAt,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("bookings")
+          .update({
+            status: "cancelled",
+            updated_at: updatedAt,
+            data: nextData,
+          })
+          .eq("id", bookingRow.id);
+        if (error) throw error;
+
+        return res.status(200).json({ message: "Unlinked ride request cancelled by customer support." });
       }
 
       const { data: resolvedRide, error: rideError } = await supabaseAdmin

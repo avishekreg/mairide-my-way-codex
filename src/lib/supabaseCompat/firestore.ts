@@ -478,11 +478,9 @@ export function onSnapshot(
   };
 
   void run();
-  const interval = window.setInterval(run, 3000);
 
   return () => {
     active = false;
-    window.clearInterval(interval);
   };
 }
 

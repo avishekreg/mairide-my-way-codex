@@ -677,7 +677,6 @@ const generateRideOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 const TRIP_SESSION_STALE_AFTER_MS = 60_000;
 const TRIP_SIGNAL_UPDATE_INTERVAL_MS = 3_000;
 const LOCATION_DB_UPDATE_INTERVAL_MS = 10_000;
-const RIDE_MATCHING_REFRESH_INTERVAL_MS = 5_000;
 const INTERNAL_DEBUG_LOG_KEY = 'mairide_internal_debug_events';
 
 type FirestoreFetchState<T> = {
@@ -718,6 +717,34 @@ const isBookingTrackable = (booking: Booking) => {
   if (booking.rideLifecycleStatus === 'completed' || Boolean(booking.rideEndedAt)) return false;
   return ['pending', 'confirmed', 'negotiating'].includes(booking.status);
 };
+
+type UnifiedRideLifecycle = 'active' | 'completed' | 'cancelled';
+
+const getUnifiedRideLifecycle = (record: any): UnifiedRideLifecycle => {
+  const status = String((record as any)?.status || '').trim().toLowerCase();
+  const nestedStatus = String((record as any)?.data?.status || '').trim().toLowerCase();
+  const lifecycle = String((record as any)?.rideLifecycleStatus || (record as any)?.data?.rideLifecycleStatus || '').trim().toLowerCase();
+
+  if (status === 'completed' || nestedStatus === 'completed' || lifecycle === 'completed' || Boolean((record as any)?.rideEndedAt)) {
+    return 'completed';
+  }
+
+  if (
+    status === 'cancelled' ||
+    status === 'rejected' ||
+    status === 'traveler_request_cancelled' ||
+    nestedStatus === 'cancelled' ||
+    nestedStatus === 'rejected' ||
+    Boolean((record as any)?.rideRetired || (record as any)?.data?.rideRetired)
+  ) {
+    return 'cancelled';
+  }
+
+  return 'active';
+};
+
+const isUnifiedRideActive = (record: any) =>
+  getUnifiedRideLifecycle(record) === 'active';
 
 const deriveTripEtaMinutes = (
   travelerLocation: { lat: number; lng: number } | undefined,
@@ -1406,12 +1433,8 @@ const AdminMobileAppView = () => {
       if (!active) return;
       await loadMobileApp(true);
     })();
-    const timer = window.setInterval(() => {
-      void loadMobileApp(false);
-    }, 30000);
     return () => {
       active = false;
-      window.clearInterval(timer);
     };
   }, []);
 
@@ -3030,6 +3053,21 @@ const persistCounterOfferThroughCompatStore = async (
     )
   );
 
+  if (seedBooking.rideId) {
+    await updateDoc(doc(db, 'rides', seedBooking.rideId), {
+      status: 'negotiating',
+      negotiationStatus: 'pending',
+      negotiationActor: actor,
+      updatedAt,
+      'data.status': 'negotiating',
+      'data.negotiationStatus': 'pending',
+      'data.negotiationActor': actor,
+      'data.updatedAt': updatedAt,
+    }).catch((error) => {
+      reportFirestoreError(error, OperationType.UPDATE, `rides/${seedBooking.rideId}`);
+    });
+  }
+
   return updatedAt;
 };
 
@@ -4306,13 +4344,6 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
   useEffect(() => {
     if (!isAndroidDevice) return;
     void checkAndroidUpdate();
-    const intervalId = window.setInterval(() => {
-      void checkAndroidUpdate();
-    }, 5 * 60 * 1000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
   }, [isAndroidDevice, checkAndroidUpdate]);
 
   const trimmedSha = buildStamp?.commitSha ? buildStamp.commitSha.slice(0, 7) : '';
@@ -9019,45 +9050,6 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     setTransactions(transactionsFetch.data);
   }, [transactionsFetch.data]);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel(`my-bookings:${profile.uid}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'bookings', filter: `consumer_id=eq.${profile.uid}` },
-        (payload: any) => {
-          const booking = normalizeNegotiationBooking(getRealtimeRowData<Booking>(payload.new || payload.old));
-          if (!booking.id) return;
-          setBookings((prev) => {
-            const next =
-              payload.eventType === 'DELETE'
-                ? prev.filter((item) => item.id !== booking.id)
-                : prev.some((item) => item.id === booking.id)
-                  ? prev.map((item) => (item.id === booking.id ? normalizeNegotiationBooking({ ...item, ...booking }) : item))
-                  : [booking, ...prev];
-            return dedupeBookingsByThread(
-              next
-                .map((item) => normalizeNegotiationBooking(item))
-                .sort(
-                  (a, b) =>
-                    new Date((b as any).updatedAt || b.createdAt).getTime() -
-                    new Date((a as any).updatedAt || a.createdAt).getTime()
-                )
-            );
-          });
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          recordInternalDebugEvent('my_bookings_realtime_error', { userId: profile.uid });
-        }
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [profile.uid]);
-
   const submitTravelerPaymentProof = async (
     booking: Booking,
     payload: { transactionId: string; receiptDataUrl: string }
@@ -9679,10 +9671,12 @@ const MyRides = ({
   profile,
   hiddenRideIds = [],
   onRideRetired,
+  refreshKey = 0,
 }: {
   profile: UserProfile;
   hiddenRideIds?: string[];
   onRideRetired?: (rideId: string) => void;
+  refreshKey?: number;
 }) => {
   const [rides, setRides] = useState<any[]>([]);
   const [activeNegotiationRideIds, setActiveNegotiationRideIds] = useState<string[]>([]);
@@ -9693,7 +9687,7 @@ const MyRides = ({
     () =>
       rides.filter((ride) => {
         if (hiddenRideIds.includes(ride.id)) return false;
-        return String(ride.status || '') === 'available';
+        return isUnifiedRideActive(ride);
       }),
     [rides, hiddenRideIds]
   );
@@ -9737,16 +9731,10 @@ const MyRides = ({
       }
     };
     void loadDriverRides();
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void loadDriverRides();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       active = false;
-      window.clearInterval(refreshTimer);
     };
-  }, [profile.uid, hiddenRideIds]);
+  }, [profile.uid, hiddenRideIds, refreshKey]);
 
   useEffect(() => {
     let active = true;
@@ -9776,14 +9764,8 @@ const MyRides = ({
       }
     };
     void loadActiveNegotiations();
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void loadActiveNegotiations();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       active = false;
-      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -11010,15 +10992,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     };
 
     void loadDashboardBookings();
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void loadDashboardBookings();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
 
     return () => {
       isMounted = false;
-      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -11060,15 +11036,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     };
 
     void loadTravelerRequests();
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void loadTravelerRequests();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
 
     return () => {
       isMounted = false;
-      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -11304,21 +11274,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     };
 
     sync();
-    const timer = window.setInterval(sync, TRIP_SIGNAL_UPDATE_INTERVAL_MS);
-    return () => window.clearInterval(timer);
   }, [dashboardBookings, profile.uid, userLocation, tripNetworkState, tripAppState]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      Object.values(tripSessions).forEach((session) => {
-        void markTripSessionStale(session).catch((error) => {
-          console.error('Failed to mark stale traveler trip session:', error);
-        });
-      });
-    }, 10_000);
-
-    return () => window.clearInterval(timer);
-  }, [tripSessions]);
 
   useEffect(() => {
     // Listen for online drivers within the local dashboard radius only.
@@ -11713,6 +11669,14 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           }
         );
       }
+      const cancelledAt = new Date().toISOString();
+      setTravelerRequests((prev) =>
+        prev.map((request) =>
+          request.id === requestId
+            ? { ...request, status: 'cancelled', updatedAt: cancelledAt }
+            : request
+        )
+      );
       alert('Ride request cancelled.');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `travelerRideRequests/${requestId}`);
@@ -11845,106 +11809,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   useEffect(() => {
     if (activeTab !== 'search') return;
     void handleSearch();
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void handleSearch();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(refreshTimer);
-  }, [activeTab, handleSearch, dashboardBookings.length, travelerFeedLocation, travelerRequests.length]);
-
-  useEffect(() => {
-    const upsertById = <T extends { id?: string }>(items: T[], nextItem: T) => {
-      if (!nextItem.id) return items;
-      const exists = items.some((item) => item.id === nextItem.id);
-      return exists
-        ? items.map((item) => (item.id === nextItem.id ? { ...item, ...nextItem } : item))
-        : [nextItem, ...items];
-    };
-
-    const channel = supabase
-      .channel(`active-ride-feed:${profile.uid}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, (payload: any) => {
-        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
-        const ride = getRealtimeRowData<Ride>(row);
-        if (!ride.id) return;
-        activeRideFeedRef.current =
-          payload.eventType === 'DELETE'
-            ? activeRideFeedRef.current.filter((item) => item.id !== ride.id)
-            : upsertById(activeRideFeedRef.current, ride);
-        setRideStatusById((prev) => ({
-          ...prev,
-          [ride.id]: ride.status,
-        }));
-        applyActiveRideFeed();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload: any) => {
-        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
-        if (isTravelerRequestStorageStatus(row?.status)) {
-          const request = normalizeTravelerRideRequest(row);
-          if (!request.id || request.consumerId !== profile.uid) return;
-          setTravelerRequests((prev) => {
-            const next =
-              payload.eventType === 'DELETE' || request.status === 'cancelled'
-                ? prev.filter((item) => item.id !== request.id)
-                : upsertById(prev, request);
-            return next
-              .filter((item) => isRideWithinPlanningWindow(item))
-              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          });
-          return;
-        }
-
-        const booking = normalizeNegotiationBooking(getRealtimeRowData<Booking>(row));
-        if (!booking.id) return;
-        activeRideBookingsRef.current =
-          payload.eventType === 'DELETE'
-            ? activeRideBookingsRef.current.filter((item) => item.id !== booking.id)
-            : upsertById(activeRideBookingsRef.current, booking);
-
-        if (booking.consumerId === profile.uid) {
-          setDashboardBookings((prev) => {
-            const next =
-              payload.eventType === 'DELETE'
-                ? prev.filter((item) => item.id !== booking.id)
-                : upsertById(prev, booking);
-            return dedupeBookingsByThread(
-              next
-                .map((item) => normalizeNegotiationBooking(item))
-                .sort(
-                  (a, b) =>
-                    new Date((b as any).updatedAt || b.createdAt).getTime() -
-                    new Date((a as any).updatedAt || a.createdAt).getTime()
-                )
-            );
-          });
-        }
-        applyActiveRideFeed();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'travelerRideRequests' }, (payload: any) => {
-        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
-        const request = getRealtimeRowData<TravelerRideRequest>(row);
-        if (!request.id || request.consumerId !== profile.uid) return;
-        setTravelerRequests((prev) => {
-          const next =
-            payload.eventType === 'DELETE'
-              ? prev.filter((item) => item.id !== request.id)
-              : upsertById(prev, request);
-          return next
-            .filter((item) => isRideWithinPlanningWindow(item))
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        });
-      })
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          recordInternalDebugEvent('active_ride_feed_realtime_error', { userId: profile.uid });
-        }
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [applyActiveRideFeed, profile.uid]);
+  }, [activeTab]);
 
   const handleBookRide = async (ride: any, requestedFare?: number) => {
     setIsBooking(true);
@@ -12586,10 +12451,10 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             <h2 className="text-xl font-bold text-mairide-primary">Traveler Ride Requests</h2>
           </div>
 
-          {travelerRequests.filter((item) => item.status === 'open').length > 0 && (
+          {travelerRequests.filter(isUnifiedRideActive).length > 0 && (
             <div className="mb-12 space-y-4">
               {travelerRequests
-                .filter((item) => item.status === 'open')
+                .filter(isUnifiedRideActive)
                 .map((item) => (
                   <div key={item.id} className="rounded-3xl border border-mairide-secondary bg-white p-5 shadow-sm">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -12600,6 +12465,11 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                           <Clock className="mr-2 h-3.5 w-3.5" />
                           Departure: {formatRideDeparture(item)}
                         </div>
+                        {String(item.status || '').toLowerCase() !== 'open' && (
+                          <div className="mt-2 inline-flex items-center rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
+                            Active: {String(item.status || 'active').replace(/_/g, ' ')}
+                          </div>
+                        )}
                       </div>
                       <button
                         onClick={() => handleCancelTravelerRequest(item.id)}
@@ -13342,6 +13212,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
   const [driverBookings, setDriverBookings] = useState<Booking[]>([]);
+  const [rideOffersRefreshKey, setRideOffersRefreshKey] = useState(0);
   const [driverAvailableRideRoutes, setDriverAvailableRideRoutes] = useState<
     Array<{ originLocation: { lat: number; lng: number }; destinationLocation: { lat: number; lng: number } }>
   >([]);
@@ -13461,14 +13332,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       }
     };
     void loadDriverRideRoutes();
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void loadDriverRideRoutes();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       isMounted = false;
-      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -13510,15 +13375,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     };
 
     void loadOpenTravelerRequests();
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void loadOpenTravelerRequests();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
 
     return () => {
       isMounted = false;
-      window.clearInterval(refreshTimer);
     };
   }, [profile.uid]);
 
@@ -13571,15 +13430,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     };
 
     void loadDriverBookings();
-    const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void loadDriverBookings();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
 
     return () => {
       isMounted = false;
-      window.clearInterval(refreshTimer);
     };
   }, [profile.uid, retiredRideIds]);
 
@@ -13635,115 +13488,6 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       isMounted = false;
     };
   }, [profile.uid]);
-
-  useEffect(() => {
-    const upsertById = <T extends { id?: string }>(items: T[], nextItem: T) => {
-      if (!nextItem.id) return items;
-      const exists = items.some((item) => item.id === nextItem.id);
-      return exists
-        ? items.map((item) => (item.id === nextItem.id ? { ...item, ...nextItem } : item))
-        : [nextItem, ...items];
-    };
-    const sortByUpdated = <T extends { createdAt?: string; updatedAt?: string }>(items: T[]) =>
-      [...items].sort(
-        (a, b) =>
-          new Date((b as any).updatedAt || b.createdAt || 0).getTime() -
-          new Date((a as any).updatedAt || a.createdAt || 0).getTime()
-      );
-    const toDriverRoutes = (ridesList: Ride[]) =>
-      ridesList
-        .filter((ride) => ride.driverId === profile.uid)
-        .filter((ride) => String(ride.status || '') === 'available')
-        .map((ride) => getFeedItemRoute(ride as any))
-        .filter(
-          (route): route is {
-            originLocation: { lat: number; lng: number };
-            destinationLocation: { lat: number; lng: number };
-          } => Boolean(route)
-        );
-
-    const channel = supabase
-      .channel(`driver-live-matching:${profile.uid}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'travelerRideRequests' }, (payload: any) => {
-        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
-        const request = getRealtimeRowData<TravelerRideRequest>(row);
-        if (!request.id) return;
-        setTravelerRideRequests((prev) => {
-          const next =
-            payload.eventType === 'DELETE'
-              ? prev.filter((item) => item.id !== request.id)
-              : upsertById(prev, request);
-          return next
-            .filter((item) => isRideWithinPlanningWindow(item))
-            .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime());
-        });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload: any) => {
-        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
-        if (isTravelerRequestStorageStatus(row?.status)) {
-          const request = normalizeTravelerRideRequest(row);
-          if (!request.id) return;
-          setTravelerRideRequests((prev) => {
-            const next =
-              payload.eventType === 'DELETE' || request.status === 'cancelled'
-                ? prev.filter((item) => item.id !== request.id)
-                : upsertById(prev, request);
-            return next
-              .filter((item) => isRideWithinPlanningWindow(item))
-              .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime());
-          });
-          return;
-        }
-
-        const booking = normalizeNegotiationBooking(getRealtimeRowData<Booking>(row));
-        if (!booking.id || booking.driverId !== profile.uid) return;
-
-        setDriverBookings((prev) => {
-          const next =
-            payload.eventType === 'DELETE'
-              ? prev.filter((item) => item.id !== booking.id)
-              : upsertById(prev, booking).map((item) => normalizeNegotiationBooking(item));
-          return dedupeBookingsByThread(sortByUpdated(next));
-        });
-        setRequests((prev) => {
-          const next =
-            payload.eventType === 'DELETE'
-              ? prev.filter((item) => item.id !== booking.id)
-              : upsertById(prev, booking).map((item) => normalizeNegotiationBooking(item));
-          return dedupeBookingsByThread(sortByUpdated(next)).filter(
-            (item) =>
-              !retiredRideIds.includes(item.rideId) &&
-              !(item as any).rideRetired &&
-              item.negotiationStatus !== 'rejected' &&
-              ['pending', 'confirmed', 'negotiating'].includes(item.status)
-          );
-        });
-        setDriverNegotiationPreview((current) =>
-          current && getBookingThreadKey(current) === getBookingThreadKey(booking)
-            ? normalizeNegotiationBooking({ ...current, ...booking })
-            : current
-        );
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, (payload: any) => {
-        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
-        const ride = getRealtimeRowData<Ride>(row);
-        if (!ride.id || ride.driverId !== profile.uid) return;
-        driverRideFeedRef.current =
-          payload.eventType === 'DELETE'
-            ? driverRideFeedRef.current.filter((item) => item.id !== ride.id)
-            : upsertById(driverRideFeedRef.current, ride);
-        setDriverAvailableRideRoutes(toDriverRoutes(driverRideFeedRef.current));
-      })
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          recordInternalDebugEvent('driver_live_matching_realtime_error', { userId: profile.uid });
-        }
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [profile.uid, retiredRideIds]);
 
   useEffect(() => {
     if (reviewBooking) return;
@@ -13883,21 +13627,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     };
 
     sync();
-    const timer = window.setInterval(sync, TRIP_SIGNAL_UPDATE_INTERVAL_MS);
-    return () => window.clearInterval(timer);
   }, [requests, profile.uid, driverSignalLocation, userLocation, tripNetworkState, tripAppState]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      Object.values(tripSessions).forEach((session) => {
-        void markTripSessionStale(session).catch((error) => {
-          console.error('Failed to mark stale driver trip session:', error);
-        });
-      });
-    }, 10_000);
-
-    return () => window.clearInterval(timer);
-  }, [tripSessions]);
 
   const openDriverNegotiationThread = (booking: Booking) => {
     const normalizedBooking = normalizeNegotiationBooking(booking);
@@ -13918,45 +13648,6 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       setDriverNegotiationPreview(null);
     }
   }, [driverNegotiationPreview, requests]);
-
-  useEffect(() => {
-    const rideId = driverNegotiationPreview?.rideId;
-    if (!rideId) return;
-
-    const channel = supabase
-      .channel(`negotiation-card:${rideId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'bookings', filter: `ride_id=eq.${rideId}` },
-        (payload: any) => {
-          const booking = normalizeNegotiationBooking(getRealtimeRowData<Booking>(payload.new || payload.old));
-          if (!booking.id || booking.driverId !== profile.uid) return;
-          setDriverNegotiationPreview((current) =>
-            current && getBookingThreadKey(current) === getBookingThreadKey(booking)
-              ? normalizeNegotiationBooking({ ...current, ...booking })
-              : current
-          );
-          setRequests((prev) =>
-            dedupeBookingsByThread(
-              prev.map((item) =>
-                getBookingThreadKey(item) === getBookingThreadKey(booking)
-                  ? normalizeNegotiationBooking({ ...item, ...booking })
-                  : item
-              )
-            )
-          );
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          recordInternalDebugEvent('negotiation_card_realtime_error', { rideId, userId: profile.uid });
-        }
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [driverNegotiationPreview?.rideId, profile.uid]);
 
   const toggleOnline = async () => {
     const newState = !isOnline;
@@ -14474,6 +14165,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
     let createdRideId = '';
     let returnedBookingId = String(linkedRequestIdOverride || '');
+    let responseData: any = {};
     if (isLocalDevFirestoreMode()) {
       const nowIso = new Date().toISOString();
       const rideRef = await addDoc(collection(db, 'rides'), ridePayload);
@@ -14512,7 +14204,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       } catch {
         response = await axios.post(apiPath('/api/user/create-ride'), body, { headers, timeout: 15000 });
       }
-      const responseData = response?.data || {};
+      responseData = response?.data || {};
       createdRideId = String(responseData.rideId || responseData.id || responseData?.ride?.id || '');
       returnedBookingId = String(responseData.bookingId || linkedRequestIdOverride || '');
       const bookingId = returnedBookingId;
@@ -14533,7 +14225,14 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       String((existingThread as any)?.rideId || '');
 
     if (resolvedRideId) {
-      const optimisticRide = { ...ridePayload, id: resolvedRideId, status: 'available' as const, updatedAt: new Date().toISOString() };
+      const serverRide = responseData?.ride || {};
+      const optimisticRide = {
+        ...ridePayload,
+        ...serverRide,
+        id: resolvedRideId,
+        status: serverRide.status || (returnedBookingId ? 'negotiating' : 'available'),
+        updatedAt: serverRide.updatedAt || new Date().toISOString(),
+      };
       driverRideFeedRef.current = [
         optimisticRide as Ride,
         ...driverRideFeedRef.current.filter((ride) => ride.id !== resolvedRideId),
@@ -14551,6 +14250,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           )
       );
     }
+    setRideOffersRefreshKey((value) => value + 1);
 
     if (linkedRequestIdOverride) {
       const matchedAt = new Date().toISOString();
@@ -14831,7 +14531,6 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         status: 'negotiating' as const,
         updatedAt,
       };
-      await persistCounterOfferThroughCompatStore(request, 'driver', fare);
       setRequests((prev) =>
         dedupeBookingsByThread([
           updatedThread,
@@ -15930,6 +15629,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             <MyRides
               profile={profile}
               hiddenRideIds={suppressedRideIds}
+              refreshKey={rideOffersRefreshKey}
               onRideRetired={(rideId) =>
                 setRetiredRideIds((prev) => (prev.includes(rideId) ? prev : [...prev, rideId]))
               }
@@ -16598,10 +16298,6 @@ const SupportSystem = ({ profile }: { profile: UserProfile }) => {
 
   useEffect(() => {
     refreshTickets();
-    const interval = window.setInterval(() => {
-      refreshTickets().catch(() => undefined);
-    }, 8000);
-    return () => window.clearInterval(interval);
   }, [profile.uid]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -16736,10 +16432,6 @@ const AdminSupportView = () => {
 
   useEffect(() => {
     refreshTickets();
-    const interval = window.setInterval(() => {
-      refreshTickets().catch(() => undefined);
-    }, 8000);
-    return () => window.clearInterval(interval);
   }, [selectedTicket?.id]);
 
   const handleSendResponse = async () => {
@@ -18327,12 +18019,8 @@ const AdminCapacityView = () => {
       if (!mounted) return;
       await loadCapacity(true);
     })();
-    const timer = window.setInterval(() => {
-      void loadCapacity(false);
-    }, 30000);
     return () => {
       mounted = false;
-      window.clearInterval(timer);
     };
   }, []);
 
@@ -18860,7 +18548,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [usersPage, setUsersPage] = useState(1);
   const [usersPageSize, setUsersPageSize] = useState<number>(10);
   const [rideSearchTerm, setRideSearchTerm] = useState('');
-  const [rideStatusFilter, setRideStatusFilter] = useState<'all' | Booking['status'] | 'completed_lifecycle'>('all');
+  const [rideStatusFilter, setRideStatusFilter] = useState<'all' | 'active' | Booking['status'] | 'completed_lifecycle'>('all');
   const [ridesPage, setRidesPage] = useState(1);
   const [ridesPageSize, setRidesPageSize] = useState<number>(10);
   const [usersInsightView, setUsersInsightView] = useState<UsersInsightView>(null);
@@ -18917,14 +18605,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       }
     };
     void loadBookings();
-    const refreshTimer = window.setInterval(() => {
-      if (isPageVisible()) {
-        void loadBookings();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       active = false;
-      window.clearInterval(refreshTimer);
     };
   }, []);
 
@@ -18942,14 +18624,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       }
     };
     void loadRides();
-    const refreshTimer = window.setInterval(() => {
-      if (isPageVisible()) {
-        void loadRides();
-      }
-    }, RIDE_MATCHING_REFRESH_INTERVAL_MS);
     return () => {
       active = false;
-      window.clearInterval(refreshTimer);
     };
   }, []);
 
@@ -19017,28 +18693,16 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
     };
 
     void loadTransactions();
-    const intervalId = window.setInterval(() => {
-      void loadTransactions();
-    }, 12000);
 
     return () => {
       active = false;
-      window.clearInterval(intervalId);
     };
   }, [activeTab, profile.email, adminTransactionsCacheKey]);
 
   const handleAdminForceCancelRide = async (booking: any) => {
     const rideId = booking.rideId || booking.ride_id;
-    if (!rideId) {
-      setAdminNotice({
-        title: 'Ride not found',
-        message: 'This booking is missing a linked ride reference, so support cannot cancel it from here.',
-        tone: 'error',
-      });
-      return;
-    }
 
-    setForceCancellingRideId(rideId);
+    setForceCancellingRideId(rideId || booking.id);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
       await axios.post(adminApiPath('force-cancel-ride'), {
@@ -19050,6 +18714,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       setBookings((prev) =>
         prev.map((currentBooking) =>
           (currentBooking.rideId || currentBooking.ride_id) === rideId
+          || currentBooking.id === booking.id
             ? {
                 ...currentBooking,
                 status: 'cancelled',
@@ -19062,7 +18727,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       );
       setRides((prev) =>
         prev.map((ride) =>
-          ride.id === rideId
+          rideId && ride.id === rideId
             ? {
                 ...ride,
                 status: 'cancelled',
@@ -19185,7 +18850,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const onlineDrivers = registeredDrivers.filter((u) => isUserCurrentlyOnline(u));
   const onlineTravelers = registeredTravelers.filter((u) => isUserCurrentlyOnline(u));
   const lockedRideIds = getLockedRideIds(bookings as Booking[]);
-  const openRideOffers = rides.filter((ride) => ride.status === 'available' && !lockedRideIds.has(ride.id));
+  const openRideOffers = rides.filter((ride) => isUnifiedRideActive(ride) && !lockedRideIds.has(ride.id));
   const activeTrips = bookings.filter((booking) =>
     booking.status === 'confirmed'
     || booking.rideLifecycleStatus === 'awaiting_start_otp'
@@ -19220,8 +18885,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   }, [tripSessions]);
   const filteredAdminBookings = useMemo(() => {
     return (bookings as Booking[]).filter((booking) => {
+      const unifiedLifecycle = getUnifiedRideLifecycle(booking);
       const matchesStatus =
         rideStatusFilter === 'all'
+        || (rideStatusFilter === 'active' && unifiedLifecycle === 'active')
         || (rideStatusFilter === 'completed_lifecycle'
           ? booking.rideLifecycleStatus === 'completed'
           : booking.status === rideStatusFilter);
@@ -19268,7 +18935,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const getUserRideOffers = (userId: string) =>
     rides.filter((ride) => ride.driverId === userId);
   const getActiveRideOffers = (userId: string) =>
-    rides.filter((ride) => ride.driverId === userId && ride.status === 'available' && !lockedRideIds.has(ride.id));
+    rides.filter((ride) => ride.driverId === userId && isUnifiedRideActive(ride) && !lockedRideIds.has(ride.id));
   const getUserRideBookings = (userId: string, role: UserProfile['role']) =>
     bookings.filter((booking) => role === 'driver' ? booking.driverId === userId : booking.consumerId === userId);
   const getActiveUserTrips = (userId: string, role: UserProfile['role']) =>
@@ -20226,6 +19893,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
                 >
                   <option value="all">All ride statuses</option>
+                  <option value="active">Active</option>
                   <option value="pending">Pending</option>
                   <option value="confirmed">Confirmed</option>
                   <option value="completed">Completed bookings</option>
@@ -20252,6 +19920,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                 <tbody className="divide-y divide-mairide-secondary">
                   {pagedAdminBookings.map(booking => {
                     const bookingData = (booking as any).data || {};
+                    const lifecycle = getUnifiedRideLifecycle(booking);
                     const adminDisplayFare = firstFiniteNumber(
                       booking.totalPrice,
                       booking.fare,
@@ -20281,10 +19950,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                       <td className="px-8 py-6">
                         <span className={cn(
                           "px-3 py-1 rounded-full text-[10px] font-bold uppercase",
-                          booking.status === 'confirmed' ? "bg-green-100 text-green-600" :
-                          booking.status === 'pending' ? "bg-orange-100 text-orange-600" : "bg-red-100 text-red-600"
+                          lifecycle === 'active' ? "bg-green-100 text-green-600" :
+                          lifecycle === 'completed' ? "bg-blue-100 text-blue-600" : "bg-red-100 text-red-600"
                         )}>
-                          {booking.status}
+                          {lifecycle}
                         </span>
                       </td>
                       <td className="px-8 py-6">
@@ -20295,10 +19964,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                           <button
                             type="button"
                             onClick={() => handleAdminForceCancelRide(booking)}
-                            disabled={forceCancellingRideId === (booking.rideId || booking.ride_id)}
+                            disabled={forceCancellingRideId === (booking.rideId || booking.ride_id || booking.id)}
                             className="rounded-xl border border-red-200 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-red-600 hover:bg-red-50 disabled:opacity-50"
                           >
-                            {forceCancellingRideId === (booking.rideId || booking.ride_id) ? 'Cancelling...' : 'Force cancel'}
+                            {forceCancellingRideId === (booking.rideId || booking.ride_id || booking.id) ? 'Cancelling...' : 'Force cancel'}
                           </button>
                         ) : (
                           <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
@@ -22251,13 +21920,9 @@ const App = () => {
     };
 
     void checkForAndroidUpdate();
-    const interval = window.setInterval(() => {
-      void checkForAndroidUpdate();
-    }, 2 * 60 * 1000);
 
     return () => {
       active = false;
-      window.clearInterval(interval);
     };
   }, [installedAndroidVersion]);
 
