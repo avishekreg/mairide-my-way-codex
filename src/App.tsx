@@ -14199,6 +14199,12 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           driverId: draft.driverId,
         });
       }
+      if (!linkedTravelerRequest && responseData.booking) {
+        const canonicalThread = normalizeNegotiationBooking(responseData.booking as Booking);
+        setRequests((prev) => dedupeBookingsByThread([canonicalThread, ...prev]));
+        setDriverBookings((prev) => dedupeBookingsByThread([canonicalThread, ...prev]));
+        openDriverNegotiationThread(canonicalThread);
+      }
     }
 
     const resolvedRideId =
@@ -14267,9 +14273,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         const latestThread =
           (linkedRequestIdOverride ? findExistingDriverNegotiationForRequest(linkedRequestIdOverride) : null) ||
           (returnedBookingId ? findExistingDriverNegotiationForRequest(returnedBookingId) : null);
-        if (latestThread) {
-          openDriverNegotiationThread(latestThread);
-        }
+        if (latestThread) openDriverNegotiationThread(latestThread);
       }
     }
 
@@ -14280,7 +14284,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     setShowOfferForm(false);
     setDriverSmartMatchPrompt(null);
     showAppDialog(
-      linkedRequestIdOverride ? 'Matching request found. Negotiation thread is now active.' : 'Ride offer posted successfully!',
+      returnedBookingId ? 'Matching request found. Negotiation thread is now active.' : 'Ride offer posted successfully!',
       'success'
     );
   };
@@ -14319,12 +14323,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       if (!linkedTravelerRequestId) {
         const matches = findDriverMatchCandidates(draft);
         if (matches.fullMatches.length > 0 || matches.partialMatches.length > 0) {
-          setShowOfferForm(false);
-          setDriverSmartMatchPrompt({
-            draft,
-            fullMatches: matches.fullMatches,
-            partialMatches: matches.partialMatches,
-          });
+          await startDriverNegotiationFromTravelerRequest(matches.fullMatches[0] || matches.partialMatches[0], draft);
           return;
         }
       }

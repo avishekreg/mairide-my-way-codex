@@ -42,6 +42,114 @@ function normalizeText(value: unknown) {
     .trim();
 }
 
+function deg2rad(deg: number) {
+  return deg * (Math.PI / 180);
+}
+
+function getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371;
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function normalizeLatLng(value: any) {
+  const lat = Number(value?.lat);
+  const lng = Number(value?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+function toLocalXY(lat: number, lng: number, refLat: number) {
+  const kmPerLat = 111.32;
+  const kmPerLng = 111.32 * Math.cos((refLat * Math.PI) / 180);
+  return { x: lng * kmPerLng, y: lat * kmPerLat };
+}
+
+function pointToRouteDistanceKm(
+  point: { lat: number; lng: number },
+  routeStart: { lat: number; lng: number },
+  routeEnd: { lat: number; lng: number }
+) {
+  const refLat = (routeStart.lat + routeEnd.lat) / 2;
+  const a = toLocalXY(routeStart.lat, routeStart.lng, refLat);
+  const b = toLocalXY(routeEnd.lat, routeEnd.lng, refLat);
+  const p = toLocalXY(point.lat, point.lng, refLat);
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const apx = p.x - a.x;
+  const apy = p.y - a.y;
+  const abSq = abx * abx + aby * aby;
+  if (abSq === 0) {
+    const dx = p.x - a.x;
+    const dy = p.y - a.y;
+    return { distanceKm: Math.sqrt(dx * dx + dy * dy), progress: 0 };
+  }
+  const rawT = (apx * abx + apy * aby) / abSq;
+  const t = Math.max(0, Math.min(1, rawT));
+  const closestX = a.x + t * abx;
+  const closestY = a.y + t * aby;
+  const dx = p.x - closestX;
+  const dy = p.y - closestY;
+  return { distanceKm: Math.sqrt(dx * dx + dy * dy), progress: rawT };
+}
+
+function routeCorridorMatches(
+  rideOriginLocation: { lat: number; lng: number },
+  rideDestinationLocation: { lat: number; lng: number },
+  travelerOriginLocation: { lat: number; lng: number },
+  travelerDestinationLocation: { lat: number; lng: number }
+) {
+  const routeDistanceKm = getDistanceKm(
+    rideOriginLocation.lat,
+    rideOriginLocation.lng,
+    rideDestinationLocation.lat,
+    rideDestinationLocation.lng
+  );
+  const tolerance =
+    routeDistanceKm <= 40 ? 12 :
+    routeDistanceKm <= 120 ? 18 :
+    routeDistanceKm <= 250 ? 24 : 30;
+  const pickupCheck = pointToRouteDistanceKm(travelerOriginLocation, rideOriginLocation, rideDestinationLocation);
+  const dropCheck = pointToRouteDistanceKm(travelerDestinationLocation, rideOriginLocation, rideDestinationLocation);
+  return (
+    pickupCheck.distanceKm <= tolerance &&
+    dropCheck.distanceKm <= tolerance &&
+    dropCheck.progress >= pickupCheck.progress - 0.05
+  );
+}
+
+function requestMatchesRideRoute(requestData: any, rideData: any) {
+  const requestOrigin = normalizeLatLng(requestData.originLocation);
+  const requestDestination = normalizeLatLng(requestData.destinationLocation);
+  const rideOrigin = normalizeLatLng(rideData.originLocation);
+  const rideDestination = normalizeLatLng(rideData.destinationLocation);
+  if (requestOrigin && requestDestination && rideOrigin && rideDestination) {
+    return (
+      routeCorridorMatches(rideOrigin, rideDestination, requestOrigin, requestDestination) ||
+      routeCorridorMatches(requestOrigin, requestDestination, rideOrigin, rideDestination)
+    );
+  }
+
+  const requestOriginText = normalizeText(requestData.origin);
+  const requestDestinationText = normalizeText(requestData.destination);
+  const rideOriginText = normalizeText(rideData.origin);
+  const rideDestinationText = normalizeText(rideData.destination);
+  return Boolean(
+    requestOriginText &&
+    requestDestinationText &&
+    rideOriginText &&
+    rideDestinationText &&
+    (requestOriginText.includes(rideOriginText) || rideOriginText.includes(requestOriginText)) &&
+    (requestDestinationText.includes(rideDestinationText) || rideDestinationText.includes(requestDestinationText))
+  );
+}
+
 function getRideThreadKey(data: any) {
   return [
     data?.driverId || data?.driver_id || "",
@@ -1053,7 +1161,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       return res.status(403).json({ error: "Driver account is not active." });
     }
 
-    const linkedTravelerRequestId = String(payload.linkedTravelerRequestId || "").trim();
+    let linkedTravelerRequestId = String(payload.linkedTravelerRequestId || "").trim();
     let linkedBookingId: string | null = null;
     let linkedRequestRow: any = null;
     let reusedRideIdForLinkedRequest: string | null = null;
@@ -1172,6 +1280,28 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
     });
     if (insertRideError) throw insertRideError;
 
+    if (!linkedTravelerRequestId) {
+      const { data: openRequestRows, error: openRequestError } = await getSupabaseAdmin()
+        .from("bookings")
+        .select("id,data,status,consumer_id,driver_id,ride_id,created_at")
+        .eq("status", "traveler_request_open")
+        .order("created_at", { ascending: true });
+      if (openRequestError) throw openRequestError;
+
+      const autoMatch = (openRequestRows || []).find((requestRow: any) => {
+        const requestData = requestRow.data || {};
+        if (String(requestRow.consumer_id || requestData.consumerId || "") === actorId) return false;
+        if (requestData.departureDay && rideData.departureDay && requestData.departureDay !== rideData.departureDay) return false;
+        return requestMatchesRideRoute(requestData, rideData);
+      });
+
+      if (autoMatch) {
+        linkedTravelerRequestId = autoMatch.id;
+        linkedRequestRow = autoMatch;
+        rideData.linkedTravelerRequestId = autoMatch.id;
+      }
+    }
+
     if (linkedTravelerRequestId && linkedRequestRow && linkedRequestRow.status === "traveler_request_open") {
         const requestData = linkedRequestRow.data || {};
         const requestedOrigin = String(requestData.origin || origin).trim() || origin;
@@ -1237,7 +1367,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
           })
           .eq("id", linkedTravelerRequestId)
           .eq("status", "traveler_request_open")
-          .select("id");
+          .select("*");
         if (linkedUpdateError) throw linkedUpdateError;
         if ((linkedRows || []).length > 0) {
           linkedBookingId = linkedTravelerRequestId;
@@ -1246,6 +1376,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
             matchedBookingId: linkedTravelerRequestId,
             negotiationStatus: "pending",
             negotiationActor: "driver",
+            driverCounterPending: true,
             updatedAt: now,
           });
         } else {
@@ -1291,11 +1422,25 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       console.error("Nearby ride offer notification failed:", notificationError);
     });
 
+    const responseBooking =
+      linkedBookingId
+        ? await getSupabaseAdmin()
+            .from("bookings")
+            .select("*")
+            .eq("id", linkedBookingId)
+            .maybeSingle()
+            .then(({ data, error }: any) => {
+              if (error) throw error;
+              return data ? mapBookingRow(data) : null;
+            })
+        : null;
+
     return res.status(201).json({
       message: "Ride created successfully",
       id: rideId,
       rideId,
       bookingId: linkedBookingId,
+      booking: responseBooking,
       ride: linkedBookingId ? { ...rideData, status: "negotiating", updatedAt: now } : rideData,
     });
   } catch (error: any) {
