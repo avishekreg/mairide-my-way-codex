@@ -11203,9 +11203,11 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       );
     } else {
       const token = await getAccessToken();
-      const { data } = await axios.get(apiPath('/api/user?action=list-bookings&scope=consumer'), {
+      const { data } = await axios.get(apiPath(`/api/user?action=list-bookings&scope=consumer&_=${Date.now()}`), {
         headers: {
           Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
         },
       });
       list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
@@ -11231,9 +11233,11 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       );
     } else {
       const token = await getAccessToken();
-      const { data } = await axios.get(apiPath('/api/user?action=list-traveler-requests&scope=own'), {
+      const { data } = await axios.get(apiPath(`/api/user?action=list-traveler-requests&scope=own&_=${Date.now()}`), {
         headers: {
           Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
         },
       });
       list = Array.isArray(data?.requests) ? data.requests.map(normalizeTravelerRideRequest) : [];
@@ -11357,11 +11361,16 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     // Request-scoped realtime bridge: driver counters may arrive first through negotiation-style
     // tables, so we listen by ride_request_id and project those events into the same Booking
     // state that renders the traveler's counter-offer card.
+    const activeRequestSet = new Set(activeTravelerNegotiationRequestIds);
     const channelConfigs: Array<{
       channel: string;
-      table: 'bookings' | 'negotiations' | 'ride_offers';
+      table: 'bookings' | 'negotiations' | 'ride_offers' | 'rides';
       filter?: string;
     }> = [
+      {
+        channel: `traveler-rides-all:${profile.uid}`,
+        table: 'rides',
+      },
       {
         channel: `traveler-negotiations-all:${profile.uid}`,
         table: 'negotiations',
@@ -11388,6 +11397,22 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           (payload: any) => {
             const row = payload.new || payload.old;
             if (!row) return;
+            if (table === 'rides') {
+              const rowData = row?.data && typeof row.data === 'object' ? row.data : {};
+              const linkedRequestId = String(
+                rowData.linkedTravelerRequestId ||
+                  rowData.rideRequestId ||
+                  rowData.requestId ||
+                  rowData.matchedBookingId ||
+                  rowData.bookingId ||
+                  ''
+              );
+              const status = String(row?.status || rowData.status || '').trim().toLowerCase();
+              if (linkedRequestId && activeRequestSet.has(linkedRequestId) && status === 'negotiating') {
+                void refreshTravelerNegotiationState('ride-status-negotiating');
+              }
+              return;
+            }
             const normalized = buildTravelerNegotiationFromRealtimeRow(row, table);
             if (!normalized) return;
             applyTravelerNegotiationRealtimeBooking(normalized, payload.eventType || payload.event || 'UPDATE');
@@ -11418,6 +11443,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     applyTravelerNegotiationRealtimeBooking,
     buildTravelerNegotiationFromRealtimeRow,
     profile.uid,
+    refreshTravelerNegotiationState,
     scheduleTravelerRealtimeReconnect,
     travelerRealtimeReconnectKey,
   ]);
@@ -11464,8 +11490,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       }
     };
 
+    const initialSyncId = window.setTimeout(syncIfRealtimeWentQuiet, 500);
     const intervalId = window.setInterval(syncIfRealtimeWentQuiet, 3000);
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearTimeout(initialSyncId);
+      window.clearInterval(intervalId);
+    };
   }, [hasTravelerActiveRequestScreen, profile.uid, refreshTravelerNegotiationState]);
 
   useEffect(() => {
@@ -13669,6 +13699,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const hasHydratedTravelerCountersRef = useRef(false);
   const lastDriverLocationWriteRef = useRef(0);
   const driverRideFeedRef = useRef<Ride[]>([]);
+  const driverBookingFallbackInFlightRef = useRef(false);
   const driverFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -13747,6 +13778,151 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       setTripSessions((prev) => ({ ...prev, [session.bookingId || normalized.id]: session }));
     }
   }, []);
+
+  const applyDriverBookingState = useCallback(
+    (booking: Booking, eventType = 'UPDATE') => {
+      const normalized = normalizeNegotiationBooking(booking);
+      if (!normalized.id || normalized.driverId !== profile.uid) return;
+
+      const applyList = (prev: Booking[]) => {
+        const next =
+          eventType === 'DELETE'
+            ? prev.filter((candidate) => candidate.id !== normalized.id)
+            : [
+                normalized,
+                ...prev.filter(
+                  (candidate) =>
+                    candidate.id !== normalized.id &&
+                    getBookingThreadKey(candidate) !== getBookingThreadKey(normalized)
+                ),
+              ];
+        return dedupeBookingsByThread(next).sort(
+          (a, b) =>
+            new Date((b as any).updatedAt || b.createdAt).getTime() -
+            new Date((a as any).updatedAt || a.createdAt).getTime()
+        );
+      };
+
+      setDriverBookings(applyList);
+      setRequests((prev) =>
+        applyList(prev).filter(
+          (candidate) =>
+            !retiredRideIds.includes(candidate.rideId) &&
+            !(candidate as any).rideRetired &&
+            candidate.negotiationStatus !== 'rejected' &&
+            ['pending', 'confirmed', 'negotiating'].includes(candidate.status)
+        )
+      );
+      setDriverNegotiationPreview((prev) =>
+        prev && getBookingThreadKey(prev) === getBookingThreadKey(normalized) ? normalized : prev
+      );
+    },
+    [profile.uid, retiredRideIds]
+  );
+
+  const loadDriverBookingState = useCallback(async () => {
+    let list: Booking[] = [];
+    if (isLocalDevFirestoreMode()) {
+      const snapshot = await getDocs(query(collection(db, 'bookings'), where('driverId', '==', profile.uid)));
+      list = snapshot.docs
+        .map((snapshotDoc) => normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+        .filter((booking) => ['pending', 'confirmed', 'negotiating', 'completed'].includes(booking.status));
+    } else {
+      const token = await getAccessToken();
+      const { data } = await axios.get(apiPath(`/api/user?action=list-bookings&scope=driver&_=${Date.now()}`), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
+      list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
+    }
+
+    return dedupeBookingsByThread(
+      list
+        .map((booking) => normalizeNegotiationBooking(booking))
+        .sort(
+          (a, b) =>
+            new Date((b as any).updatedAt || b.createdAt).getTime() -
+            new Date((a as any).updatedAt || a.createdAt).getTime()
+        )
+    );
+  }, [profile.uid]);
+
+  const refreshDriverBookingState = useCallback(async (reason = 'manual') => {
+    const normalized = await loadDriverBookingState();
+    setDriverBookings(normalized);
+    setRequests(
+      normalized.filter(
+        (booking) =>
+          !retiredRideIds.includes(booking.rideId) &&
+          !(booking as any).rideRetired &&
+          booking.negotiationStatus !== 'rejected' &&
+          ['pending', 'confirmed', 'negotiating'].includes(booking.status)
+      )
+    );
+    recordInternalDebugEvent('driver_booking_state_refreshed', {
+      userId: profile.uid,
+      reason,
+      bookings: normalized.length,
+    });
+  }, [loadDriverBookingState, profile.uid, retiredRideIds]);
+
+  useEffect(() => {
+    if (isLocalDevFirestoreMode()) return;
+
+    const channel = supabase
+      .channel(`driver-bookings:${profile.uid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings', filter: `driver_id=eq.${profile.uid}` },
+        (payload: any) => {
+          const row = payload.new || payload.old;
+          if (!row) return;
+          applyDriverBookingState(getRealtimeRowData<Booking>(row), payload.eventType || payload.event || 'UPDATE');
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          recordInternalDebugEvent('driver_bookings_realtime_error', {
+            userId: profile.uid,
+            status,
+          });
+          if (status === 'TIMED_OUT' || status === 'CLOSED') {
+            void refreshDriverBookingState(`realtime-${status.toLowerCase()}`);
+          }
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [applyDriverBookingState, profile.uid, refreshDriverBookingState]);
+
+  useEffect(() => {
+    if (isLocalDevFirestoreMode() || !requests.some(isBookingTrackable)) return;
+    const syncDriverBookings = async () => {
+      if (driverBookingFallbackInFlightRef.current) return;
+      driverBookingFallbackInFlightRef.current = true;
+      try {
+        await refreshDriverBookingState('active-negotiation-fallback');
+      } catch (error) {
+        recordInternalDebugEvent('driver_booking_fallback_sync_failed', {
+          userId: profile.uid,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        driverBookingFallbackInFlightRef.current = false;
+      }
+    };
+    const initialSyncId = window.setTimeout(syncDriverBookings, 500);
+    const intervalId = window.setInterval(syncDriverBookings, 3000);
+    return () => {
+      window.clearTimeout(initialSyncId);
+      window.clearInterval(intervalId);
+    };
+  }, [profile.uid, refreshDriverBookingState, requests]);
 
   useEffect(() => {
     if (isLocalDevFirestoreMode() || driverActiveRideIds.length === 0) return;
@@ -13906,31 +14082,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
     const loadDriverBookings = async () => {
       try {
-        let list: Booking[] = [];
-        if (isLocalDevFirestoreMode()) {
-          const snapshot = await getDocs(query(collection(db, 'bookings'), where('driverId', '==', profile.uid)));
-          list = snapshot.docs
-            .map((snapshotDoc) => normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-            .filter((booking) => ['pending', 'confirmed', 'negotiating', 'completed'].includes(booking.status));
-        } else {
-          const token = await getAccessToken();
-          const { data } = await axios.get(apiPath('/api/user?action=list-bookings&scope=driver'), {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-          list = Array.isArray(data?.bookings) ? data.bookings as Booking[] : [];
-        }
+        const normalized = await loadDriverBookingState();
         if (!isMounted) return;
-        const normalized = dedupeBookingsByThread(
-          list
-            .map((booking) => normalizeNegotiationBooking(booking))
-            .sort(
-              (a, b) =>
-                new Date((b as any).updatedAt || b.createdAt).getTime() -
-                new Date((a as any).updatedAt || a.createdAt).getTime()
-            )
-        );
         setDriverBookings(normalized);
         setRequests(
           normalized.filter(
@@ -13954,7 +14107,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return () => {
       isMounted = false;
     };
-  }, [profile.uid, retiredRideIds]);
+  }, [loadDriverBookingState, retiredRideIds]);
 
   useEffect(() => {
     if (!isLocalDevFirestoreMode()) return;

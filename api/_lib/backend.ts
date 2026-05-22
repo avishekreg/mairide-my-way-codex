@@ -11,6 +11,7 @@ export type ReqLike = {
 };
 
 export type ResLike = {
+  setHeader?: (key: string, value: string) => void;
   status: (code: number) => ResLike;
   json: (payload: any) => void;
 };
@@ -28,6 +29,12 @@ function extractErrorMessage(error: any, fallback: string) {
     return error.error_description;
   }
   return fallback;
+}
+
+function setNoStore(res: ResLike) {
+  res.setHeader?.("Cache-Control", "no-store, no-cache, max-age=0, must-revalidate");
+  res.setHeader?.("Pragma", "no-cache");
+  res.setHeader?.("Expires", "0");
 }
 
 function normalizeRouteText(value: string | null | undefined) {
@@ -1713,6 +1720,7 @@ function mapBookingRow(row: any) {
 }
 
 export async function handleUserListBookings(req: any, res: ResLike) {
+  setNoStore(res);
   try {
     const authHeader = Array.isArray(req.headers.authorization)
       ? req.headers.authorization[0]
@@ -1942,6 +1950,7 @@ export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike
 }
 
 export async function handleUserListTravelerRequests(req: any, res: ResLike) {
+  setNoStore(res);
   try {
     const authHeader = Array.isArray(req.headers.authorization)
       ? req.headers.authorization[0]
