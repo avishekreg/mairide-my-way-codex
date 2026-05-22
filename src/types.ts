@@ -157,7 +157,7 @@ export interface Ride {
   departureNote?: string;
   price: number;
   seatsAvailable: number;
-  status: 'available' | 'negotiating' | 'full' | 'completed' | 'cancelled';
+  status: 'available' | 'negotiating' | 'full' | 'started' | 'in_progress' | 'completed' | 'cancelled';
   createdAt: string;
 }
 

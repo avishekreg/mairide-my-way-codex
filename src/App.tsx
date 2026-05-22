@@ -13354,6 +13354,91 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         ),
     [driverAvailableRideRoutes, travelerRideRequests, profile.uid, linkedTravelerRequestIds]
   );
+
+  const driverActiveRideIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...requests, ...driverBookings]
+            .map((booking) => booking.rideId)
+            .filter((rideId): rideId is string => Boolean(rideId))
+        )
+      ),
+    [requests, driverBookings]
+  );
+
+  const markDriverRideStartedInState = useCallback((rideId: string, startedAt: string) => {
+    if (!rideId) return;
+
+    const patchBooking = (booking: Booking): Booking =>
+      normalizeNegotiationBooking({
+        ...booking,
+        status: booking.status === 'cancelled' ? booking.status : 'confirmed',
+        rideLifecycleStatus: 'in_progress',
+        rideStartedAt: booking.rideStartedAt || startedAt,
+        rideStartOtpVerifiedAt: booking.rideStartOtpVerifiedAt || startedAt,
+        updatedAt: startedAt,
+      } as Booking);
+
+    setRequests((prev) => prev.map((booking) => (booking.rideId === rideId ? patchBooking(booking) : booking)));
+    setDriverBookings((prev) => prev.map((booking) => (booking.rideId === rideId ? patchBooking(booking) : booking)));
+    setDriverNegotiationPreview((prev) => (prev?.rideId === rideId ? patchBooking(prev) : prev));
+  }, []);
+
+  const applyStartedBookingState = useCallback((booking: Booking, session?: TripSession) => {
+    const normalized = normalizeNegotiationBooking(booking);
+    setRequests((prev) => prev.map((item) => (item.id === normalized.id ? normalized : item)));
+    setDriverBookings((prev) => prev.map((item) => (item.id === normalized.id ? normalized : item)));
+    setDriverNegotiationPreview((prev) => (prev?.id === normalized.id ? normalized : prev));
+    if (session) {
+      setTripSessions((prev) => ({ ...prev, [session.bookingId || normalized.id]: session }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isLocalDevFirestoreMode() || driverActiveRideIds.length === 0) return;
+
+    // Ride-specific websocket listener: each active ride gets a narrow channel so a backend
+    // status transition to STARTED/IN_PROGRESS updates this driver UI without a page refresh.
+    const channels = driverActiveRideIds.map((rideId) =>
+      supabase
+        .channel(`driver-ride-status:${profile.uid}:${rideId}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'rides', filter: `id=eq.${rideId}` },
+          (payload: any) => {
+            const row = payload.new;
+            if (!row) return;
+            const ride = getRealtimeRowData<Ride>(row);
+            const status = String(ride.status || row.status || row.data?.status || '').toLowerCase();
+            if (!['started', 'start', 'in_progress', 'started_ride'].includes(status)) return;
+
+            const startedAt =
+              row.data?.rideStartedAt ||
+              row.data?.ride_started_at ||
+              row.ride_started_at ||
+              row.updated_at ||
+              new Date().toISOString();
+            markDriverRideStartedInState(rideId, startedAt);
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            recordInternalDebugEvent('driver_ride_status_realtime_error', {
+              userId: profile.uid,
+              rideId,
+              status,
+            });
+          }
+        })
+    );
+
+    return () => {
+      channels.forEach((channel) => {
+        void supabase.removeChannel(channel);
+      });
+    };
+  }, [driverActiveRideIds.join('|'), markDriverRideStartedInState, profile.uid]);
   const partialTravelerRideRequests = useMemo(
     () =>
       travelerRideRequests
@@ -14852,34 +14937,58 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
   const handleStartRide = async (booking: Booking, enteredOtp: string) => {
     if (!enteredOtp || enteredOtp !== booking.rideStartOtp) {
-      alert('Invalid ride start OTP.');
+      showAppDialog('Invalid ride start OTP.', 'error');
+      return;
+    }
+    if (!auth.currentUser) {
+      showAppDialog('Please sign in again before starting this ride.', 'error');
+      return;
+    }
+    if (!booking.rideId) {
+      showAppDialog('This booking is missing its ride link. Please contact support.', 'error');
       return;
     }
 
     try {
+      const startedAt = new Date().toISOString();
+      const rideEndOtp = generateRideOtp();
+      const startedBooking = normalizeNegotiationBooking({
+        ...booking,
+        status: 'confirmed',
+        rideLifecycleStatus: 'in_progress',
+        rideStartedAt: startedAt,
+        rideStartOtpVerifiedAt: startedAt,
+        rideEndOtp,
+        rideEndOtpGeneratedAt: startedAt,
+        updatedAt: startedAt,
+      } as Booking);
+
       await updateDoc(doc(db, 'bookings', booking.id), {
         rideLifecycleStatus: 'in_progress',
-        rideStartedAt: new Date().toISOString(),
-        rideStartOtpVerifiedAt: new Date().toISOString(),
-        rideEndOtp: generateRideOtp(),
-        rideEndOtpGeneratedAt: new Date().toISOString(),
+        rideStartedAt: startedAt,
+        rideStartOtpVerifiedAt: startedAt,
+        rideEndOtp,
+        rideEndOtpGeneratedAt: startedAt,
+        updatedAt: startedAt,
       });
 
       await updateDoc(doc(db, 'rides', booking.rideId), {
-        status: 'full',
+        status: 'in_progress',
+        rideLifecycleStatus: 'in_progress',
+        rideStartedAt: startedAt,
+        updatedAt: startedAt,
+        'data.status': 'in_progress',
+        'data.rideLifecycleStatus': 'in_progress',
+        'data.rideStartedAt': startedAt,
+        'data.updatedAt': startedAt,
       });
 
       await updateDoc(doc(db, 'users', booking.driverId), {
         'driverDetails.isOnline': false,
       });
 
-      await upsertTripSession({
-        booking: {
-          ...booking,
-          rideLifecycleStatus: 'in_progress',
-          rideStartedAt: new Date().toISOString(),
-          status: 'confirmed',
-        },
+      const session = await upsertTripSession({
+        booking: startedBooking,
         actorRole: 'driver',
         actorId: profile.uid,
         location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
@@ -14889,8 +14998,11 @@ const finalizeDriverDashboardRazorpayPayment = async (
         note: 'ride_started',
       });
 
+      // Immediate optimistic UI transition after the write succeeds. The realtime ride listener
+      // above applies the same state change if another backend path starts the ride first.
+      applyStartedBookingState(startedBooking, session);
       setIsOnline(false);
-      alert('Ride started. Driver visibility is now hidden until the trip is closed.');
+      showAppDialog('Ride started. Driver visibility is now hidden until the trip is closed.', 'success');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
     }
