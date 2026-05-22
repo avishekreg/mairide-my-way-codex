@@ -2864,6 +2864,11 @@ const getRealtimeRowData = <T extends { id?: string }>(row: any): T => {
     ...(row?.updated_at ? { updatedAt: row.updated_at } : {}),
     ...(row?.driver_bid !== undefined ? { driverBid: row.driver_bid } : {}),
     ...(row?.consumer_bid !== undefined ? { consumerBid: row.consumer_bid } : {}),
+    ...(row?.ride_request_id ? { linkedTravelerRequestId: row.ride_request_id } : {}),
+    ...(row?.request_id ? { linkedTravelerRequestId: row.request_id } : {}),
+    ...(row?.booking_id ? { bookingId: row.booking_id } : {}),
+    ...(row?.negotiated_fare !== undefined ? { negotiatedFare: row.negotiated_fare } : {}),
+    ...(row?.counter_fare !== undefined ? { negotiatedFare: row.counter_fare } : {}),
   } as T;
 };
 
@@ -10975,6 +10980,180 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         ),
     [travelerRequests]
   );
+  const activeTravelerNegotiationRequestIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...travelerRequests
+              .filter(isUnifiedRideActive)
+              .map((request) => request.id),
+            ...dashboardBookings.map((booking) =>
+              String((booking as any).linkedTravelerRequestId || (booking as any).rideRequestId || booking.id || '')
+            ),
+          ].filter(Boolean)
+        )
+      ),
+    [dashboardBookings, travelerRequests]
+  );
+
+  const buildTravelerNegotiationFromRealtimeRow = useCallback(
+    (row: any, sourceTable: 'bookings' | 'negotiations' | 'ride_offers'): Booking | null => {
+      const rowData = row?.data && typeof row.data === 'object' ? row.data : {};
+      const directBooking =
+        sourceTable === 'bookings'
+          ? normalizeNegotiationBooking(getRealtimeRowData<Booking>(row))
+          : null;
+      if (directBooking?.id && directBooking.consumerId === profile.uid) {
+        return directBooking;
+      }
+
+      const requestId = String(
+        row?.ride_request_id ||
+          row?.request_id ||
+          rowData.rideRequestId ||
+          rowData.ride_request_id ||
+          rowData.linkedTravelerRequestId ||
+          rowData.requestId ||
+          row?.booking_id ||
+          rowData.bookingId ||
+          ''
+      );
+      const existingBooking = dashboardBookings.find(
+        (booking) =>
+          booking.id === requestId ||
+          String((booking as any).linkedTravelerRequestId || '') === requestId ||
+          String((booking as any).bookingId || '') === String(row?.booking_id || rowData.bookingId || '')
+      );
+      const existingBookingData = (existingBooking || {}) as Booking & Record<string, any>;
+      const request = travelerRequests.find((item) => item.id === requestId);
+      const consumerId = String(
+        row?.consumer_id ||
+          row?.traveler_id ||
+          rowData.consumerId ||
+          rowData.consumer_id ||
+          existingBooking?.consumerId ||
+          request?.consumerId ||
+          ''
+      );
+      if (!requestId || consumerId !== profile.uid) return null;
+
+      const driverBid = firstFiniteNumber(
+        row?.driver_bid,
+        row?.driverBid,
+        rowData.driverBid,
+        rowData.driver_bid,
+        row?.counter_fare,
+        rowData.counterFare,
+        row?.negotiated_fare,
+        rowData.negotiatedFare,
+        row?.fare,
+        rowData.fare
+      );
+      const listedFare = firstFiniteNumber(
+          existingBookingData.listedFare,
+        rowData.listedFare,
+        rowData.originalRiderOffer,
+        row?.original_rider_offer,
+        request?.fare,
+        existingBookingData.fare
+      );
+      const now = new Date().toISOString();
+      const bookingId = String(row?.booking_id || rowData.bookingId || existingBooking?.id || requestId);
+
+      return normalizeNegotiationBooking({
+        ...existingBookingData,
+        id: bookingId,
+        rideId: String(row?.ride_id || rowData.rideId || existingBookingData.rideId || request?.matchedRideId || ''),
+        consumerId: profile.uid,
+        consumerName: existingBookingData.consumerName || request?.consumerName || profile.displayName,
+        consumerPhone: existingBookingData.consumerPhone || request?.consumerPhone || profile.phoneNumber || '',
+        driverId: String(row?.driver_id || rowData.driverId || existingBookingData.driverId || request?.matchedDriverId || ''),
+        driverName: String(rowData.driverName || existingBookingData.driverName || 'Driver'),
+        driverPhotoUrl: rowData.driverPhotoUrl || existingBookingData.driverPhotoUrl || '',
+        origin: existingBookingData.origin || request?.origin || rowData.origin || '',
+        destination: existingBookingData.destination || request?.destination || rowData.destination || '',
+        listedOrigin: existingBookingData.listedOrigin || request?.origin || rowData.listedOrigin || rowData.origin || '',
+        listedDestination: existingBookingData.listedDestination || request?.destination || rowData.listedDestination || rowData.destination || '',
+        listedFare: listedFare || driverBid,
+        fare: driverBid || listedFare,
+        negotiatedFare: driverBid || listedFare,
+        driverBid: driverBid || undefined,
+        consumerBid: existingBookingData.consumerBid || request?.fare || listedFare,
+        seatsBooked: existingBookingData.seatsBooked || request?.seatsNeeded || 1,
+        serviceFee: existingBookingData.serviceFee || 0,
+        gstAmount: existingBookingData.gstAmount || 0,
+        totalPrice: driverBid || listedFare,
+        status: 'negotiating',
+        paymentStatus: existingBookingData.paymentStatus || 'pending',
+        negotiationStatus: 'pending',
+        negotiationActor: 'driver',
+        driverCounterPending: true,
+        linkedTravelerRequestId: requestId,
+        departureTime: existingBookingData.departureTime || request?.departureTime || rowData.departureTime || now,
+        departureDay: existingBookingData.departureDay || request?.departureDay || rowData.departureDay || 'today',
+        departureDayLabel: existingBookingData.departureDayLabel || request?.departureDayLabel || rowData.departureDayLabel || 'Today',
+        departureClock: existingBookingData.departureClock || request?.departureClock || rowData.departureClock || '09:00',
+        departureNote: existingBookingData.departureNote || request?.departureNote || rowData.departureNote || '',
+        createdAt: existingBookingData.createdAt || request?.createdAt || row?.created_at || now,
+        updatedAt: row?.updated_at || rowData.updatedAt || now,
+      } as Booking);
+    },
+    [dashboardBookings, profile.displayName, profile.phoneNumber, profile.uid, travelerRequests]
+  );
+
+  const applyTravelerNegotiationRealtimeBooking = useCallback(
+    (booking: Booking, eventType = 'UPDATE') => {
+      const normalized = normalizeNegotiationBooking(booking);
+      if (!normalized.id || normalized.consumerId !== profile.uid) return;
+
+      setDashboardBookings((prev) => {
+        const requestId = String((normalized as any).linkedTravelerRequestId || (normalized as any).rideRequestId || '');
+        const next =
+          eventType === 'DELETE'
+            ? prev.filter((candidate) => candidate.id !== normalized.id)
+            : [
+                normalized,
+                ...prev.filter(
+                  (candidate) =>
+                    candidate.id !== normalized.id &&
+                    (!requestId || String((candidate as any).linkedTravelerRequestId || '') !== requestId) &&
+                    getBookingThreadKey(candidate) !== getBookingThreadKey(normalized)
+                ),
+              ];
+        return dedupeBookingsByThread(next).sort(
+          (a, b) =>
+            new Date((b as any).updatedAt || b.createdAt).getTime() -
+            new Date((a as any).updatedAt || a.createdAt).getTime()
+        );
+      });
+
+      const requestId = String((normalized as any).linkedTravelerRequestId || (normalized as any).rideRequestId || normalized.id || '');
+      if (requestId && eventType !== 'DELETE') {
+        const normalizedData = normalized as Booking & Record<string, any>;
+        setTravelerRequests((prev) =>
+          prev.map((request) =>
+            request.id === requestId
+              ? {
+                  ...request,
+                  status: 'matched',
+                  matchedRideId: normalized.rideId || request.matchedRideId,
+                  matchedDriverId: normalized.driverId || request.matchedDriverId,
+                  matchedAt: normalizedData.matchedAt || request.matchedAt || normalizedData.updatedAt || new Date().toISOString(),
+                  updatedAt: normalizedData.updatedAt || new Date().toISOString(),
+                }
+              : request
+          )
+        );
+      }
+
+      setActiveTab('search');
+      setSelectedRide(null);
+      setTravelerSmartMatchPrompt(null);
+      setShowRequestForm(false);
+    },
+    [profile.uid]
+  );
 
   useEffect(() => {
     const handleHomeNavigation = () => setActiveTab('search');
@@ -11043,20 +11222,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     if (!profile.uid || isLocalDevFirestoreMode()) return;
 
     const applyRealtimeBookingRow = (row: any, eventType: string) => {
-      const normalized = normalizeNegotiationBooking(getRealtimeRowData<Booking>(row));
-      if (!normalized.id || normalized.consumerId !== profile.uid) return;
-
-      setDashboardBookings((prev) => {
-        const next =
-          eventType === 'DELETE'
-            ? prev.filter((booking) => booking.id !== normalized.id)
-            : dedupeBookingsByThread([normalized, ...prev.filter((booking) => booking.id !== normalized.id)]);
-        return next.sort(
-          (a, b) =>
-            new Date((b as any).updatedAt || b.createdAt).getTime() -
-            new Date((a as any).updatedAt || a.createdAt).getTime()
-        );
-      });
+      const normalized = buildTravelerNegotiationFromRealtimeRow(row, 'bookings');
+      if (!normalized) return;
+      applyTravelerNegotiationRealtimeBooking(normalized, eventType);
 
       const requestSnapshot = normalizeTravelerRideRequest(row);
       if (requestSnapshot.id && requestSnapshot.consumerId === profile.uid) {
@@ -11095,7 +11263,57 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [profile.uid]);
+  }, [applyTravelerNegotiationRealtimeBooking, buildTravelerNegotiationFromRealtimeRow, profile.uid]);
+
+  useEffect(() => {
+    if (!profile.uid || isLocalDevFirestoreMode() || activeTravelerNegotiationRequestIds.length === 0) return;
+
+    // Request-scoped realtime bridge: driver counters may arrive first through negotiation-style
+    // tables, so we listen by ride_request_id and project those events into the same Booking
+    // state that renders the traveler's counter-offer card.
+    const channelConfigs = activeTravelerNegotiationRequestIds.flatMap((requestId) => [
+      { channel: `traveler-booking-request:${profile.uid}:${requestId}`, table: 'bookings' as const, filter: `id=eq.${requestId}` },
+      { channel: `traveler-negotiation-request:${profile.uid}:${requestId}`, table: 'negotiations' as const, filter: `ride_request_id=eq.${requestId}` },
+      { channel: `traveler-offer-request:${profile.uid}:${requestId}`, table: 'ride_offers' as const, filter: `ride_request_id=eq.${requestId}` },
+    ]);
+
+    const channels = channelConfigs.map(({ channel: channelName, table, filter }) =>
+      supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table, filter },
+          (payload: any) => {
+            const row = payload.new || payload.old;
+            if (!row) return;
+            const normalized = buildTravelerNegotiationFromRealtimeRow(row, table);
+            if (!normalized) return;
+            applyTravelerNegotiationRealtimeBooking(normalized, payload.eventType || payload.event || 'UPDATE');
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            recordInternalDebugEvent('traveler_request_negotiation_realtime_error', {
+              userId: profile.uid,
+              table,
+              filter,
+              status,
+            });
+          }
+        })
+    );
+
+    return () => {
+      channels.forEach((channel) => {
+        void supabase.removeChannel(channel);
+      });
+    };
+  }, [
+    activeTravelerNegotiationRequestIds.join('|'),
+    applyTravelerNegotiationRealtimeBooking,
+    buildTravelerNegotiationFromRealtimeRow,
+    profile.uid,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
