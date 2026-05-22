@@ -9050,6 +9050,47 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     setTransactions(transactionsFetch.data);
   }, [transactionsFetch.data]);
 
+  useEffect(() => {
+    if (!profile.uid || isLocalDevFirestoreMode()) return;
+
+    const channel = supabase
+      .channel(`traveler-bookings:${profile.uid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings', filter: `consumer_id=eq.${profile.uid}` },
+        (payload: any) => {
+          const row = payload.new || payload.old;
+          if (!row) return;
+          const normalized = normalizeNegotiationBooking(getRealtimeRowData<Booking>(row));
+          if (!normalized.id || normalized.consumerId !== profile.uid) return;
+          setBookings((prev) => {
+            const next =
+              payload.eventType === 'DELETE'
+                ? prev.filter((booking) => booking.id !== normalized.id)
+                : dedupeBookingsByThread([normalized, ...prev.filter((booking) => booking.id !== normalized.id)]);
+            return next.sort(
+              (a, b) =>
+                new Date((b as any).updatedAt || b.createdAt).getTime() -
+                new Date((a as any).updatedAt || a.createdAt).getTime()
+            );
+          });
+          setLoading(false);
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          recordInternalDebugEvent('traveler_bookings_realtime_error', {
+            userId: profile.uid,
+            status,
+          });
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [profile.uid]);
+
   const submitTravelerPaymentProof = async (
     booking: Booking,
     payload: { transactionId: string; receiptDataUrl: string }
@@ -10995,6 +11036,64 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
     return () => {
       isMounted = false;
+    };
+  }, [profile.uid]);
+
+  useEffect(() => {
+    if (!profile.uid || isLocalDevFirestoreMode()) return;
+
+    const applyRealtimeBookingRow = (row: any, eventType: string) => {
+      const normalized = normalizeNegotiationBooking(getRealtimeRowData<Booking>(row));
+      if (!normalized.id || normalized.consumerId !== profile.uid) return;
+
+      setDashboardBookings((prev) => {
+        const next =
+          eventType === 'DELETE'
+            ? prev.filter((booking) => booking.id !== normalized.id)
+            : dedupeBookingsByThread([normalized, ...prev.filter((booking) => booking.id !== normalized.id)]);
+        return next.sort(
+          (a, b) =>
+            new Date((b as any).updatedAt || b.createdAt).getTime() -
+            new Date((a as any).updatedAt || a.createdAt).getTime()
+        );
+      });
+
+      const requestSnapshot = normalizeTravelerRideRequest(row);
+      if (requestSnapshot.id && requestSnapshot.consumerId === profile.uid) {
+        setTravelerRequests((prev) => {
+          const next =
+            eventType === 'DELETE'
+              ? prev.filter((request) => request.id !== requestSnapshot.id)
+              : [requestSnapshot, ...prev.filter((request) => request.id !== requestSnapshot.id)];
+          return next
+            .filter((item) => isRideWithinPlanningWindow(item))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        });
+      }
+    };
+
+    const channel = supabase
+      .channel(`traveler-negotiations:${profile.uid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings', filter: `consumer_id=eq.${profile.uid}` },
+        (payload: any) => {
+          const row = payload.new || payload.old;
+          if (!row) return;
+          applyRealtimeBookingRow(row, payload.eventType || payload.event || 'UPDATE');
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          recordInternalDebugEvent('traveler_negotiation_realtime_error', {
+            userId: profile.uid,
+            status,
+          });
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
     };
   }, [profile.uid]);
 
