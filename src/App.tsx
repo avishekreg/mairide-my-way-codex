@@ -3333,6 +3333,18 @@ const areBookingRenderListsEqual = (current: Booking[], next: Booking[]) => {
   return current.every((booking, index) => getBookingRenderSignature(booking) === getBookingRenderSignature(next[index]));
 };
 
+const mergeNegotiationThread = (bookings: Booking[], updatedThread: Booking) =>
+  dedupeBookingsByThread([
+    updatedThread,
+    ...bookings.map((booking) =>
+      getBookingThreadKey(booking) === getBookingThreadKey(updatedThread) ? updatedThread : booking
+    ),
+  ]).sort(
+    (a, b) =>
+      new Date((b as any).updatedAt || b.createdAt).getTime() -
+      new Date((a as any).updatedAt || a.createdAt).getTime()
+  );
+
 const primaryActionButtonClass =
   "rounded-xl font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 active:shadow-sm";
 
@@ -12653,7 +12665,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
     try {
       const token = await getAccessToken();
-      await axios.post(
+      const { data } = await axios.post(
         '/api/user?action=traveler-counter-booking',
         {
           bookingId: booking.id,
@@ -12669,25 +12681,21 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
       const updatedAt = new Date().toISOString();
       await persistCounterOfferThroughCompatStore(booking, 'consumer', fare);
-      setDashboardBookings((prev) =>
-        prev.map((candidate) =>
-          getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-            ? {
-                ...candidate,
-                driverListedFare: (candidate as any).driverListedFare || getDriverListedFare(candidate),
-                travelerListedFare: (candidate as any).travelerListedFare || getTravelerListedFare(candidate),
-                negotiatedFare: fare,
-                consumerBid: fare,
-                negotiationStatus: 'pending',
-                negotiationActor: 'consumer',
-                driverCounterPending: false,
-                status: 'negotiating',
-                rideRetired: false,
-                updatedAt,
-              }
-            : candidate
-        )
-      );
+      const canonicalThread = data?.booking ? normalizeNegotiationBooking(data.booking as Booking) : null;
+      const updatedThread = canonicalThread || normalizeNegotiationBooking({
+        ...booking,
+        driverListedFare: (booking as any).driverListedFare || getDriverListedFare(booking),
+        travelerListedFare: (booking as any).travelerListedFare || getTravelerListedFare(booking),
+        negotiatedFare: fare,
+        consumerBid: fare,
+        negotiationStatus: 'pending',
+        negotiationActor: 'consumer',
+        driverCounterPending: false,
+        status: 'negotiating',
+        rideRetired: false,
+        updatedAt,
+      } as Booking);
+      setDashboardBookings((prev) => mergeNegotiationThread(prev, updatedThread));
       setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
       void sendBrowserNotification(
         'MaiRide Counter Offer',
@@ -12698,24 +12706,21 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     } catch (error) {
       try {
         const updatedAt = await persistCounterOfferThroughCompatStore(booking, 'consumer', fare);
+        const updatedThread = normalizeNegotiationBooking({
+          ...booking,
+          driverListedFare: (booking as any).driverListedFare || getDriverListedFare(booking),
+          travelerListedFare: (booking as any).travelerListedFare || getTravelerListedFare(booking),
+          negotiatedFare: fare,
+          consumerBid: fare,
+          negotiationStatus: 'pending',
+          negotiationActor: 'consumer',
+          driverCounterPending: false,
+          status: 'negotiating',
+          rideRetired: false,
+          updatedAt,
+        } as Booking);
         setDashboardBookings((prev) =>
-          prev.map((candidate) =>
-            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-              ? {
-                  ...candidate,
-                  driverListedFare: (candidate as any).driverListedFare || getDriverListedFare(candidate),
-                  travelerListedFare: (candidate as any).travelerListedFare || getTravelerListedFare(candidate),
-                  negotiatedFare: fare,
-                  consumerBid: fare,
-                  negotiationStatus: 'pending',
-                  negotiationActor: 'consumer',
-                  driverCounterPending: false,
-                  status: 'negotiating',
-                  rideRetired: false,
-                  updatedAt,
-                }
-              : candidate
-          )
+          mergeNegotiationThread(prev, updatedThread)
         );
         setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
         showAppDialog('Counter offer sent to the driver.', 'success');
@@ -15360,22 +15365,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         status: 'negotiating' as const,
         updatedAt,
       };
-      setRequests((prev) =>
-        dedupeBookingsByThread([
-          updatedThread,
-          ...prev.map((booking) =>
-            getBookingThreadKey(booking) === getBookingThreadKey(request) ? updatedThread : booking
-          ),
-        ])
-      );
-      setDriverBookings((prev) =>
-        dedupeBookingsByThread([
-          updatedThread,
-          ...prev.map((booking) =>
-            getBookingThreadKey(booking) === getBookingThreadKey(request) ? updatedThread : booking
-          ),
-        ])
-      );
+      setRequests((prev) => mergeNegotiationThread(prev, updatedThread));
+      setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread));
       setDriverNegotiationPreview(null);
       setDriverSmartMatchPrompt(null);
       setShowOfferForm(false);
@@ -15403,31 +15394,20 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       }
       try {
         const updatedAt = await persistCounterOfferThroughCompatStore(request, 'driver', fare);
-        const updatedThread = {
+        const updatedThread = normalizeNegotiationBooking({
           ...request,
+          driverListedFare: (request as any).driverListedFare || getDriverListedFare(request),
+          travelerListedFare: (request as any).travelerListedFare || getTravelerListedFare(request),
           negotiatedFare: fare,
+          driverBid: fare,
           negotiationStatus: 'pending' as const,
           negotiationActor: 'driver' as const,
           driverCounterPending: true,
           status: 'negotiating' as const,
           updatedAt,
-        };
-        setRequests((prev) =>
-          dedupeBookingsByThread([
-            updatedThread,
-            ...prev.map((booking) =>
-              getBookingThreadKey(booking) === getBookingThreadKey(request) ? updatedThread : booking
-            ),
-          ])
-        );
-        setDriverBookings((prev) =>
-          dedupeBookingsByThread([
-            updatedThread,
-            ...prev.map((booking) =>
-              getBookingThreadKey(booking) === getBookingThreadKey(request) ? updatedThread : booking
-            ),
-          ])
-        );
+        } as Booking);
+        setRequests((prev) => mergeNegotiationThread(prev, updatedThread));
+        setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread));
         setDriverNegotiationPreview(null);
         setDriverSmartMatchPrompt(null);
         setShowOfferForm(false);

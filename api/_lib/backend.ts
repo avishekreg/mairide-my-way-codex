@@ -2575,6 +2575,8 @@ export async function handleUserRespondBooking(req: ReqLike, res: ResLike) {
       return res.status(400).json({ error: "No valid fare to confirm" });
     }
 
+    let responseRow: any = null;
+
     await Promise.all(
       targetRows.map(async (row: any) => {
         const rowData = row.data || {};
@@ -2794,6 +2796,8 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
       }
     }
 
+    let responseRow: any = null;
+
     await Promise.all(
       targetRows.map(async (row: any) => {
         const rowData = row.data || {};
@@ -2811,16 +2815,21 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
           updatedAt,
         };
 
-        const { error } = await supabaseAdmin
+        const { data: updatedRow, error } = await supabaseAdmin
           .from("bookings")
           .update({
             status: "negotiating",
             updated_at: updatedAt,
             data: nextData,
           })
-          .eq("id", row.id);
+          .eq("id", row.id)
+          .select("*")
+          .single();
 
         if (error) throw error;
+        if (updatedRow && (!responseRow || updatedRow.id === bookingRow.id)) {
+          responseRow = updatedRow;
+        }
       })
     );
 
@@ -2831,7 +2840,10 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
       updatedAt,
     });
 
-    return res.status(200).json({ message: "Counter offer sent to the driver." });
+    return res.status(200).json({
+      message: "Counter offer sent to the driver.",
+      booking: responseRow ? mapBookingRow(responseRow) : mapBookingRow(bookingRow),
+    });
   } catch (error: any) {
     console.error("Error sending traveler counter offer:", error);
     return res.status(error?.status || 500).json({
