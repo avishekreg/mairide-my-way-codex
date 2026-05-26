@@ -3293,6 +3293,39 @@ const dedupeBookingsByThread = <T extends Booking>(bookings: T[]) => {
   return Array.from(latestByThread.values());
 };
 
+const getBookingRenderSignature = (booking: Booking) =>
+  [
+    booking.id,
+    booking.rideId,
+    booking.status,
+    booking.negotiationStatus,
+    booking.negotiationActor,
+    booking.rideLifecycleStatus,
+    booking.fare,
+    (booking as any).listedFare,
+    booking.negotiatedFare,
+    (booking as any).driverBid,
+    (booking as any).consumerBid,
+    booking.origin,
+    booking.destination,
+    booking.driverId,
+    booking.consumerId,
+    booking.driverName,
+    booking.consumerName,
+    booking.seatsBooked,
+    (booking as any).seatsAvailable,
+    booking.feePaid,
+    booking.driverFeePaid,
+    booking.rideStartedAt,
+    booking.rideEndedAt,
+    (booking as any).rideRetired,
+  ].join('|');
+
+const areBookingRenderListsEqual = (current: Booking[], next: Booking[]) => {
+  if (current.length !== next.length) return false;
+  return current.every((booking, index) => getBookingRenderSignature(booking) === getBookingRenderSignature(next[index]));
+};
+
 const primaryActionButtonClass =
   "rounded-xl font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 active:shadow-sm";
 
@@ -13742,6 +13775,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const hasHydratedTravelerCountersRef = useRef(false);
   const lastDriverLocationWriteRef = useRef(0);
   const driverRideFeedRef = useRef<Ride[]>([]);
+  const driverTripSessionSyncKeysRef = useRef<Record<string, string>>({});
   const driverFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -13806,16 +13840,44 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         updatedAt: startedAt,
       } as Booking);
 
-    setRequests((prev) => prev.map((booking) => (booking.rideId === rideId ? patchBooking(booking) : booking)));
-    setDriverBookings((prev) => prev.map((booking) => (booking.rideId === rideId ? patchBooking(booking) : booking)));
-    setDriverNegotiationPreview((prev) => (prev?.rideId === rideId ? patchBooking(prev) : prev));
+    const patchList = (prev: Booking[]) => {
+      let changed = false;
+      const next = prev.map((booking) => {
+        if (booking.rideId !== rideId) return booking;
+        const patched = patchBooking(booking);
+        if (getBookingRenderSignature(patched) !== getBookingRenderSignature(booking)) changed = true;
+        return patched;
+      });
+      return changed ? next : prev;
+    };
+
+    setRequests(patchList);
+    setDriverBookings(patchList);
+    setDriverNegotiationPreview((prev) => {
+      if (prev?.rideId !== rideId) return prev;
+      const patched = patchBooking(prev);
+      return getBookingRenderSignature(patched) === getBookingRenderSignature(prev) ? prev : patched;
+    });
   }, []);
 
   const applyStartedBookingState = useCallback((booking: Booking, session?: TripSession) => {
     const normalized = normalizeNegotiationBooking(booking);
-    setRequests((prev) => prev.map((item) => (item.id === normalized.id ? normalized : item)));
-    setDriverBookings((prev) => prev.map((item) => (item.id === normalized.id ? normalized : item)));
-    setDriverNegotiationPreview((prev) => (prev?.id === normalized.id ? normalized : prev));
+    const patchList = (prev: Booking[]) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (item.id !== normalized.id) return item;
+        if (getBookingRenderSignature(item) !== getBookingRenderSignature(normalized)) changed = true;
+        return normalized;
+      });
+      return changed ? next : prev;
+    };
+
+    setRequests(patchList);
+    setDriverBookings(patchList);
+    setDriverNegotiationPreview((prev) => {
+      if (prev?.id !== normalized.id) return prev;
+      return getBookingRenderSignature(prev) === getBookingRenderSignature(normalized) ? prev : normalized;
+    });
     if (session) {
       setTripSessions((prev) => ({ ...prev, [session.bookingId || normalized.id]: session }));
     }
@@ -13845,19 +13907,24 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         );
       };
 
-      setDriverBookings(applyList);
-      setRequests((prev) =>
-        applyList(prev).filter(
+      setDriverBookings((prev) => {
+        const next = applyList(prev);
+        return areBookingRenderListsEqual(prev, next) ? prev : next;
+      });
+      setRequests((prev) => {
+        const next = applyList(prev).filter(
           (candidate) =>
             !retiredRideIds.includes(candidate.rideId) &&
             !(candidate as any).rideRetired &&
             candidate.negotiationStatus !== 'rejected' &&
             ['pending', 'confirmed', 'negotiating'].includes(candidate.status)
-        )
-      );
-      setDriverNegotiationPreview((prev) =>
-        prev && getBookingThreadKey(prev) === getBookingThreadKey(normalized) ? normalized : prev
-      );
+        );
+        return areBookingRenderListsEqual(prev, next) ? prev : next;
+      });
+      setDriverNegotiationPreview((prev) => {
+        if (!prev || getBookingThreadKey(prev) !== getBookingThreadKey(normalized)) return prev;
+        return getBookingRenderSignature(prev) === getBookingRenderSignature(normalized) ? prev : normalized;
+      });
     },
     [profile.uid, retiredRideIds]
   );
@@ -13894,16 +13961,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const refreshDriverBookingState = useCallback(async (reason = 'manual') => {
     const normalized = await loadDriverBookingState();
-    setDriverBookings(normalized);
-    setRequests(
-      normalized.filter(
+    setDriverBookings((prev) => (areBookingRenderListsEqual(prev, normalized) ? prev : normalized));
+    const nextRequests = normalized.filter(
         (booking) =>
           !retiredRideIds.includes(booking.rideId) &&
           !(booking as any).rideRetired &&
           booking.negotiationStatus !== 'rejected' &&
           ['pending', 'confirmed', 'negotiating'].includes(booking.status)
-      )
     );
+    setRequests((prev) => (areBookingRenderListsEqual(prev, nextRequests) ? prev : nextRequests));
     recordInternalDebugEvent('driver_booking_state_refreshed', {
       userId: profile.uid,
       reason,
@@ -14102,16 +14168,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       try {
         const normalized = await loadDriverBookingState();
         if (!isMounted) return;
-        setDriverBookings(normalized);
-        setRequests(
-          normalized.filter(
-            (booking) =>
-              !retiredRideIds.includes(booking.rideId) &&
-              !(booking as any).rideRetired &&
-              booking.negotiationStatus !== 'rejected' &&
-              ['pending', 'confirmed', 'negotiating'].includes(booking.status)
-          )
+        setDriverBookings((prev) => (areBookingRenderListsEqual(prev, normalized) ? prev : normalized));
+        const nextRequests = normalized.filter(
+          (booking) =>
+            !retiredRideIds.includes(booking.rideId) &&
+            !(booking as any).rideRetired &&
+            booking.negotiationStatus !== 'rejected' &&
+            ['pending', 'confirmed', 'negotiating'].includes(booking.status)
         );
+        setRequests((prev) => (areBookingRenderListsEqual(prev, nextRequests) ? prev : nextRequests));
       } catch (error) {
         if (!isMounted) return;
         console.error('Driver booking load failed:', error);
@@ -14296,15 +14361,30 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
     const sync = () => {
       trackableRequests.forEach((request) => {
+        const location = driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined);
+        const locationKey = location
+          ? `${location.lat.toFixed(5)},${location.lng.toFixed(5)},${Math.round(location.accuracy || 0)},${Math.round(location.speedKmph || 0)},${Math.round(location.heading || 0)}`
+          : 'no-location';
+        const syncKey = [
+          getBookingRenderSignature(request),
+          locationKey,
+          tripNetworkState || 'online',
+          tripAppState || 'foreground',
+        ].join('::');
+
+        if (driverTripSessionSyncKeysRef.current[request.id] === syncKey) return;
+        driverTripSessionSyncKeysRef.current[request.id] = syncKey;
+
         void upsertTripSession({
           booking: request,
           actorRole: 'driver',
           actorId: profile.uid,
-          location: driverSignalLocation || (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined),
+          location,
           networkState: tripNetworkState,
           appState: tripAppState,
           note: 'driver_presence_sync',
         }).catch((error) => {
+          delete driverTripSessionSyncKeysRef.current[request.id];
           console.error('Driver trip session sync failed:', error);
         });
       });
