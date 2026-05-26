@@ -3328,6 +3328,53 @@ const getBookingRenderSignature = (booking: Booking) =>
     (booking as any).rideRetired,
   ].join('|');
 
+const getNegotiationInstanceSignature = (booking: Booking) => {
+  const actor = String(getBookingNegotiationField<string>(booking, 'negotiationActor') || '');
+  const status = String(getBookingNegotiationField<string>(booking, 'negotiationStatus') || '');
+  const driverBid = getFirstBookingNegotiationField<number | string>(booking, ['driverBid', 'driver_bid']);
+  const consumerBid = getFirstBookingNegotiationField<number | string>(booking, ['consumerBid', 'consumer_bid', 'riderOffer', 'rider_offer']);
+  const negotiatedFare = getBookingNegotiationField<number | string>(booking, 'negotiatedFare');
+
+  if (status !== 'pending' || !['driver', 'consumer'].includes(actor)) return '';
+
+  return [
+    getBookingThreadKey(booking),
+    status,
+    actor,
+    negotiatedFare ?? '',
+    driverBid ?? '',
+    consumerBid ?? '',
+  ].join('|');
+};
+
+const scheduleReloadForNegotiationInstance = (booking: Booking, source: string) => {
+  if (typeof window === 'undefined') return;
+  const signature = getNegotiationInstanceSignature(booking);
+  if (!signature) return;
+
+  const key = `mairide_negotiation_auto_reload:${getBookingThreadKey(booking)}`;
+  if (safeStorageGet('session', key) === signature) return;
+  safeStorageSet('session', key, signature);
+
+  recordInternalDebugEvent('negotiation_instance_auto_reload', {
+    bookingId: booking.id,
+    rideId: booking.rideId,
+    source,
+    signature,
+  });
+
+  window.setTimeout(() => window.location.reload(), 100);
+};
+
+const scheduleReloadIfNegotiationChanged = (previous: Booking | undefined, next: Booking, source: string) => {
+  if (!previous) return;
+  const previousSignature = getNegotiationInstanceSignature(previous);
+  const nextSignature = getNegotiationInstanceSignature(next);
+  if (nextSignature && previousSignature !== nextSignature) {
+    scheduleReloadForNegotiationInstance(next, source);
+  }
+};
+
 const areBookingRenderListsEqual = (current: Booking[], next: Booking[]) => {
   if (current.length !== next.length) return false;
   return current.every((booking, index) => getBookingRenderSignature(booking) === getBookingRenderSignature(next[index]));
@@ -11266,6 +11313,13 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
       setDashboardBookings((prev) => {
         const requestId = String((normalized as any).linkedTravelerRequestId || (normalized as any).rideRequestId || '');
+        const previous = prev.find(
+          (candidate) =>
+            candidate.id === normalized.id ||
+            getBookingThreadKey(candidate) === getBookingThreadKey(normalized) ||
+            (requestId && String((candidate as any).linkedTravelerRequestId || '') === requestId)
+        );
+        scheduleReloadIfNegotiationChanged(previous, normalized, `traveler-realtime-${eventType}`);
         const next =
           eventType === 'DELETE'
             ? prev.filter((candidate) => candidate.id !== normalized.id)
@@ -11390,7 +11444,17 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         loadTravelerDashboardBookings(),
         loadTravelerDashboardRequests(),
       ]);
-      setDashboardBookings((prev) => (areBookingRenderListsEqual(prev, normalizedBookings) ? prev : normalizedBookings));
+      setDashboardBookings((prev) => {
+        normalizedBookings.forEach((booking) => {
+          const previous = prev.find(
+            (candidate) =>
+              candidate.id === booking.id ||
+              getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+          );
+          scheduleReloadIfNegotiationChanged(previous, booking, `traveler-refresh-${reason}`);
+        });
+        return areBookingRenderListsEqual(prev, normalizedBookings) ? prev : normalizedBookings;
+      });
       setTravelerRequests(normalizedRequests);
       lastTravelerNegotiationSyncRef.current = Date.now();
       recordInternalDebugEvent('traveler_negotiation_state_refreshed', {
@@ -13968,10 +14032,22 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       };
 
       setDriverBookings((prev) => {
+        const previous = prev.find(
+          (candidate) =>
+            candidate.id === normalized.id ||
+            getBookingThreadKey(candidate) === getBookingThreadKey(normalized)
+        );
+        scheduleReloadIfNegotiationChanged(previous, normalized, `driver-realtime-bookings-${eventType}`);
         const next = applyList(prev);
         return areBookingRenderListsEqual(prev, next) ? prev : next;
       });
       setRequests((prev) => {
+        const previous = prev.find(
+          (candidate) =>
+            candidate.id === normalized.id ||
+            getBookingThreadKey(candidate) === getBookingThreadKey(normalized)
+        );
+        scheduleReloadIfNegotiationChanged(previous, normalized, `driver-realtime-requests-${eventType}`);
         const next = applyList(prev).filter(
           (candidate) =>
             !retiredRideIds.includes(candidate.rideId) &&
@@ -14021,7 +14097,17 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const refreshDriverBookingState = useCallback(async (reason = 'manual') => {
     const normalized = await loadDriverBookingState();
-    setDriverBookings((prev) => (areBookingRenderListsEqual(prev, normalized) ? prev : normalized));
+    setDriverBookings((prev) => {
+      normalized.forEach((booking) => {
+        const previous = prev.find(
+          (candidate) =>
+            candidate.id === booking.id ||
+            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+        );
+        scheduleReloadIfNegotiationChanged(previous, booking, `driver-refresh-bookings-${reason}`);
+      });
+      return areBookingRenderListsEqual(prev, normalized) ? prev : normalized;
+    });
     const nextRequests = normalized.filter(
         (booking) =>
           !retiredRideIds.includes(booking.rideId) &&
@@ -14029,7 +14115,17 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           booking.negotiationStatus !== 'rejected' &&
           ['pending', 'confirmed', 'negotiating'].includes(booking.status)
     );
-    setRequests((prev) => (areBookingRenderListsEqual(prev, nextRequests) ? prev : nextRequests));
+    setRequests((prev) => {
+      nextRequests.forEach((booking) => {
+        const previous = prev.find(
+          (candidate) =>
+            candidate.id === booking.id ||
+            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
+        );
+        scheduleReloadIfNegotiationChanged(previous, booking, `driver-refresh-requests-${reason}`);
+      });
+      return areBookingRenderListsEqual(prev, nextRequests) ? prev : nextRequests;
+    });
     recordInternalDebugEvent('driver_booking_state_refreshed', {
       userId: profile.uid,
       reason,
