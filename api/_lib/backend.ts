@@ -1319,6 +1319,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
         const normalizedRideDestination = normalizeText(destination);
         const listedFare = Number(requestData.fare);
         const requestedFare = Number.isFinite(listedFare) && listedFare > 0 ? listedFare : price;
+        const driverListedFare = Number.isFinite(price) && price > 0 ? price : requestedFare;
         const bookingThreadData = {
           ...requestData,
           rideId,
@@ -1339,8 +1340,13 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
             normalizedRequestedOrigin !== normalizedRideOrigin ||
             normalizedRequestedDestination !== normalizedRideDestination,
           listedFare: requestedFare,
+          travelerListedFare: requestedFare,
+          requestedFare,
+          driverListedFare,
           fare: requestedFare,
-          negotiatedFare: price,
+          negotiatedFare: driverListedFare,
+          driverBid: driverListedFare,
+          consumerBid: requestedFare,
           negotiationStatus: "pending",
           negotiationActor: "driver",
           driverCounterPending: true,
@@ -1520,8 +1526,16 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
         ridePayload.price ||
         0
     );
+    const driverListedFare = Number(
+      threadData.driverListedFare ||
+        requestData.driverListedFare ||
+        ridePayload.price ||
+        threadData.negotiatedFare ||
+        listedFare ||
+        0
+    );
     const negotiatedFare = Number(
-      threadData.negotiatedFare || ridePayload.price || listedFare || 0
+      threadData.negotiatedFare || driverListedFare || listedFare || 0
     );
 
     const nextData = {
@@ -1548,7 +1562,12 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
         threadData.listedDestination || ridePayload.destination || requestData.destination || "",
       fare: listedFare,
       listedFare,
+      travelerListedFare: Number(threadData.travelerListedFare || requestData.travelerListedFare || listedFare),
+      requestedFare: Number(threadData.requestedFare || requestData.requestedFare || listedFare),
+      driverListedFare,
       negotiatedFare,
+      driverBid: negotiatedFare,
+      consumerBid: Number(threadData.consumerBid || requestData.consumerBid || listedFare),
       totalPrice: listedFare,
       negotiationStatus: "pending",
       negotiationActor: "driver",
@@ -2676,7 +2695,10 @@ export async function handleUserCounterBooking(req: ReqLike, res: ResLike) {
         const rowData = row.data || {};
         const nextData = {
           ...rowData,
+          driverListedFare: Number(rowData.driverListedFare || rowData.ridePrice || rowData.price || rowData.negotiatedFare || fare),
+          travelerListedFare: Number(rowData.travelerListedFare || rowData.requestedFare || rowData.listedFare || rowData.fare || 0),
           negotiatedFare: Number(fare),
+          driverBid: Number(fare),
           negotiationStatus: "pending",
           negotiationActor: "driver",
           driverCounterPending: true,
@@ -2777,7 +2799,10 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
         const rowData = row.data || {};
         const nextData = {
           ...rowData,
+          driverListedFare: Number(rowData.driverListedFare || rowData.ridePrice || rowData.price || rowData.driverBid || rowData.negotiatedFare || 0),
+          travelerListedFare: Number(rowData.travelerListedFare || rowData.requestedFare || rowData.listedFare || rowData.fare || fare),
           negotiatedFare: Number(fare),
+          consumerBid: Number(fare),
           negotiationStatus: "pending",
           negotiationActor: "consumer",
           driverCounterPending: false,
