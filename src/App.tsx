@@ -11125,8 +11125,10 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     [dashboardBookings, travelerRequests]
   );
   const hasTravelerActiveRequestScreen = useMemo(
-    () => activeTab === 'search' && travelerRequests.some(isUnifiedRideActive),
-    [activeTab, travelerRequests]
+    () =>
+      activeTab === 'search' &&
+      (travelerRequests.some(isUnifiedRideActive) || dashboardBookings.some(isBookingTrackable)),
+    [activeTab, dashboardBookings, travelerRequests]
   );
 
   useEffect(() => {
@@ -11388,7 +11390,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         loadTravelerDashboardBookings(),
         loadTravelerDashboardRequests(),
       ]);
-      setDashboardBookings(normalizedBookings);
+      setDashboardBookings((prev) => (areBookingRenderListsEqual(prev, normalizedBookings) ? prev : normalizedBookings));
       setTravelerRequests(normalizedRequests);
       lastTravelerNegotiationSyncRef.current = Date.now();
       recordInternalDebugEvent('traveler_negotiation_state_refreshed', {
@@ -11625,7 +11627,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     };
 
     const initialSyncId = window.setTimeout(syncIfRealtimeWentQuiet, 500);
-    const intervalId = window.setInterval(syncIfRealtimeWentQuiet, 3000);
+    const intervalId = window.setInterval(syncIfRealtimeWentQuiet, 1500);
     return () => {
       window.clearTimeout(initialSyncId);
       window.clearInterval(intervalId);
@@ -13833,6 +13835,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const lastDriverLocationWriteRef = useRef(0);
   const driverRideFeedRef = useRef<Ride[]>([]);
   const driverTripSessionSyncKeysRef = useRef<Record<string, string>>({});
+  const driverNegotiationFallbackInFlightRef = useRef(false);
   const driverFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -14064,6 +14067,32 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       void supabase.removeChannel(channel);
     };
   }, [applyDriverBookingState, profile.uid, refreshDriverBookingState]);
+
+  useEffect(() => {
+    if (isLocalDevFirestoreMode() || !requests.some(isBookingTrackable)) return;
+
+    const syncNegotiations = async () => {
+      if (driverNegotiationFallbackInFlightRef.current) return;
+      driverNegotiationFallbackInFlightRef.current = true;
+      try {
+        await refreshDriverBookingState('active-negotiation-card-sync');
+      } catch (error) {
+        recordInternalDebugEvent('driver_negotiation_card_sync_failed', {
+          userId: profile.uid,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        driverNegotiationFallbackInFlightRef.current = false;
+      }
+    };
+
+    const initialSyncId = window.setTimeout(syncNegotiations, 500);
+    const intervalId = window.setInterval(syncNegotiations, 1500);
+    return () => {
+      window.clearTimeout(initialSyncId);
+      window.clearInterval(intervalId);
+    };
+  }, [profile.uid, refreshDriverBookingState, requests]);
 
   useEffect(() => {
     if (isLocalDevFirestoreMode() || driverActiveRideIds.length === 0) return;
