@@ -3215,8 +3215,51 @@ const getListedFare = (booking: Booking) => {
   return Number(getBookingNegotiationField<number | string>(booking, 'fare'));
 };
 
+const firstPositiveFare = (booking: Booking, fields: string[]) => {
+  for (const field of fields) {
+    const value = Number(getBookingNegotiationField<number | string>(booking, field));
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
+const getViewerListedFare = (booking: Booking, viewer: 'consumer' | 'driver') => {
+  if (viewer === 'driver') {
+    return (
+      firstPositiveFare(booking, [
+        'travelerListedFare',
+        'riderListedFare',
+        'requestedFare',
+        'riderOffer',
+        'consumerBid',
+        'fare',
+        'listedFare',
+      ]) ?? getListedFare(booking)
+    );
+  }
+
+  const driverCounterFare =
+    getPendingNegotiationActor(booking) === 'driver'
+      ? firstPositiveFare(booking, ['driverBid', 'negotiatedFare'])
+      : undefined;
+
+  return (
+    firstPositiveFare(booking, ['driverListedFare', 'ridePrice', 'price', 'driverBid']) ??
+    driverCounterFare ??
+    getListedFare(booking)
+  );
+};
+
 const shouldShowNegotiatedFareLine = (booking: Booking) => {
   const listedFare = getListedFare(booking);
+  const displayFare = getNegotiationDisplayFare(booking);
+  return Math.abs(displayFare - listedFare) > 0.001;
+};
+
+const shouldShowViewerNegotiatedFareLine = (booking: Booking, viewer: 'consumer' | 'driver') => {
+  const listedFare = getViewerListedFare(booking, viewer);
   const displayFare = getNegotiationDisplayFare(booking);
   return Math.abs(displayFare - listedFare) > 0.001;
 };
@@ -8138,8 +8181,8 @@ const TravelerDashboardSummary = ({
           const hasDriverCounterOffer = pendingActor === 'driver';
           const hasTravelerCounterOffer = pendingActor === 'consumer';
           const displayFare = getNegotiationDisplayFare(booking);
-          const listedFare = getListedFare(booking);
-          const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
+          const listedFare = getViewerListedFare(booking, 'consumer');
+          const showNegotiatedFareLine = shouldShowViewerNegotiatedFareLine(booking, 'consumer');
           const statusLabel = getBookingStateLabel(booking);
           const travelerFeeBreakdown = getBookingPaymentBreakdown(booking as Booking, 'consumer', config);
           const tripSession = tripSessions[booking.id];
@@ -8179,7 +8222,7 @@ const TravelerDashboardSummary = ({
             </div>
             <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-mairide-secondary">Listed fare</span>
+                <span className="text-sm text-mairide-secondary">Driver listed fare</span>
                 <span className="text-base font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
               </div>
               <div className="mt-2 flex items-center justify-between">
@@ -8398,9 +8441,9 @@ const TravelerCounterOffersSummary = ({
         {counterOffers.map((booking) => (
           <div key={booking.id} className="bg-white border border-mairide-secondary rounded-[28px] p-6 shadow-sm">
             {(() => {
-              const listedFare = getListedFare(booking);
+              const listedFare = getViewerListedFare(booking, 'consumer');
               const counterFare = getNegotiationDisplayFare(booking);
-              const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
+              const showNegotiatedFareLine = shouldShowViewerNegotiatedFareLine(booking, 'consumer');
               return (
                 <>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -8425,7 +8468,7 @@ const TravelerCounterOffersSummary = ({
             <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-mairide-secondary">
-                  {showNegotiatedFareLine ? 'Listed fare' : 'Ride fare'}
+                  {showNegotiatedFareLine ? 'Driver listed fare' : 'Ride fare'}
                 </span>
                 <span className="text-base font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
               </div>
@@ -8556,7 +8599,7 @@ const DriverDashboardSummary = ({
           const travelerCounterPending = pendingActor === 'consumer';
           const driverCounterPending = pendingActor === 'driver';
           const displayFare = getNegotiationDisplayFare(request);
-          const listedFare = getListedFare(request);
+          const listedFare = getViewerListedFare(request, 'driver');
           const driverFeeBreakdown = getBookingPaymentBreakdown(request as Booking, 'driver', config);
           const tripSession = tripSessions[request.id];
           const requestedOrigin = request.requestedOrigin || request.origin;
@@ -8582,7 +8625,7 @@ const DriverDashboardSummary = ({
             </div>
             <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-mairide-secondary">Listed fare</span>
+                <span className="text-sm text-mairide-secondary">Traveler listed fare</span>
                 <span className="text-base font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
               </div>
               <div className="mt-2 flex items-center justify-between">
@@ -9507,8 +9550,8 @@ const finalizeTravelerRazorpayPayment = async (
             const hasDriverCounterOffer = pendingActor === 'driver';
             const hasTravelerCounterOffer = pendingActor === 'consumer';
             const displayFare = getNegotiationDisplayFare(booking);
-            const listedFare = getListedFare(booking);
-            const showNegotiatedFareLine = shouldShowNegotiatedFareLine(booking);
+            const listedFare = getViewerListedFare(booking, 'consumer');
+            const showNegotiatedFareLine = shouldShowViewerNegotiatedFareLine(booking, 'consumer');
             const statusLabel = getBookingStateLabel(booking);
             const consumerFeeBreakdown = getBookingPaymentBreakdown({ ...(booking as Booking), fare: displayFare }, 'consumer', config);
 
@@ -9549,7 +9592,7 @@ const finalizeTravelerRazorpayPayment = async (
 
               <div className="bg-mairide-bg p-6 rounded-2xl mb-6">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm text-mairide-secondary">Listed fare</span>
+                  <span className="text-sm text-mairide-secondary">Driver listed fare</span>
                   <span className="font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
@@ -10682,8 +10725,8 @@ const finalizeDriverRazorpayPayment = async (
                 const driverCounterPending = pendingActor === 'driver';
                 const travelerCounterPending = pendingActor === 'consumer';
                 const displayFare = getNegotiationDisplayFare(request);
-                const listedFare = getListedFare(request);
-                const showNegotiatedFareLine = shouldShowNegotiatedFareLine(request);
+                const listedFare = getViewerListedFare(request, 'driver');
+                const showNegotiatedFareLine = shouldShowViewerNegotiatedFareLine(request, 'driver');
                 const requestedOrigin = request.requestedOrigin || request.origin;
                 const requestedDestination = request.requestedDestination || request.destination;
                 const showsDetour =
@@ -10720,7 +10763,7 @@ const finalizeDriverRazorpayPayment = async (
               
               <div className="bg-mairide-bg p-6 rounded-2xl mb-6">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm text-mairide-secondary">Listed fare</span>
+                  <span className="text-sm text-mairide-secondary">Traveler listed fare</span>
                   <span className="font-bold text-mairide-primary">{formatCurrency(listedFare)}</span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
@@ -13699,7 +13742,6 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const hasHydratedTravelerCountersRef = useRef(false);
   const lastDriverLocationWriteRef = useRef(0);
   const driverRideFeedRef = useRef<Ride[]>([]);
-  const driverBookingFallbackInFlightRef = useRef(false);
   const driverFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -13899,30 +13941,6 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       void supabase.removeChannel(channel);
     };
   }, [applyDriverBookingState, profile.uid, refreshDriverBookingState]);
-
-  useEffect(() => {
-    if (isLocalDevFirestoreMode() || !requests.some(isBookingTrackable)) return;
-    const syncDriverBookings = async () => {
-      if (driverBookingFallbackInFlightRef.current) return;
-      driverBookingFallbackInFlightRef.current = true;
-      try {
-        await refreshDriverBookingState('active-negotiation-fallback');
-      } catch (error) {
-        recordInternalDebugEvent('driver_booking_fallback_sync_failed', {
-          userId: profile.uid,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      } finally {
-        driverBookingFallbackInFlightRef.current = false;
-      }
-    };
-    const initialSyncId = window.setTimeout(syncDriverBookings, 500);
-    const intervalId = window.setInterval(syncDriverBookings, 3000);
-    return () => {
-      window.clearTimeout(initialSyncId);
-      window.clearInterval(intervalId);
-    };
-  }, [profile.uid, refreshDriverBookingState, requests]);
 
   useEffect(() => {
     if (isLocalDevFirestoreMode() || driverActiveRideIds.length === 0) return;
@@ -15946,7 +15964,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
           <AnimatePresence>
             {driverNegotiationPreview && (() => {
               const pendingActor = getPendingNegotiationActor(driverNegotiationPreview);
-              const listedFare = getListedFare(driverNegotiationPreview);
+              const listedFare = getViewerListedFare(driverNegotiationPreview, 'driver');
               const currentFare = getNegotiationDisplayFare(driverNegotiationPreview);
               const counterValue = counterFares[driverNegotiationPreview.id] || '';
               const isDriverCounterPending = pendingActor === 'driver';
