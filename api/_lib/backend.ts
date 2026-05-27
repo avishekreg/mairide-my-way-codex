@@ -2533,6 +2533,8 @@ export async function handleUserRespondBooking(req: ReqLike, res: ResLike) {
       }
     }
 
+    let responseRow: any = null;
+
     if (action === "rejected") {
       await Promise.all(
         targetRows.map(async (row: any) => {
@@ -2549,20 +2551,28 @@ export async function handleUserRespondBooking(req: ReqLike, res: ResLike) {
             updatedAt,
           };
 
-          const { error } = await supabaseAdmin
+          const { data: updatedRow, error } = await supabaseAdmin
             .from("bookings")
             .update({
               status: "rejected",
               updated_at: updatedAt,
               data: nextData,
             })
-            .eq("id", row.id);
+            .eq("id", row.id)
+            .select("*")
+            .single();
 
           if (error) throw error;
+          if (updatedRow && (!responseRow || updatedRow.id === bookingRow.id)) {
+            responseRow = updatedRow;
+          }
         })
       );
 
-      return res.status(200).json({ message: "Traveler offer rejected." });
+      return res.status(200).json({
+        message: "Traveler offer rejected.",
+        booking: responseRow ? mapBookingRow(responseRow) : mapBookingRow(bookingRow),
+      });
     }
 
     const acceptedFare = Number(
@@ -2574,8 +2584,6 @@ export async function handleUserRespondBooking(req: ReqLike, res: ResLike) {
     if (!Number.isFinite(acceptedFare) || acceptedFare <= 0) {
       return res.status(400).json({ error: "No valid fare to confirm" });
     }
-
-    let responseRow: any = null;
 
     await Promise.all(
       targetRows.map(async (row: any) => {
@@ -2592,16 +2600,21 @@ export async function handleUserRespondBooking(req: ReqLike, res: ResLike) {
           updatedAt,
         };
 
-        const { error } = await supabaseAdmin
+        const { data: updatedRow, error } = await supabaseAdmin
           .from("bookings")
           .update({
             status: "confirmed",
             updated_at: updatedAt,
             data: nextData,
           })
-          .eq("id", row.id);
+          .eq("id", row.id)
+          .select("*")
+          .single();
 
         if (error) throw error;
+        if (updatedRow && (!responseRow || updatedRow.id === bookingRow.id)) {
+          responseRow = updatedRow;
+        }
       })
     );
 
@@ -2620,7 +2633,10 @@ export async function handleUserRespondBooking(req: ReqLike, res: ResLike) {
 
     if (rideError) throw rideError;
 
-    return res.status(200).json({ message: "Booking confirmed." });
+    return res.status(200).json({
+      message: "Booking confirmed.",
+      booking: responseRow ? mapBookingRow(responseRow) : mapBookingRow(bookingRow),
+    });
   } catch (error: any) {
     console.error("Error responding to driver booking:", error);
     return res.status(error?.status || 500).json({
@@ -2903,6 +2919,8 @@ export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLik
       }
     }
 
+    let responseRow: any = null;
+
     if (action === "accepted") {
       const negotiatedFare = Number(seedData.negotiatedFare ?? bookingRow.data?.negotiatedFare);
       if (!Number.isFinite(negotiatedFare) || negotiatedFare <= 0) {
@@ -2922,16 +2940,21 @@ export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLik
             updatedAt,
           };
 
-          const { error } = await supabaseAdmin
+          const { data: updatedRow, error } = await supabaseAdmin
             .from("bookings")
             .update({
               status: "confirmed",
               updated_at: updatedAt,
               data: nextData,
             })
-            .eq("id", row.id);
+            .eq("id", row.id)
+            .select("*")
+            .single();
 
           if (error) throw error;
+          if (updatedRow && (!responseRow || updatedRow.id === bookingRow.id)) {
+            responseRow = updatedRow;
+          }
         })
       );
 
@@ -2953,7 +2976,10 @@ export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLik
         if (rideError) throw rideError;
       }
 
-      return res.status(200).json({ message: "Counter offer accepted." });
+      return res.status(200).json({
+        message: "Counter offer accepted.",
+        booking: responseRow ? mapBookingRow(responseRow) : mapBookingRow(bookingRow),
+      });
     }
 
     await Promise.all(
@@ -2968,20 +2994,28 @@ export async function handleUserTravelerRespondBooking(req: ReqLike, res: ResLik
           updatedAt,
         };
 
-        const { error } = await supabaseAdmin
+        const { data: updatedRow, error } = await supabaseAdmin
           .from("bookings")
           .update({
             status: "rejected",
             updated_at: updatedAt,
             data: nextData,
           })
-          .eq("id", row.id);
+          .eq("id", row.id)
+          .select("*")
+          .single();
 
         if (error) throw error;
+        if (updatedRow && (!responseRow || updatedRow.id === bookingRow.id)) {
+          responseRow = updatedRow;
+        }
       })
     );
 
-    return res.status(200).json({ message: "Counter offer rejected." });
+    return res.status(200).json({
+      message: "Counter offer rejected.",
+      booking: responseRow ? mapBookingRow(responseRow) : mapBookingRow(bookingRow),
+    });
   } catch (error: any) {
     console.error("Error responding to traveler booking:", error);
     return res.status(error?.status || 500).json({

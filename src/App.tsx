@@ -3328,53 +3328,6 @@ const getBookingRenderSignature = (booking: Booking) =>
     (booking as any).rideRetired,
   ].join('|');
 
-const getNegotiationInstanceSignature = (booking: Booking) => {
-  const actor = String(getBookingNegotiationField<string>(booking, 'negotiationActor') || '');
-  const status = String(getBookingNegotiationField<string>(booking, 'negotiationStatus') || '');
-  const driverBid = getFirstBookingNegotiationField<number | string>(booking, ['driverBid', 'driver_bid']);
-  const consumerBid = getFirstBookingNegotiationField<number | string>(booking, ['consumerBid', 'consumer_bid', 'riderOffer', 'rider_offer']);
-  const negotiatedFare = getBookingNegotiationField<number | string>(booking, 'negotiatedFare');
-
-  if (status !== 'pending' || !['driver', 'consumer'].includes(actor)) return '';
-
-  return [
-    getBookingThreadKey(booking),
-    status,
-    actor,
-    negotiatedFare ?? '',
-    driverBid ?? '',
-    consumerBid ?? '',
-  ].join('|');
-};
-
-const scheduleReloadForNegotiationInstance = (booking: Booking, source: string) => {
-  if (typeof window === 'undefined') return;
-  const signature = getNegotiationInstanceSignature(booking);
-  if (!signature) return;
-
-  const key = `mairide_negotiation_auto_reload:${getBookingThreadKey(booking)}`;
-  if (safeStorageGet('session', key) === signature) return;
-  safeStorageSet('session', key, signature);
-
-  recordInternalDebugEvent('negotiation_instance_auto_reload', {
-    bookingId: booking.id,
-    rideId: booking.rideId,
-    source,
-    signature,
-  });
-
-  window.setTimeout(() => window.location.reload(), 100);
-};
-
-const scheduleReloadIfNegotiationChanged = (previous: Booking | undefined, next: Booking, source: string) => {
-  if (!previous) return;
-  const previousSignature = getNegotiationInstanceSignature(previous);
-  const nextSignature = getNegotiationInstanceSignature(next);
-  if (nextSignature && previousSignature !== nextSignature) {
-    scheduleReloadForNegotiationInstance(next, source);
-  }
-};
-
 const areBookingRenderListsEqual = (current: Booking[], next: Booking[]) => {
   if (current.length !== next.length) return false;
   return current.every((booking, index) => getBookingRenderSignature(booking) === getBookingRenderSignature(next[index]));
@@ -9405,7 +9358,7 @@ const finalizeTravelerRazorpayPayment = async (
       }
       const token = await getAccessToken();
 
-      await axios.post(
+      const { data } = await axios.post(
         '/api/user?action=traveler-respond-booking',
         {
           bookingId,
@@ -9435,28 +9388,26 @@ const finalizeTravelerRazorpayPayment = async (
       } catch (syncError) {
         console.warn('Negotiation sync (traveler accept) failed after API success.', syncError);
       }
-      setBookings((prev) =>
-        prev.map((candidate) =>
-          getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-            ? {
-	                ...candidate,
-	                status: action === 'accepted' ? 'confirmed' : 'rejected',
-	                ...(action === 'accepted' && acceptedFare
-                    ? {
-                        fare: acceptedFare,
-                        serviceFee: acceptedFareBreakdown?.baseFee ?? candidate.serviceFee,
-                        gstAmount: acceptedFareBreakdown?.gstAmount ?? candidate.gstAmount,
-                        totalPrice: acceptedFare + (acceptedFareBreakdown?.totalFee ?? 0),
-                      }
-                    : {}),
-	                negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
-                negotiationActor: 'driver',
-                driverCounterPending: false,
-                updatedAt,
-              }
-            : candidate
-        )
-      );
+      const updatedThread = data?.booking
+        ? normalizeNegotiationBooking(data.booking as Booking)
+        : normalizeNegotiationBooking({
+            ...booking,
+            status: action === 'accepted' ? 'confirmed' : 'rejected',
+            ...(action === 'accepted' && acceptedFare
+              ? {
+                  fare: acceptedFare,
+                  serviceFee: acceptedFareBreakdown?.baseFee ?? booking.serviceFee,
+                  gstAmount: acceptedFareBreakdown?.gstAmount ?? booking.gstAmount,
+                  totalPrice: acceptedFare + (acceptedFareBreakdown?.totalFee ?? 0),
+                }
+              : {}),
+            negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+            negotiationActor: 'driver',
+            driverCounterPending: false,
+            rideRetired: action === 'rejected',
+            updatedAt,
+          } as Booking);
+      setBookings((prev) => mergeNegotiationThread(prev, updatedThread));
 
       showAppDialog(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.', 'success');
       return;
@@ -10521,21 +10472,22 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
         }
       );
       const updatedAt = new Date().toISOString();
-      setRequests((prev) =>
-        prev.map((booking) =>
-          getBookingThreadKey(booking) === getBookingThreadKey(request)
-            ? {
-                ...booking,
-                negotiatedFare: fare,
-                negotiationStatus: 'pending',
-                negotiationActor: 'driver',
-                driverCounterPending: true,
-                status: 'negotiating',
-                updatedAt,
-              }
-            : booking
-        )
-      );
+      const updatedThread = data?.booking
+        ? normalizeNegotiationBooking(data.booking as Booking)
+        : normalizeNegotiationBooking({
+            ...request,
+            driverListedFare: (request as any).driverListedFare || getDriverListedFare(request),
+            travelerListedFare: (request as any).travelerListedFare || getTravelerListedFare(request),
+            negotiatedFare: fare,
+            driverBid: fare,
+            negotiationStatus: 'pending',
+            negotiationActor: 'driver',
+            driverCounterPending: true,
+            status: 'negotiating',
+            rideRetired: false,
+            updatedAt,
+          } as Booking);
+      setRequests((prev) => mergeNegotiationThread(prev, updatedThread));
       showAppDialog("Counter offer sent to traveler!", 'success');
     } catch (error) {
       try {
@@ -10624,7 +10576,7 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
         throw new Error('Booking request not found.');
       }
       const token = await getAccessToken();
-      await axios.post(
+      const { data } = await axios.post(
         '/api/user?action=respond-booking',
         {
           bookingId: bookingData.id,
@@ -10646,31 +10598,30 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
           : fare;
       const acceptedFareBreakdown =
         status === 'confirmed' ? calculateServiceFee(acceptedFare, config || undefined) : null;
+      const updatedThread = data?.booking
+        ? normalizeNegotiationBooking(data.booking as Booking)
+        : normalizeNegotiationBooking({
+            ...bookingData,
+            status,
+            fare: acceptedFare,
+            ...(status === 'confirmed' && acceptedFareBreakdown
+              ? {
+                  serviceFee: acceptedFareBreakdown.baseFee,
+                  gstAmount: acceptedFareBreakdown.gstAmount,
+                  totalPrice: acceptedFare + acceptedFareBreakdown.totalFee,
+                }
+              : {}),
+            driverPhone: profile.phoneNumber || '',
+            driverCounterPending: false,
+            negotiationStatus: status === 'confirmed' ? 'accepted' : 'rejected',
+            rideRetired: status === 'rejected',
+            updatedAt,
+          } as Booking);
 
       setRequests((prev) =>
         status === 'rejected'
-          ? prev.filter((booking) => getBookingThreadKey(booking) !== getBookingThreadKey(bookingData))
-          : prev.map((booking) =>
-              getBookingThreadKey(booking) === getBookingThreadKey(bookingData)
-                ? {
-	                    ...booking,
-	                    status,
-	                    fare: acceptedFare,
-	                    ...(status === 'confirmed' && acceptedFareBreakdown
-                        ? {
-                            serviceFee: acceptedFareBreakdown.baseFee,
-                            gstAmount: acceptedFareBreakdown.gstAmount,
-                            totalPrice: acceptedFare + acceptedFareBreakdown.totalFee,
-                          }
-                        : {}),
-	                    driverPhone: profile.phoneNumber || '',
-                    driverCounterPending: false,
-                    negotiationStatus:
-                      booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
-                    updatedAt,
-                  }
-                : booking
-            )
+          ? prev.filter((booking) => getBookingThreadKey(booking) !== getBookingThreadKey(updatedThread))
+          : mergeNegotiationThread(prev, updatedThread)
       );
       showAppDialog(status === 'confirmed' ? 'Booking confirmed.' : 'Traveler offer rejected.', 'success');
     } catch (error) {
@@ -11313,13 +11264,6 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
       setDashboardBookings((prev) => {
         const requestId = String((normalized as any).linkedTravelerRequestId || (normalized as any).rideRequestId || '');
-        const previous = prev.find(
-          (candidate) =>
-            candidate.id === normalized.id ||
-            getBookingThreadKey(candidate) === getBookingThreadKey(normalized) ||
-            (requestId && String((candidate as any).linkedTravelerRequestId || '') === requestId)
-        );
-        scheduleReloadIfNegotiationChanged(previous, normalized, `traveler-realtime-${eventType}`);
         const next =
           eventType === 'DELETE'
             ? prev.filter((candidate) => candidate.id !== normalized.id)
@@ -11445,14 +11389,6 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         loadTravelerDashboardRequests(),
       ]);
       setDashboardBookings((prev) => {
-        normalizedBookings.forEach((booking) => {
-          const previous = prev.find(
-            (candidate) =>
-              candidate.id === booking.id ||
-              getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-          );
-          scheduleReloadIfNegotiationChanged(previous, booking, `traveler-refresh-${reason}`);
-        });
         return areBookingRenderListsEqual(prev, normalizedBookings) ? prev : normalizedBookings;
       });
       setTravelerRequests(normalizedRequests);
@@ -12604,7 +12540,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const handleTravelerNegotiation = async (booking: Booking, action: 'accepted' | 'rejected') => {
     try {
       const token = await getAccessToken();
-      await axios.post(
+      const { data } = await axios.post(
         '/api/user?action=traveler-respond-booking',
         {
           bookingId: booking.id,
@@ -12634,28 +12570,26 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       } catch (syncError) {
         console.warn('Negotiation sync (traveler dashboard) failed after API success.', syncError);
       }
-      setDashboardBookings((prev) =>
-        prev.map((candidate) =>
-          getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-            ? {
-	                ...candidate,
-	                status: action === 'accepted' ? 'confirmed' : 'rejected',
-	                ...(action === 'accepted' && acceptedFare
-                    ? {
-                        fare: acceptedFare,
-                        serviceFee: acceptedFareBreakdown?.baseFee ?? candidate.serviceFee,
-                        gstAmount: acceptedFareBreakdown?.gstAmount ?? candidate.gstAmount,
-                        totalPrice: acceptedFare + (acceptedFareBreakdown?.totalFee ?? 0),
-                      }
-                    : {}),
-	                negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
-                negotiationActor: 'driver',
-                driverCounterPending: false,
-                updatedAt,
-              }
-            : candidate
-        )
-      );
+      const updatedThread = data?.booking
+        ? normalizeNegotiationBooking(data.booking as Booking)
+        : normalizeNegotiationBooking({
+            ...booking,
+            status: action === 'accepted' ? 'confirmed' : 'rejected',
+            ...(action === 'accepted' && acceptedFare
+              ? {
+                  fare: acceptedFare,
+                  serviceFee: acceptedFareBreakdown?.baseFee ?? booking.serviceFee,
+                  gstAmount: acceptedFareBreakdown?.gstAmount ?? booking.gstAmount,
+                  totalPrice: acceptedFare + (acceptedFareBreakdown?.totalFee ?? 0),
+                }
+              : {}),
+            negotiationStatus: action === 'accepted' ? 'accepted' : 'rejected',
+            negotiationActor: 'driver',
+            driverCounterPending: false,
+            rideRetired: action === 'rejected',
+            updatedAt,
+          } as Booking);
+      setDashboardBookings((prev) => mergeNegotiationThread(prev, updatedThread));
       showAppDialog(action === 'accepted' ? 'Counter offer accepted.' : 'Counter offer rejected.', 'success');
     } catch (error: any) {
       try {
@@ -14032,22 +13966,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       };
 
       setDriverBookings((prev) => {
-        const previous = prev.find(
-          (candidate) =>
-            candidate.id === normalized.id ||
-            getBookingThreadKey(candidate) === getBookingThreadKey(normalized)
-        );
-        scheduleReloadIfNegotiationChanged(previous, normalized, `driver-realtime-bookings-${eventType}`);
         const next = applyList(prev);
         return areBookingRenderListsEqual(prev, next) ? prev : next;
       });
       setRequests((prev) => {
-        const previous = prev.find(
-          (candidate) =>
-            candidate.id === normalized.id ||
-            getBookingThreadKey(candidate) === getBookingThreadKey(normalized)
-        );
-        scheduleReloadIfNegotiationChanged(previous, normalized, `driver-realtime-requests-${eventType}`);
         const next = applyList(prev).filter(
           (candidate) =>
             !retiredRideIds.includes(candidate.rideId) &&
@@ -14098,14 +14020,6 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const refreshDriverBookingState = useCallback(async (reason = 'manual') => {
     const normalized = await loadDriverBookingState();
     setDriverBookings((prev) => {
-      normalized.forEach((booking) => {
-        const previous = prev.find(
-          (candidate) =>
-            candidate.id === booking.id ||
-            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-        );
-        scheduleReloadIfNegotiationChanged(previous, booking, `driver-refresh-bookings-${reason}`);
-      });
       return areBookingRenderListsEqual(prev, normalized) ? prev : normalized;
     });
     const nextRequests = normalized.filter(
@@ -14116,14 +14030,6 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           ['pending', 'confirmed', 'negotiating'].includes(booking.status)
     );
     setRequests((prev) => {
-      nextRequests.forEach((booking) => {
-        const previous = prev.find(
-          (candidate) =>
-            candidate.id === booking.id ||
-            getBookingThreadKey(candidate) === getBookingThreadKey(booking)
-        );
-        scheduleReloadIfNegotiationChanged(previous, booking, `driver-refresh-requests-${reason}`);
-      });
       return areBookingRenderListsEqual(prev, nextRequests) ? prev : nextRequests;
     });
     recordInternalDebugEvent('driver_booking_state_refreshed', {
@@ -15314,7 +15220,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const handleDriverAction = async (request: Booking, status: 'confirmed' | 'rejected') => {
     try {
       const token = await getAccessToken();
-      await axios.post(
+      const { data } = await axios.post(
         '/api/user?action=respond-booking',
         {
           bookingId: request.id,
@@ -15346,31 +15252,31 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         console.warn('Negotiation sync (driver response) failed after API success.', syncError);
       }
 
+      const updatedThread = data?.booking
+        ? normalizeNegotiationBooking(data.booking as Booking)
+        : normalizeNegotiationBooking({
+            ...request,
+            status,
+            fare: acceptedFare,
+            ...(status === 'confirmed' && acceptedFareBreakdown
+              ? {
+                  serviceFee: acceptedFareBreakdown.baseFee,
+                  gstAmount: acceptedFareBreakdown.gstAmount,
+                  totalPrice: acceptedFare + acceptedFareBreakdown.totalFee,
+                }
+              : {}),
+            negotiationStatus: status === 'confirmed' ? 'accepted' : 'rejected',
+            driverCounterPending: false,
+            driverPhone: profile.phoneNumber || '',
+            rideRetired: status === 'rejected',
+            updatedAt,
+          } as Booking);
       setRequests((prev) =>
         status === 'rejected'
-          ? prev.filter((booking) => getBookingThreadKey(booking) !== getBookingThreadKey(request))
-          : prev.map((booking) =>
-              getBookingThreadKey(booking) === getBookingThreadKey(request)
-                ? {
-                    ...booking,
-	                    status,
-	                    fare: acceptedFare,
-	                    ...(status === 'confirmed' && acceptedFareBreakdown
-                        ? {
-                            serviceFee: acceptedFareBreakdown.baseFee,
-                            gstAmount: acceptedFareBreakdown.gstAmount,
-                            totalPrice: acceptedFare + acceptedFareBreakdown.totalFee,
-                          }
-                        : {}),
-	                    negotiationStatus:
-                      booking.negotiationStatus === 'pending' ? 'accepted' : booking.negotiationStatus,
-                    driverCounterPending: false,
-                    driverPhone: profile.phoneNumber || '',
-                    updatedAt,
-                  }
-                : booking
-            )
+          ? prev.filter((booking) => getBookingThreadKey(booking) !== getBookingThreadKey(updatedThread))
+          : mergeNegotiationThread(prev, updatedThread)
       );
+      setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread));
 
       await upsertTripSession({
         booking: {
