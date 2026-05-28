@@ -106,6 +106,36 @@ function pointToRouteDistanceKm(
   return { distanceKm: Math.sqrt(dx * dx + dy * dy), progress: rawT };
 }
 
+function getRouteMidpoint(route: {
+  originLocation: { lat: number; lng: number };
+  destinationLocation: { lat: number; lng: number };
+}) {
+  return {
+    lat: (route.originLocation.lat + route.destinationLocation.lat) / 2,
+    lng: (route.originLocation.lng + route.destinationLocation.lng) / 2,
+  };
+}
+
+function getRouteBearingDegrees(
+  start: { lat: number; lng: number },
+  end: { lat: number; lng: number }
+) {
+  const lat1 = deg2rad(start.lat);
+  const lat2 = deg2rad(end.lat);
+  const dLon = deg2rad(end.lng - start.lng);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  return (bearing + 360) % 360;
+}
+
+function getBearingDifferenceDegrees(a: number, b: number) {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
 function routeCorridorMatches(
   rideOriginLocation: { lat: number; lng: number },
   rideDestinationLocation: { lat: number; lng: number },
@@ -131,15 +161,75 @@ function routeCorridorMatches(
   );
 }
 
+function routesSharePartialCorridor(
+  candidateRoute: {
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+  },
+  referenceRoute: {
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+  },
+  pickupRadiusKm = 50,
+  dropRadiusKm = 200
+) {
+  const originDistanceKm = getDistanceKm(
+    candidateRoute.originLocation.lat,
+    candidateRoute.originLocation.lng,
+    referenceRoute.originLocation.lat,
+    referenceRoute.originLocation.lng
+  );
+  if (originDistanceKm > pickupRadiusKm) return false;
+
+  const candidateBearing = getRouteBearingDegrees(
+    candidateRoute.originLocation,
+    candidateRoute.destinationLocation
+  );
+  const referenceBearing = getRouteBearingDegrees(
+    referenceRoute.originLocation,
+    referenceRoute.destinationLocation
+  );
+  if (getBearingDifferenceDegrees(candidateBearing, referenceBearing) > 35) return false;
+
+  const candidateMidpointToReference = pointToRouteDistanceKm(
+    getRouteMidpoint(candidateRoute),
+    referenceRoute.originLocation,
+    referenceRoute.destinationLocation
+  );
+  const referenceMidpointToCandidate = pointToRouteDistanceKm(
+    getRouteMidpoint(referenceRoute),
+    candidateRoute.originLocation,
+    candidateRoute.destinationLocation
+  );
+  if (
+    candidateMidpointToReference.distanceKm > pickupRadiusKm &&
+    referenceMidpointToCandidate.distanceKm > pickupRadiusKm
+  ) {
+    return false;
+  }
+
+  const destinationDistanceKm = getDistanceKm(
+    candidateRoute.destinationLocation.lat,
+    candidateRoute.destinationLocation.lng,
+    referenceRoute.destinationLocation.lat,
+    referenceRoute.destinationLocation.lng
+  );
+  return destinationDistanceKm <= dropRadiusKm;
+}
+
 function requestMatchesRideRoute(requestData: any, rideData: any) {
   const requestOrigin = normalizeLatLng(requestData.originLocation);
   const requestDestination = normalizeLatLng(requestData.destinationLocation);
   const rideOrigin = normalizeLatLng(rideData.originLocation);
   const rideDestination = normalizeLatLng(rideData.destinationLocation);
   if (requestOrigin && requestDestination && rideOrigin && rideDestination) {
+    const requestRoute = { originLocation: requestOrigin, destinationLocation: requestDestination };
+    const rideRoute = { originLocation: rideOrigin, destinationLocation: rideDestination };
     return (
       routeCorridorMatches(rideOrigin, rideDestination, requestOrigin, requestDestination) ||
-      routeCorridorMatches(requestOrigin, requestDestination, rideOrigin, rideDestination)
+      routeCorridorMatches(requestOrigin, requestDestination, rideOrigin, rideDestination) ||
+      routesSharePartialCorridor(rideRoute, requestRoute) ||
+      routesSharePartialCorridor(requestRoute, rideRoute)
     );
   }
 
