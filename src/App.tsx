@@ -718,6 +718,8 @@ const isBookingTrackable = (booking: Booking) => {
   return ['pending', 'confirmed', 'negotiating'].includes(booking.status);
 };
 
+const isDriverDashboardBooking = (booking: Booking) => isBookingTrackable(booking);
+
 type UnifiedRideLifecycle = 'active' | 'completed' | 'cancelled';
 
 const getUnifiedRideLifecycle = (record: any): UnifiedRideLifecycle => {
@@ -13966,7 +13968,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       };
 
       setDriverBookings((prev) => {
-        const next = applyList(prev);
+        const next = applyList(prev).filter(isDriverDashboardBooking);
         return areBookingRenderListsEqual(prev, next) ? prev : next;
       });
       setRequests((prev) => {
@@ -13981,6 +13983,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       });
       setDriverNegotiationPreview((prev) => {
         if (!prev || getBookingThreadKey(prev) !== getBookingThreadKey(normalized)) return prev;
+        if (!isDriverDashboardBooking(normalized)) return null;
         return getBookingRenderSignature(prev) === getBookingRenderSignature(normalized) ? prev : normalized;
       });
     },
@@ -13993,7 +13996,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       const snapshot = await getDocs(query(collection(db, 'bookings'), where('driverId', '==', profile.uid)));
       list = snapshot.docs
         .map((snapshotDoc) => normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
-        .filter((booking) => ['pending', 'confirmed', 'negotiating', 'completed'].includes(booking.status));
+        .filter(isDriverDashboardBooking);
     } else {
       const token = await getAccessToken();
       const { data } = await axios.get(apiPath(`/api/user?action=list-bookings&scope=driver&_=${Date.now()}`), {
@@ -14009,6 +14012,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return dedupeBookingsByThread(
       list
         .map((booking) => normalizeNegotiationBooking(booking))
+        .filter(isDriverDashboardBooking)
         .sort(
           (a, b) =>
             new Date((b as any).updatedAt || b.createdAt).getTime() -
@@ -14319,7 +14323,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           list.push(normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
         );
         setDriverBookings(
-          dedupeBookingsByThread(list).sort(
+          dedupeBookingsByThread(list).filter(isDriverDashboardBooking).sort(
             (a, b) => new Date((b as any).updatedAt || b.createdAt).getTime() - new Date((a as any).updatedAt || a.createdAt).getTime()
           )
         );
@@ -14800,7 +14804,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       )
     );
     setRequests((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
-    setDriverBookings((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
+    setDriverBookings((prev) => dedupeBookingsByThread([optimisticThread, ...prev]).filter(isDriverDashboardBooking));
     showAppDialog('Negotiation thread is ready. Send your counter or accept the request.', 'success');
 
     try {
@@ -14813,7 +14817,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       });
       const normalizedPersistedThread = normalizeNegotiationBooking(persistedThread as Booking);
       setRequests((prev) => dedupeBookingsByThread([normalizedPersistedThread, ...prev]));
-      setDriverBookings((prev) => dedupeBookingsByThread([normalizedPersistedThread, ...prev]));
+      setDriverBookings((prev) => dedupeBookingsByThread([normalizedPersistedThread, ...prev]).filter(isDriverDashboardBooking));
       setDriverNegotiationPreview((current) =>
         current && getBookingThreadKey(current) === getBookingThreadKey(optimisticThread)
           ? normalizedPersistedThread
@@ -15083,7 +15087,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       if (!linkedTravelerRequest && responseData.booking) {
         const canonicalThread = normalizeNegotiationBooking(responseData.booking as Booking);
         setRequests((prev) => dedupeBookingsByThread([canonicalThread, ...prev]));
-        setDriverBookings((prev) => dedupeBookingsByThread([canonicalThread, ...prev]));
+        setDriverBookings((prev) => dedupeBookingsByThread([canonicalThread, ...prev]).filter(isDriverDashboardBooking));
         openDriverNegotiationThread(canonicalThread);
       }
     }
@@ -15148,7 +15152,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           }) as Booking
         );
         setRequests((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
-        setDriverBookings((prev) => dedupeBookingsByThread([optimisticThread, ...prev]));
+        setDriverBookings((prev) => dedupeBookingsByThread([optimisticThread, ...prev]).filter(isDriverDashboardBooking));
         openDriverNegotiationThread(optimisticThread);
       } else {
         const latestThread =
@@ -15276,7 +15280,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           ? prev.filter((booking) => getBookingThreadKey(booking) !== getBookingThreadKey(updatedThread))
           : mergeNegotiationThread(prev, updatedThread)
       );
-      setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread));
+      setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread).filter(isDriverDashboardBooking));
 
       await upsertTripSession({
         booking: {
@@ -15397,7 +15401,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         updatedAt,
       };
       setRequests((prev) => mergeNegotiationThread(prev, updatedThread));
-      setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread));
+      setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread).filter(isDriverDashboardBooking));
       setDriverNegotiationPreview(null);
       setDriverSmartMatchPrompt(null);
       setShowOfferForm(false);
@@ -15438,7 +15442,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           updatedAt,
         } as Booking);
         setRequests((prev) => mergeNegotiationThread(prev, updatedThread));
-        setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread));
+        setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread).filter(isDriverDashboardBooking));
         setDriverNegotiationPreview(null);
         setDriverSmartMatchPrompt(null);
         setShowOfferForm(false);
@@ -15724,6 +15728,10 @@ const finalizeDriverDashboardRazorpayPayment = async (
         appState: tripAppState,
         note: 'ride_completed',
       });
+
+      setRequests((prev) => prev.filter((candidate) => candidate.id !== booking.id));
+      setDriverBookings((prev) => prev.filter((candidate) => candidate.id !== booking.id));
+      setDriverNegotiationPreview((prev) => (prev?.id === booking.id ? null : prev));
 
       if (!booking.driverEarningsCreditedAt) {
         const driverRef = doc(db, 'users', booking.driverId);
