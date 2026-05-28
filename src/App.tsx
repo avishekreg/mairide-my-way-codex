@@ -15695,6 +15695,21 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
     try {
       const completedAt = new Date().toISOString();
+      const completedBooking = normalizeNegotiationBooking({
+        ...booking,
+        rideLifecycleStatus: 'completed',
+        rideEndedAt: completedAt,
+        rideEndOtpVerifiedAt: completedAt,
+        status: 'completed',
+        driverEarningsCreditedAt: booking.driverEarningsCreditedAt || completedAt,
+        reviewWorkflow: {
+          version: 2,
+          activatedAt: completedAt,
+          consumerPending: true,
+          driverPending: true,
+        },
+      } as Booking);
+
       await updateDoc(doc(db, 'bookings', booking.id), {
         rideLifecycleStatus: 'completed',
         rideEndedAt: completedAt,
@@ -15729,6 +15744,9 @@ const finalizeDriverDashboardRazorpayPayment = async (
         note: 'ride_completed',
       });
 
+      if (!completedBooking.driverReview && !dismissedReviewIds[completedBooking.id]) {
+        setReviewBooking(completedBooking);
+      }
       setRequests((prev) => prev.filter((candidate) => candidate.id !== booking.id));
       setDriverBookings((prev) => prev.filter((candidate) => candidate.id !== booking.id));
       setDriverNegotiationPreview((prev) => (prev?.id === booking.id ? null : prev));
