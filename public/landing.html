@@ -294,6 +294,11 @@
   </div>
 
   <script type="module">
+    const currentHost = String(window.location.hostname || '').toLowerCase();
+    if ((currentHost === 'mairide.in' || currentHost === 'www.mairide.in') && window.location.pathname === '/landing.html') {
+      window.history.replaceState({}, '', `/${window.location.search}${window.location.hash}`);
+    }
+
     const rideDomain = 'https://rides.mairide.in';
     const langStorageKey = 'mairide_ui_language';
     const langPromptSeenKey = 'mairide_ui_language_prompt_seen';
