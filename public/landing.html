@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MaiRide | Empty-Leg Cab Fares for Smart Travelers</title>
+  <meta
+    name="description"
+    content="MaiRide helps travelers book verified empty-leg cabs at transparent fixed fares while helping drivers reduce idle return trips."
+  />
+  <meta name="theme-color" content="#F4F7F8" />
+  <meta property="og:title" content="MaiRide | Empty-Leg Cab Fares" />
+  <meta
+    property="og:description"
+    content="Travel smarter with verified empty-leg cabs, fixed pricing, no driver commissions, and lower carbon waste."
+  />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="./logo.png" />
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" />
+  <link rel="preconnect" href="https://images.unsplash.com" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            mairide: {
+              bg: '#F4F7F8',
+              secondary: '#6F8090',
+              primary: '#1F2D38',
+              accent: '#E97A2E'
+            }
+          },
+          boxShadow: {
+            mairide: '0 22px 70px rgba(31, 45, 56, 0.12)'
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    html { background: #F4F7F8; }
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+    .hero-photo {
+      background-image:
+        linear-gradient(90deg, rgba(244,247,248,.98) 0%, rgba(244,247,248,.9) 44%, rgba(244,247,248,.48) 100%),
+        linear-gradient(180deg, rgba(244,247,248,.10) 0%, rgba(244,247,248,.98) 100%),
+        url("https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=2200&q=72");
+      background-position: center;
+      background-size: cover;
+    }
+    .reveal {
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity .65s ease, transform .65s ease;
+    }
+    .reveal.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .reveal { opacity: 1; transform: none; transition: none; }
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body class="bg-mairide-bg text-mairide-primary">
+  <header class="sticky top-0 z-50 border-b border-mairide-secondary/25 bg-white/90 backdrop-blur-xl">
+    <nav class="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8" aria-label="Primary navigation">
+      <a href="#top" class="flex items-center gap-3" aria-label="MaiRide home">
+        <img src="./logo.png" alt="" class="h-11 w-11 rounded-2xl" width="44" height="44" />
+        <span class="text-xl font-black tracking-tight">MaiRide</span>
+      </a>
+      <div class="hidden items-center gap-8 text-sm font-bold text-mairide-secondary md:flex">
+        <a href="#edge" class="hover:text-mairide-accent" data-i18n="navEdge">Edge</a>
+        <a href="#sustainability" class="hover:text-mairide-accent" data-i18n="navSustainability">Sustainability</a>
+        <a href="#partners" class="hover:text-mairide-accent" data-i18n="navPartners">Partners</a>
+      </div>
+      <div class="flex items-center gap-3">
+        <label class="sr-only" for="languageSelect">Language</label>
+        <select
+          id="languageSelect"
+          class="h-11 rounded-2xl border border-mairide-secondary/35 bg-mairide-bg px-3 text-xs font-black uppercase tracking-widest text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+        >
+          <option value="en">EN</option>
+          <option value="hi">हिं</option>
+          <option value="bn">বা</option>
+          <option value="ne">ने</option>
+          <option value="as">অ</option>
+        </select>
+        <a
+          href="https://rides.mairide.in"
+          data-ride-cta
+          class="hidden rounded-2xl bg-mairide-accent px-5 py-3 text-sm font-black text-white shadow-mairide transition hover:-translate-y-0.5 hover:bg-mairide-primary sm:inline-flex"
+          data-i18n="bookNow"
+        >
+          Book Now
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero-photo relative flex min-h-[calc(100svh-77px)] items-center overflow-hidden">
+      <div class="mx-auto w-full max-w-7xl px-5 py-16 lg:px-8 lg:py-20">
+        <div class="max-w-3xl reveal">
+          <div class="mb-5 inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary/30 bg-white/75 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-mairide-accent shadow-sm">
+            <span class="h-2 w-2 rounded-full bg-mairide-accent"></span>
+            <span data-i18n="heroBadge">Empty-Leg Mobility Network</span>
+          </div>
+          <h1 class="text-4xl font-black leading-[1.06] tracking-tight text-mairide-primary sm:text-6xl lg:text-7xl" data-i18n="heroTitle">
+            Travel for up to half the fare in empty-leg cabs.
+          </h1>
+          <p class="mt-7 max-w-2xl text-lg leading-8 text-mairide-secondary sm:text-xl" data-i18n="heroSub">
+            No Commissions, No Price Negotiations. A transparent, fixed-fee aggregator ecosystem built for smart travelers and drivers.
+          </p>
+          <div class="mt-10 flex flex-col gap-4 sm:flex-row">
+            <a
+              href="https://rides.mairide.in"
+              data-ride-cta
+              class="inline-flex min-h-14 items-center justify-center rounded-2xl bg-mairide-accent px-8 text-base font-black text-white shadow-mairide transition hover:-translate-y-1 hover:bg-mairide-primary"
+              data-i18n="heroPrimary"
+            >
+              Book Now / Ride With Us
+            </a>
+            <a
+              href="#partners"
+              class="inline-flex min-h-14 items-center justify-center rounded-2xl border border-mairide-secondary/45 bg-white/70 px-8 text-base font-black text-mairide-primary transition hover:-translate-y-1 hover:border-mairide-accent hover:text-mairide-accent"
+              data-i18n="heroSecondary"
+            >
+              Partner With Us
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="pointer-events-none absolute bottom-6 left-5 right-5 mx-auto flex max-w-7xl items-end justify-between text-[10px] font-black uppercase tracking-[0.25em] text-mairide-secondary lg:px-8">
+        <span data-i18n="heroProofA">Verified Drivers</span>
+        <span class="hidden sm:inline" data-i18n="heroProofB">Fixed Fee Ecosystem</span>
+      </div>
+    </section>
+
+    <section id="edge" class="px-5 py-20 lg:px-8">
+      <div class="mx-auto max-w-7xl">
+        <div class="reveal max-w-2xl">
+          <p class="text-sm font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="edgeEyebrow">The MaiRide Edge</p>
+          <h2 class="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl" data-i18n="edgeTitle">Built for lower fares, cleaner routes, and fair driver economics.</h2>
+        </div>
+        <div class="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+          <article class="reveal rounded-[32px] border border-mairide-secondary/25 bg-white p-7 shadow-sm">
+            <div class="mb-8 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-mairide-accent/10 text-mairide-accent">
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="m13 6 6 6-6 6"/><path d="M5 6v12"/></svg>
+            </div>
+            <h3 class="text-xl font-black" data-i18n="advOneTitle">One-Way Discounted Fares</h3>
+            <p class="mt-4 text-sm leading-6 text-mairide-secondary" data-i18n="advOneBody">Up to 30-40% cheaper because you only pay for the leg you use.</p>
+          </article>
+          <article class="reveal rounded-[32px] border border-mairide-secondary/25 bg-white p-7 shadow-sm">
+            <div class="mb-8 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-mairide-accent/10 text-mairide-accent">
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <h3 class="text-xl font-black" data-i18n="advTwoTitle">Scam-Free Fixed Pricing</h3>
+            <p class="mt-4 text-sm leading-6 text-mairide-secondary" data-i18n="advTwoBody">Transparent upfront algorithm-driven pricing. No on-ground bargaining.</p>
+          </article>
+          <article class="reveal rounded-[32px] border border-mairide-secondary/25 bg-white p-7 shadow-sm">
+            <div class="mb-8 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-mairide-accent/10 text-mairide-accent">
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M4 7h12a4 4 0 0 1 0 8H8"/></svg>
+            </div>
+            <h3 class="text-xl font-black" data-i18n="advThreeTitle">No Driver Commissions</h3>
+            <p class="mt-4 text-sm leading-6 text-mairide-secondary" data-i18n="advThreeBody">Drivers keep 100% of their fare, paying only a tiny fixed platform fee.</p>
+          </article>
+          <article class="reveal rounded-[32px] border border-mairide-secondary/25 bg-white p-7 shadow-sm">
+            <div class="mb-8 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-mairide-accent/10 text-mairide-accent">
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-5"/></svg>
+            </div>
+            <h3 class="text-xl font-black" data-i18n="advFourTitle">Safety & Trust</h3>
+            <p class="mt-4 text-sm leading-6 text-mairide-secondary" data-i18n="advFourBody">Verified drivers with real-time route tracking and digital OTP security.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="sustainability" class="border-y border-mairide-secondary/20 bg-white px-5 py-20 lg:px-8">
+      <div class="mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[1fr_.85fr]">
+        <div class="reveal">
+          <p class="text-sm font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="greenEyebrow">Carbon Footprint Savings</p>
+          <h2 class="mt-4 text-4xl font-black tracking-tight sm:text-5xl" data-i18n="greenTitle">Green Mobility: Saving Fuel, Saving the Planet.</h2>
+          <p class="mt-6 max-w-2xl text-lg leading-8 text-mairide-secondary" data-i18n="greenBody">
+            MaiRide turns empty return journeys into shared trips. By filling empty-leg cabs already moving between cities, the network reduces duplicate highway runs, fuel wastage, and unnecessary CO2 emissions.
+          </p>
+        </div>
+        <div class="reveal rounded-[40px] border border-mairide-secondary/25 bg-mairide-bg p-8 shadow-mairide">
+          <div class="flex items-center justify-between gap-6 border-b border-mairide-secondary/20 pb-8">
+            <div>
+              <p class="text-xs font-black uppercase tracking-[0.22em] text-mairide-secondary" data-i18n="impactEyebrow">Impact Estimate</p>
+              <p class="mt-3 text-3xl font-black" data-i18n="impactTitle">1 Empty-Leg Journey Shared</p>
+            </div>
+            <div class="rounded-2xl border border-mairide-accent/35 bg-white px-4 py-2 text-sm font-black text-mairide-accent" data-i18n="impactBadge">Grant Ready</div>
+          </div>
+          <div class="py-10">
+            <p class="text-6xl font-black tracking-tight text-mairide-accent sm:text-7xl">~35kg</p>
+            <p class="mt-3 text-xl font-black" data-i18n="impactBody">of CO2 prevented from entering the atmosphere.</p>
+          </div>
+          <div class="grid grid-cols-3 gap-3 text-center text-xs font-black uppercase tracking-[0.13em] text-mairide-secondary">
+            <div class="rounded-2xl bg-white p-4" data-i18n="impactPillA">Less Fuel</div>
+            <div class="rounded-2xl bg-white p-4" data-i18n="impactPillB">Fewer Empty Cars</div>
+            <div class="rounded-2xl bg-white p-4" data-i18n="impactPillC">Cleaner Highways</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="partners" class="px-5 py-20 lg:px-8">
+      <div class="mx-auto max-w-7xl">
+        <div class="reveal flex flex-col justify-between gap-8 lg:flex-row lg:items-end">
+          <div class="max-w-2xl">
+            <p class="text-sm font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="b2bEyebrow">B2B Partner Solutions</p>
+            <h2 class="mt-4 text-4xl font-black tracking-tight sm:text-5xl" data-i18n="b2bTitle">A new revenue layer for mobility partners.</h2>
+          </div>
+          <p class="max-w-md text-base leading-7 text-mairide-secondary" data-i18n="b2bBody">Direct dashboards for operators who want predictable return loads, verified trips, and cleaner guest mobility.</p>
+        </div>
+
+        <div class="mt-12 grid gap-6 lg:grid-cols-2">
+          <article class="reveal rounded-[40px] border border-mairide-secondary/25 bg-white p-8 shadow-sm transition hover:-translate-y-1 hover:border-mairide-accent">
+            <p class="text-xs font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="fleetEyebrow">Fleet Layer</p>
+            <h3 class="mt-5 text-3xl font-black" data-i18n="fleetTitle">For Fleet Owners & Travel Agents</h3>
+            <p class="mt-5 text-base leading-7 text-mairide-secondary" data-i18n="fleetBody">Manage multiple cars, secure guaranteed return loads, reduce idle losses, and monitor every empty-leg opportunity from a custom dashboard.</p>
+            <a href="mailto:partners@mairide.in?subject=Request%20Fleet%20Access" class="mt-8 inline-flex rounded-2xl bg-mairide-primary px-6 py-4 font-black text-white transition hover:bg-mairide-accent" data-i18n="fleetCta">Request Fleet Access</a>
+          </article>
+          <article class="reveal rounded-[40px] border border-mairide-secondary/25 bg-white p-8 shadow-sm transition hover:-translate-y-1 hover:border-mairide-accent">
+            <p class="text-xs font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="hotelEyebrow">Hospitality Layer</p>
+            <h3 class="mt-5 text-3xl font-black" data-i18n="hotelTitle">For Hotel & Resort Partners</h3>
+            <p class="mt-5 text-base leading-7 text-mairide-secondary" data-i18n="hotelBody">Book scam-free rides for guests through a desk console, add a premium travel service, and earn a 10% revenue share on successful bookings.</p>
+            <a href="mailto:partners@mairide.in?subject=Become%20a%20Hotel%20Partner" class="mt-8 inline-flex rounded-2xl bg-mairide-accent px-6 py-4 font-black text-white shadow-mairide transition hover:bg-mairide-primary" data-i18n="hotelCta">Become a Hotel Partner</a>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="bg-mairide-primary px-5 py-14 text-white lg:px-8">
+    <div class="mx-auto grid max-w-7xl gap-10 md:grid-cols-4">
+      <div class="md:col-span-2">
+        <div class="flex items-center gap-3">
+          <img src="./logo.png" alt="" class="h-10 w-10 rounded-2xl" width="40" height="40" />
+          <span class="text-xl font-black">MaiRide</span>
+        </div>
+        <p class="mt-5 max-w-md text-sm leading-6 text-white/62" data-i18n="footerBody">A transparent empty-leg cab aggregator for smarter travelers, fairer drivers, and cleaner highways.</p>
+      </div>
+      <div>
+        <h4 class="text-sm font-black uppercase tracking-[0.2em]" data-i18n="footerCompany">Company</h4>
+        <div class="mt-5 grid gap-3 text-sm text-white/62">
+          <a href="#edge" class="hover:text-white" data-i18n="navEdge">The MaiRide Edge</a>
+          <a href="#sustainability" class="hover:text-white" data-i18n="navSustainability">Sustainability</a>
+          <a href="#partners" class="hover:text-white" data-i18n="navPartners">Partners</a>
+        </div>
+      </div>
+      <div>
+        <h4 class="text-sm font-black uppercase tracking-[0.2em]" data-i18n="footerCompliance">Compliance</h4>
+        <div class="mt-5 grid gap-3 text-sm text-white/62">
+          <a href="./terms-and-conditions.html" class="hover:text-white" data-i18n="terms">Terms & Conditions</a>
+          <a href="./privacy-policy.html" class="hover:text-white" data-i18n="privacy">Privacy Policy</a>
+          <a href="./terms-and-conditions.html#refund-policy" class="hover:text-white" data-i18n="refund">Terms of Use / Refund Policy</a>
+        </div>
+      </div>
+    </div>
+    <div class="mx-auto mt-12 flex max-w-7xl flex-col gap-3 border-t border-white/10 pt-6 text-xs text-white/45 sm:flex-row sm:items-center sm:justify-between">
+      <p>© <span id="year"></span> MaiRide. <span data-i18n="rights">All rights reserved.</span></p>
+      <p>mairide.in · rides.mairide.in</p>
+    </div>
+  </footer>
+
+  <div id="languagePrompt" class="fixed inset-0 z-[70] hidden items-center justify-center bg-mairide-primary/70 p-5 backdrop-blur-sm">
+    <div class="w-full max-w-md rounded-[40px] border border-mairide-secondary/25 bg-white p-8 text-center shadow-mairide">
+      <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-mairide-accent/10 text-mairide-accent">
+        <svg viewBox="0 0 24 24" class="h-8 w-8" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-4.4 7-11a7 7 0 1 0-14 0c0 6.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+      </div>
+      <p class="text-xs font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="languagePromptEyebrow">Local Language</p>
+      <h2 class="mt-3 text-2xl font-black" data-i18n="languagePromptTitle">Use your regional language?</h2>
+      <p class="mt-3 text-sm leading-6 text-mairide-secondary" id="languagePromptBody">
+        We can tune this page to your region. Your location is used only in this browser to suggest a language.
+      </p>
+      <div class="mt-7 grid gap-3">
+        <button id="acceptLanguage" class="rounded-2xl bg-mairide-accent px-5 py-4 font-black text-white transition hover:bg-mairide-primary">
+          Use Suggested Language
+        </button>
+        <button id="keepEnglish" class="rounded-2xl border border-mairide-secondary/35 px-5 py-4 font-black text-mairide-primary transition hover:border-mairide-accent hover:text-mairide-accent" data-i18n="keepEnglish">
+          Keep English
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const rideDomain = 'https://rides.mairide.in';
+    const langStorageKey = 'mairide_ui_language';
+    const langPromptSeenKey = 'mairide_ui_language_prompt_seen';
+    const passThroughKeys = [
+      'utm_source',
+      'utm_medium',
+      'utm_campaign',
+      'utm_term',
+      'utm_content',
+      'gclid',
+      'fbclid',
+      'ref',
+      'source'
+    ];
+
+    const languages = {
+      en: { name: 'English', short: 'English' },
+      hi: { name: 'Hindi', short: 'हिंदी' },
+      bn: { name: 'Bengali', short: 'বাংলা' },
+      ne: { name: 'Nepali', short: 'नेपाली' },
+      as: { name: 'Assamese', short: 'অসমীয়া' }
+    };
+
+    const translations = {
+      en: {},
+      hi: {
+        navEdge: 'फायदे', navSustainability: 'हरित यात्रा', navPartners: 'पार्टनर', bookNow: 'बुक करें',
+        heroBadge: 'खाली लौटती गाड़ियों का नेटवर्क',
+        heroTitle: 'पर्यटक खाली लौटती गाड़ियों से आधी कीमत में यात्रा करें।',
+        heroSub: 'कोई कमीशन नहीं, कोई सड़क पर मोलभाव नहीं। स्मार्ट यात्रियों और ड्राइवरों के लिए पारदर्शी, फिक्स्ड-फी इकोसिस्टम।',
+        heroPrimary: 'अभी बुक करें / Ride With Us', heroSecondary: 'हमसे पार्टनर बनें',
+        heroProofA: 'वेरिफाइड ड्राइवर', heroProofB: 'फिक्स्ड फी इकोसिस्टम',
+        edgeEyebrow: 'MaiRide का फायदा', edgeTitle: 'कम किराया, साफ रूट और ड्राइवर के लिए बेहतर कमाई।',
+        advOneTitle: 'वन-वे डिस्काउंटेड किराया', advOneBody: 'आप केवल अपने इस्तेमाल वाले रास्ते का भुगतान करते हैं, इसलिए 30-40% तक सस्ता।',
+        advTwoTitle: 'स्कैम-फ्री फिक्स्ड प्राइसिंग', advTwoBody: 'पहले से साफ एल्गोरिदम आधारित किराया। ऑन-ग्राउंड मोलभाव नहीं।',
+        advThreeTitle: 'ड्राइवर कमीशन नहीं', advThreeBody: 'ड्राइवर पूरा किराया रखते हैं, केवल छोटा सा फिक्स्ड प्लेटफॉर्म शुल्क देते हैं।',
+        advFourTitle: 'सेफ्टी और भरोसा', advFourBody: 'वेरिफाइड ड्राइवर, रियल-टाइम रूट ट्रैकिंग और डिजिटल OTP सुरक्षा।',
+        greenEyebrow: 'कार्बन बचत', greenTitle: 'Green Mobility: ईंधन बचाएं, पृथ्वी बचाएं।',
+        greenBody: 'MaiRide खाली लौटती गाड़ियों को साझा यात्रा में बदलता है। इससे हाईवे पर अनावश्यक खाली कारें, ईंधन बर्बादी और CO2 उत्सर्जन कम होता है।',
+        impactEyebrow: 'इम्पैक्ट अनुमान', impactTitle: '1 खाली लौटती यात्रा साझा', impactBadge: 'Grant Ready',
+        impactBody: 'CO2 वातावरण में जाने से रोकी जा सकती है।',
+        impactPillA: 'कम ईंधन', impactPillB: 'कम खाली कारें', impactPillC: 'स्वच्छ हाईवे',
+        b2bEyebrow: 'B2B पार्टनर सॉल्यूशन्स', b2bTitle: 'मोबिलिटी पार्टनर्स के लिए नया रेवेन्यू लेयर।',
+        b2bBody: 'ऑपरेटरों के लिए डैशबोर्ड जो रिटर्न लोड, वेरिफाइड ट्रिप और बेहतर गेस्ट मोबिलिटी चाहते हैं।',
+        fleetEyebrow: 'फ्लीट लेयर', fleetTitle: 'फ्लीट ओनर्स और ट्रैवल एजेंट्स के लिए',
+        fleetBody: 'कई कारें मैनेज करें, गारंटीड रिटर्न लोड पाएं, idle loss घटाएं और खाली-लेग अवसर मॉनिटर करें।',
+        fleetCta: 'Fleet Access मांगें',
+        hotelEyebrow: 'हॉस्पिटैलिटी लेयर', hotelTitle: 'होटल और रिसॉर्ट पार्टनर्स के लिए',
+        hotelBody: 'गेस्ट्स के लिए स्कैम-फ्री राइड बुक करें और सफल बुकिंग पर 10% रेवेन्यू शेयर कमाएं।',
+        hotelCta: 'Hotel Partner बनें',
+        footerBody: 'स्मार्ट यात्रियों, निष्पक्ष ड्राइवरों और स्वच्छ हाईवे के लिए पारदर्शी खाली-लेग कैब एग्रीगेटर।',
+        footerCompany: 'कंपनी', footerCompliance: 'कम्प्लायंस', terms: 'Terms & Conditions', privacy: 'Privacy Policy', refund: 'Terms of Use / Refund Policy',
+        rights: 'सर्वाधिकार सुरक्षित।', languagePromptEyebrow: 'स्थानीय भाषा', languagePromptTitle: 'अपनी क्षेत्रीय भाषा इस्तेमाल करें?', keepEnglish: 'English रखें'
+      },
+      bn: {
+        navEdge: 'সুবিধা', navSustainability: 'সবুজ যাত্রা', navPartners: 'পার্টনার', bookNow: 'বুক করুন',
+        heroBadge: 'Empty-Leg Mobility Network',
+        heroTitle: 'পর্যটকরা খালি ফেরত যাওয়া গাড়িতে কম খরচে ভ্রমণ করুন।',
+        heroSub: 'কোনও কমিশন নয়, দর-কষাকষি নয়। স্মার্ট যাত্রী ও চালকদের জন্য স্বচ্ছ ফিক্সড-ফি ইকোসিস্টেম।',
+        heroPrimary: 'এখন বুক করুন / Ride With Us', heroSecondary: 'Partner With Us',
+        heroProofA: 'Verified Drivers', heroProofB: 'Fixed Fee Ecosystem',
+        edgeEyebrow: 'MaiRide Edge', edgeTitle: 'কম ভাড়া, পরিষ্কার রুট এবং চালকের ন্যায্য আয়।',
+        advOneTitle: 'One-Way Discounted Fares', advOneBody: 'শুধু ব্যবহৃত পথের জন্য পেমেন্ট, তাই 30-40% পর্যন্ত সাশ্রয়।',
+        advTwoTitle: 'Scam-Free Fixed Pricing', advTwoBody: 'আগেই পরিষ্কার অ্যালগরিদম-ভিত্তিক ভাড়া। রাস্তায় দর-কষাকষি নয়।',
+        advThreeTitle: 'No Driver Commissions', advThreeBody: 'চালক পুরো ভাড়া রাখেন, শুধু ছোট ফিক্সড প্ল্যাটফর্ম ফি দেন।',
+        advFourTitle: 'Safety & Trust', advFourBody: 'Verified drivers, real-time route tracking এবং digital OTP security।',
+        greenEyebrow: 'Carbon Footprint Savings', greenTitle: 'Green Mobility: জ্বালানি বাঁচান, পৃথিবী বাঁচান।',
+        greenBody: 'MaiRide খালি ফেরত যাত্রাকে শেয়ারড ট্রিপে বদলায়, ফলে অপ্রয়োজনীয় গাড়ি চলাচল, জ্বালানি অপচয় ও CO2 কমে।',
+        impactEyebrow: 'Impact Estimate', impactTitle: '1 Empty-Leg Journey Shared', impactBadge: 'Grant Ready',
+        impactBody: 'CO2 বাতাসে যাওয়া থেকে আটকানো যায়।',
+        impactPillA: 'Less Fuel', impactPillB: 'Fewer Empty Cars', impactPillC: 'Cleaner Highways',
+        b2bEyebrow: 'B2B Partner Solutions', b2bTitle: 'Mobility partners-এর জন্য নতুন revenue layer।',
+        b2bBody: 'Return load, verified trips এবং guest mobility পরিচালনার জন্য direct dashboards।',
+        fleetTitle: 'Fleet Owners ও Travel Agents-এর জন্য', fleetBody: 'Multiple cars manage করুন, guaranteed return loads সুরক্ষিত করুন এবং idle losses কমান।',
+        fleetCta: 'Request Fleet Access',
+        hotelTitle: 'Hotel ও Resort Partners-এর জন্য', hotelBody: 'Guest rides book করুন এবং successful bookings-এ 10% revenue share earn করুন।',
+        hotelCta: 'Become a Hotel Partner',
+        footerBody: 'Smart travelers, fair drivers এবং cleaner highways-এর জন্য transparent empty-leg cab aggregator।',
+        footerCompany: 'Company', footerCompliance: 'Compliance', rights: 'All rights reserved.',
+        languagePromptEyebrow: 'Local Language', languagePromptTitle: 'আপনার স্থানীয় ভাষা ব্যবহার করবেন?', keepEnglish: 'Keep English'
+      },
+      ne: {
+        navEdge: 'फाइदा', navSustainability: 'हरित यात्रा', navPartners: 'पार्टनर', bookNow: 'बुक गर्नुहोस्',
+        heroBadge: 'Empty-Leg Mobility Network',
+        heroTitle: 'पर्यटकले खाली फर्किने गाडीमा कम खर्चमा यात्रा गर्नुहोस्।',
+        heroSub: 'कुनै कमिसन छैन, कुनै मोलतोल छैन। स्मार्ट यात्रु र ड्राइभरका लागि पारदर्शी fixed-fee ecosystem।',
+        heroPrimary: 'अहिले बुक गर्नुहोस् / Ride With Us', heroSecondary: 'Partner With Us',
+        edgeEyebrow: 'MaiRide Edge', edgeTitle: 'कम भाडा, सफा रुट, र ड्राइभरको निष्पक्ष आम्दानी।',
+        advOneTitle: 'One-Way Discounted Fares', advOneBody: 'तपाईंले प्रयोग गरेको लेगको मात्रै भुक्तानी गर्नुहुन्छ, त्यसैले 30-40% सम्म सस्तो।',
+        advTwoTitle: 'Scam-Free Fixed Pricing', advTwoBody: 'पहिल्यै स्पष्ट algorithm-driven pricing। सडकमा मोलतोल छैन।',
+        advThreeTitle: 'No Driver Commissions', advThreeBody: 'ड्राइभरले आफ्नो पूरा भाडा राख्छन्, केवल सानो fixed platform fee।',
+        advFourTitle: 'Safety & Trust', advFourBody: 'Verified drivers, real-time route tracking र digital OTP security।',
+        greenTitle: 'Green Mobility: इन्धन बचाऔं, पृथ्वी बचाऔं।',
+        greenBody: 'MaiRide ले खाली फर्किने यात्रालाई shared trip बनाउँछ, जसले fuel wastage र अनावश्यक CO2 घटाउँछ।',
+        impactBody: 'CO2 वातावरणमा जानबाट रोक्न सकिन्छ।',
+        b2bTitle: 'Mobility partners का लागि नयाँ revenue layer।',
+        fleetTitle: 'Fleet Owners र Travel Agents का लागि',
+        hotelTitle: 'Hotel र Resort Partners का लागि',
+        languagePromptTitle: 'आफ्नो स्थानीय भाषा प्रयोग गर्ने?', keepEnglish: 'Keep English'
+      },
+      as: {
+        navEdge: 'সুবিধা', navSustainability: 'সেউজ যাত্ৰা', navPartners: 'পাৰ্টনাৰ', bookNow: 'বুক কৰক',
+        heroBadge: 'Empty-Leg Mobility Network',
+        heroTitle: 'পৰ্যটকে খালী উভতি অহা গাড়ীত কম খৰচত যাত্ৰা কৰক।',
+        heroSub: 'কমিছন নাই, দামৰ টনা-আজোৰা নাই। স্মাৰ্ট যাত্ৰী আৰু চালকৰ বাবে স্বচ্ছ fixed-fee ecosystem।',
+        heroPrimary: 'এতিয়াই বুক কৰক / Ride With Us', heroSecondary: 'Partner With Us',
+        edgeTitle: 'কম ভাড়া, পৰিষ্কাৰ ৰুট, আৰু চালকৰ ন্যায্য উপাৰ্জন।',
+        advOneBody: 'আপুনি ব্যৱহাৰ কৰা leg-ৰ বাবেহে পেমেণ্ট, সেয়ে 30-40% পৰ্যন্ত সাশ্ৰয়।',
+        advTwoBody: 'আগতে স্পষ্ট algorithm-driven pricing। ৰাস্তাত দামাদামি নাই।',
+        advThreeBody: 'চালকে সম্পূৰ্ণ ভাড়া ৰাখে, কেৱল সৰু fixed platform fee দিয়ে।',
+        greenTitle: 'Green Mobility: ইন্ধন বচাওক, পৃথিৱী বচাওক।',
+        greenBody: 'MaiRide-এ খালী উভতি অহা যাত্ৰাক shared trip কৰে, যাৰ ফলত fuel wastage আৰু CO2 emission কমে।',
+        impactBody: 'CO2 বায়ুমণ্ডলত যোৱাৰ পৰা ৰোধ হ’ব পাৰে।',
+        fleetTitle: 'Fleet Owners আৰু Travel Agents-ৰ বাবে',
+        hotelTitle: 'Hotel আৰু Resort Partners-ৰ বাবে',
+        languagePromptTitle: 'আপোনাৰ স্থানীয় ভাষা ব্যৱহাৰ কৰিবনে?', keepEnglish: 'Keep English'
+      }
+    };
+
+    const englishDefaults = Object.fromEntries(
+      Array.from(document.querySelectorAll('[data-i18n]')).map((node) => [node.dataset.i18n, node.textContent.trim()])
+    );
+
+    const withMarketingParams = (targetUrl) => {
+      const target = new URL(targetUrl);
+      const current = new URL(window.location.href);
+      passThroughKeys.forEach((key) => {
+        const value = current.searchParams.get(key);
+        if (value) target.searchParams.set(key, value);
+      });
+      const selectedLanguage = localStorage.getItem(langStorageKey);
+      if (selectedLanguage) target.searchParams.set('lang', selectedLanguage);
+      target.searchParams.set('landing_host', window.location.hostname || 'localhost');
+      return target.toString();
+    };
+
+    const setLanguage = (lang) => {
+      const active = translations[lang] ? lang : 'en';
+      localStorage.setItem(langStorageKey, active);
+      document.documentElement.lang = active;
+      document.getElementById('languageSelect').value = active;
+      document.querySelectorAll('[data-i18n]').forEach((node) => {
+        const key = node.dataset.i18n;
+        node.textContent = translations[active][key] || englishDefaults[key] || node.textContent;
+      });
+    };
+
+    const detectLanguageFromPosition = ({ latitude, longitude }) => {
+      if (latitude >= 26.4 && latitude <= 28.2 && longitude >= 87.8 && longitude <= 89.4) return 'ne';
+      if (latitude >= 25.7 && latitude <= 27.8 && longitude >= 88.0 && longitude <= 90.2) return 'bn';
+      if (latitude >= 24.0 && latitude <= 28.5 && longitude >= 90.0 && longitude <= 96.5) return 'as';
+      if (latitude >= 6 && latitude <= 36 && longitude >= 68 && longitude <= 98) return 'hi';
+      return 'en';
+    };
+
+    const detectLanguageFromBrowser = () => {
+      const navLang = (navigator.language || '').toLowerCase();
+      if (navLang.startsWith('hi')) return 'hi';
+      if (navLang.startsWith('bn')) return 'bn';
+      if (navLang.startsWith('ne')) return 'ne';
+      if (navLang.startsWith('as')) return 'as';
+      return 'en';
+    };
+
+    const showLanguagePrompt = (suggestedLang) => {
+      if (suggestedLang === 'en' || localStorage.getItem(langPromptSeenKey) === 'true') return;
+      const prompt = document.getElementById('languagePrompt');
+      const body = document.getElementById('languagePromptBody');
+      const accept = document.getElementById('acceptLanguage');
+      body.textContent = `MaiRide can show this page in ${languages[suggestedLang].short}. Your location is used only on this device to suggest a language.`;
+      accept.textContent = `Use ${languages[suggestedLang].short}`;
+      prompt.classList.remove('hidden');
+      prompt.classList.add('flex');
+      accept.onclick = () => {
+        localStorage.setItem(langPromptSeenKey, 'true');
+        setLanguage(suggestedLang);
+        prompt.classList.add('hidden');
+        prompt.classList.remove('flex');
+      };
+      document.getElementById('keepEnglish').onclick = () => {
+        localStorage.setItem(langPromptSeenKey, 'true');
+        setLanguage('en');
+        prompt.classList.add('hidden');
+        prompt.classList.remove('flex');
+      };
+    };
+
+    document.querySelectorAll('[data-ride-cta]').forEach((link) => {
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        window.location.assign(withMarketingParams(rideDomain));
+      });
+    });
+
+    document.querySelectorAll('a[href^="#"]').forEach((link) => {
+      link.addEventListener('click', (event) => {
+        const targetId = link.getAttribute('href');
+        if (!targetId || targetId === '#') return;
+        const target = document.querySelector(targetId);
+        if (!target) return;
+        event.preventDefault();
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+
+    document.getElementById('languageSelect').addEventListener('change', (event) => {
+      localStorage.setItem(langPromptSeenKey, 'true');
+      setLanguage(event.target.value);
+    });
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12 });
+
+    document.querySelectorAll('.reveal').forEach((node) => observer.observe(node));
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    const savedLanguage = localStorage.getItem(langStorageKey);
+    setLanguage(savedLanguage || detectLanguageFromBrowser());
+
+    if (!savedLanguage && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => showLanguagePrompt(detectLanguageFromPosition(position.coords)),
+        () => showLanguagePrompt(detectLanguageFromBrowser()),
+        { enableHighAccuracy: false, timeout: 3500, maximumAge: 1000 * 60 * 60 * 24 }
+      );
+    } else if (!savedLanguage) {
+      showLanguagePrompt(detectLanguageFromBrowser());
+    }
+  </script>
+</body>
+</html>

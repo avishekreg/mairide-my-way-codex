@@ -54,6 +54,15 @@
       ]
     },
     {
+      "source": "/downloads/ios/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/index.html",
       "headers": [
         {
@@ -65,11 +74,41 @@
   ],
   "rewrites": [
     {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "mairide.in"
+        }
+      ],
+      "destination": "/landing.html"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mairide.in"
+        }
+      ],
+      "destination": "/landing.html"
+    },
+    {
+      "source": "/downloads/ios",
+      "destination": "/downloads/ios/index.html"
+    },
+    {
       "source": "/downloads/mairide-android-download.apk",
       "destination": "/downloads/mairide-android.apk"
     },
     {
       "source": "/((?!api/).*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "rides.mairide.in"
+        }
+      ],
       "destination": "/index.html"
     }
   ]
