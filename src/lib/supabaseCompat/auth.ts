@@ -79,6 +79,27 @@ void auth.hydrate();
 
 export class GoogleAuthProvider {}
 
+function getOAuthRedirectBase() {
+  if (typeof window === 'undefined') return 'https://rides.mairide.in';
+  const protocol = String(window.location.protocol || '').toLowerCase();
+  const hostname = String(window.location.hostname || '').toLowerCase();
+  const isLocalHost =
+    protocol === 'file:' ||
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0';
+
+  if (isLocalHost) {
+    return window.location.origin || 'http://localhost:5173';
+  }
+
+  if (hostname === 'mairide.in' || hostname === 'www.mairide.in' || hostname === 'rides.mairide.in') {
+    return 'https://rides.mairide.in';
+  }
+
+  return window.location.origin || 'https://rides.mairide.in';
+}
+
 export class RecaptchaVerifier {
   constructor(
     public container: string | HTMLElement,
@@ -171,7 +192,7 @@ export async function signInWithPopup(
   sessionStorage.setItem('mairide_oauth_started', 'google');
   const oauthMode = sessionStorage.getItem('mairide_oauth_mode') || '';
   const oauthRole = sessionStorage.getItem('mairide_oauth_role') || '';
-  const redirectUrl = new URL('/', window.location.origin);
+  const redirectUrl = new URL('/', getOAuthRedirectBase());
   if (oauthMode === 'login' || oauthMode === 'signup') {
     redirectUrl.searchParams.set('oauthMode', oauthMode);
   }

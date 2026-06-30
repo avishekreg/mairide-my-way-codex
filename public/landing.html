@@ -248,6 +248,28 @@
           <span class="text-xl font-black">MaiRide</span>
         </div>
         <p class="mt-5 max-w-md text-sm leading-6 text-white/62" data-i18n="footerBody">A transparent empty-leg cab aggregator for smarter travelers, fairer drivers, and cleaner highways.</p>
+        <div class="mt-6 flex flex-wrap items-center gap-3">
+          <a
+            href="./downloads/android.html"
+            class="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+            aria-label="Download MaiRide for Android"
+          >
+            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true">
+              <path d="M7.55 5.55 5.9 2.68a.55.55 0 1 1 .95-.55L8.58 5h6.84l1.73-2.87a.55.55 0 1 1 .95.55l-1.65 2.87A4.62 4.62 0 0 1 19.5 9.6v8.65A1.75 1.75 0 0 1 17.75 20h-.9v2.1a1.1 1.1 0 1 1-2.2 0V20h-5.3v2.1a1.1 1.1 0 1 1-2.2 0V20h-.9A1.75 1.75 0 0 1 4.5 18.25V9.6a4.62 4.62 0 0 1 3.05-4.05ZM8.4 8.1a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Zm7.2 0a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Z"/>
+            </svg>
+            <span>Android App</span>
+          </a>
+          <a
+            href="./downloads/ios/"
+            class="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+            aria-label="Download MaiRide for iPhone"
+          >
+            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true">
+              <path d="M15.62 1.1c.14 1.12-.28 2.24-.92 3-.7.83-1.85 1.47-2.95 1.38-.16-1.08.36-2.21 1-2.94.7-.8 1.92-1.4 2.87-1.44Zm3.95 16.77c-.55 1.24-.8 1.8-1.51 2.9-.98 1.52-2.36 3.42-4.08 3.43-1.53.02-1.92-1-4-1-2.08 0-2.52 1-4.05.98-1.73-.02-3.04-1.73-4.02-3.24C-.84 16.23-.9 10.55 1.63 6.65 3.43 3.9 6.27 2.3 8.94 2.3c1.58 0 3.08 1.1 4.02 1.1.92 0 2.66-1.35 4.49-1.15.77.03 2.94.31 4.34 2.35-3.9 2.13-3.27 7.72.78 9.37Z"/>
+            </svg>
+            <span>iPhone App</span>
+          </a>
+        </div>
       </div>
       <div>
         <h4 class="text-sm font-black uppercase tracking-[0.2em]" data-i18n="footerCompany">Company</h4>
@@ -273,23 +295,16 @@
   </footer>
 
   <div id="languagePrompt" class="fixed inset-0 z-[70] hidden items-center justify-center bg-mairide-primary/70 p-5 backdrop-blur-sm">
-    <div class="w-full max-w-md rounded-[40px] border border-mairide-secondary/25 bg-white p-8 text-center shadow-mairide">
+    <div class="w-full max-w-md rounded-[40px] border border-mairide-secondary/25 bg-white p-8 shadow-mairide">
       <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-mairide-accent/10 text-mairide-accent">
         <svg viewBox="0 0 24 24" class="h-8 w-8" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-4.4 7-11a7 7 0 1 0-14 0c0 6.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>
       </div>
-      <p class="text-xs font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="languagePromptEyebrow">Local Language</p>
-      <h2 class="mt-3 text-2xl font-black" data-i18n="languagePromptTitle">Use your regional language?</h2>
+      <p class="text-xs font-black uppercase tracking-[0.24em] text-mairide-secondary" data-i18n="languagePromptEyebrow">Language Preference</p>
+      <h2 class="mt-3 text-2xl font-black text-mairide-primary" data-i18n="languagePromptTitle">Choose your page language</h2>
       <p class="mt-3 text-sm leading-6 text-mairide-secondary" id="languagePromptBody">
-        We can tune this page to your region. Your location is used only in this browser to suggest a language.
+        We detected suggested local languages for your region. You can change this anytime from the menu.
       </p>
-      <div class="mt-7 grid gap-3">
-        <button id="acceptLanguage" class="rounded-2xl bg-mairide-accent px-5 py-4 font-black text-white transition hover:bg-mairide-primary">
-          Use Suggested Language
-        </button>
-        <button id="keepEnglish" class="rounded-2xl border border-mairide-secondary/35 px-5 py-4 font-black text-mairide-primary transition hover:border-mairide-accent hover:text-mairide-accent" data-i18n="keepEnglish">
-          Keep English
-        </button>
-      </div>
+      <div id="languagePromptOptions" class="mt-7 grid gap-3"></div>
     </div>
   </div>
 
@@ -315,11 +330,11 @@
     ];
 
     const languages = {
-      en: { name: 'English', short: 'English' },
-      hi: { name: 'Hindi', short: 'हिंदी' },
-      bn: { name: 'Bengali', short: 'বাংলা' },
-      ne: { name: 'Nepali', short: 'नेपाली' },
-      as: { name: 'Assamese', short: 'অসমীয়া' }
+      en: { name: 'English', short: 'English', nativeLabel: 'English' },
+      hi: { name: 'Hindi', short: 'हिंदी', nativeLabel: 'हिंदी' },
+      bn: { name: 'Bengali', short: 'বাংলা', nativeLabel: 'বাংলা' },
+      ne: { name: 'Nepali', short: 'नेपाली', nativeLabel: 'नेपाली' },
+      as: { name: 'Assamese', short: 'অসমীয়া', nativeLabel: 'অসমীয়া' }
     };
 
     const translations = {
@@ -351,7 +366,7 @@
         hotelCta: 'Hotel Partner बनें',
         footerBody: 'स्मार्ट यात्रियों, निष्पक्ष ड्राइवरों और स्वच्छ हाईवे के लिए पारदर्शी खाली-लेग कैब एग्रीगेटर।',
         footerCompany: 'कंपनी', footerCompliance: 'कम्प्लायंस', terms: 'Terms & Conditions', privacy: 'Privacy Policy', refund: 'Terms of Use / Refund Policy',
-        rights: 'सर्वाधिकार सुरक्षित।', languagePromptEyebrow: 'स्थानीय भाषा', languagePromptTitle: 'अपनी क्षेत्रीय भाषा इस्तेमाल करें?', keepEnglish: 'English रखें'
+        rights: 'सर्वाधिकार सुरक्षित।', languagePromptEyebrow: 'भाषा विकल्प', languagePromptTitle: 'अपनी पेज भाषा चुनें'
       },
       bn: {
         navEdge: 'সুবিধা', navSustainability: 'সবুজ যাত্রা', navPartners: 'পার্টনার', bookNow: 'বুক করুন',
@@ -378,7 +393,7 @@
         hotelCta: 'Become a Hotel Partner',
         footerBody: 'Smart travelers, fair drivers এবং cleaner highways-এর জন্য transparent empty-leg cab aggregator।',
         footerCompany: 'Company', footerCompliance: 'Compliance', rights: 'All rights reserved.',
-        languagePromptEyebrow: 'Local Language', languagePromptTitle: 'আপনার স্থানীয় ভাষা ব্যবহার করবেন?', keepEnglish: 'Keep English'
+        languagePromptEyebrow: 'Language Preference', languagePromptTitle: 'আপনার পেজের ভাষা বেছে নিন'
       },
       ne: {
         navEdge: 'फाइदा', navSustainability: 'हरित यात्रा', navPartners: 'पार्टनर', bookNow: 'बुक गर्नुहोस्',
@@ -397,7 +412,8 @@
         b2bTitle: 'Mobility partners का लागि नयाँ revenue layer।',
         fleetTitle: 'Fleet Owners र Travel Agents का लागि',
         hotelTitle: 'Hotel र Resort Partners का लागि',
-        languagePromptTitle: 'आफ्नो स्थानीय भाषा प्रयोग गर्ने?', keepEnglish: 'Keep English'
+        languagePromptEyebrow: 'Language Preference',
+        languagePromptTitle: 'आफ्नो पेज भाषा छान्नुहोस्'
       },
       as: {
         navEdge: 'সুবিধা', navSustainability: 'সেউজ যাত্ৰা', navPartners: 'পাৰ্টনাৰ', bookNow: 'বুক কৰক',
@@ -414,7 +430,8 @@
         impactBody: 'CO2 বায়ুমণ্ডলত যোৱাৰ পৰা ৰোধ হ’ব পাৰে।',
         fleetTitle: 'Fleet Owners আৰু Travel Agents-ৰ বাবে',
         hotelTitle: 'Hotel আৰু Resort Partners-ৰ বাবে',
-        languagePromptTitle: 'আপোনাৰ স্থানীয় ভাষা ব্যৱহাৰ কৰিবনে?', keepEnglish: 'Keep English'
+        languagePromptEyebrow: 'Language Preference',
+        languagePromptTitle: 'আপোনাৰ পেজ ভাষা বাছনি কৰক'
       }
     };
 
@@ -446,13 +463,40 @@
       });
     };
 
-    const detectLanguageFromPosition = ({ latitude, longitude }) => {
-      if (latitude >= 26.4 && latitude <= 28.2 && longitude >= 87.8 && longitude <= 89.4) return 'ne';
-      if (latitude >= 25.7 && latitude <= 27.8 && longitude >= 88.0 && longitude <= 90.2) return 'bn';
-      if (latitude >= 24.0 && latitude <= 28.5 && longitude >= 90.0 && longitude <= 96.5) return 'as';
-      if (latitude >= 6 && latitude <= 36 && longitude >= 68 && longitude <= 98) return 'hi';
-      return 'en';
+    const supportedLanguages = Object.keys(languages);
+    const inStateLanguageMap = {
+      'west bengal': 'bn',
+      sikkim: 'ne',
+      assam: 'as',
+      bihar: 'hi',
+      jharkhand: 'hi',
+      'uttar pradesh': 'hi',
+      delhi: 'hi',
+      haryana: 'hi',
+      uttarakhand: 'hi',
+      rajasthan: 'hi',
+      madhya: 'hi',
+      chhattisgarh: 'hi',
     };
+    const northBengalNepaliKeywords = [
+      'darjeeling',
+      'kalimpong',
+      'kurseong',
+      'mirik',
+      'jalpaiguri',
+    ];
+
+    const isSupportedLanguage = (value) => supportedLanguages.includes(value);
+
+    const buildLanguagePromptOptions = (...values) => {
+      const ordered = values
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean);
+      return Array.from(new Set(ordered)).filter(isSupportedLanguage);
+    };
+
+    const isNorthBengalNepaliBelt = (tokens) =>
+      tokens.some((token) => northBengalNepaliKeywords.some((keyword) => token.includes(keyword)));
 
     const detectLanguageFromBrowser = () => {
       const navLang = (navigator.language || '').toLowerCase();
@@ -463,27 +507,100 @@
       return 'en';
     };
 
-    const showLanguagePrompt = (suggestedLang) => {
-      if (suggestedLang === 'en' || localStorage.getItem(langPromptSeenKey) === 'true') return;
+    const resolveLanguagePromptFromAddress = (address, browserPreferredLanguage) => {
+      const state = String(address.state || address.region || '').trim().toLowerCase();
+      if (!state) return null;
+
+      const district = String(address.state_district || address.county || address.city_district || '').trim().toLowerCase();
+      const city = String(address.city || address.town || address.village || address.municipality || '').trim().toLowerCase();
+      const suburb = String(address.suburb || address.hamlet || address.neighbourhood || '').trim().toLowerCase();
+      const tokens = [city, suburb, district, state].filter(Boolean);
+
+      const stateRegionalLanguage = inStateLanguageMap[state];
+      if (!stateRegionalLanguage) {
+        return {
+          suggested: ['en', 'hi'].includes(browserPreferredLanguage) ? browserPreferredLanguage : 'en',
+          options: ['en', 'hi'],
+        };
+      }
+
+      const options = buildLanguagePromptOptions('en', 'hi', stateRegionalLanguage);
+      if (state === 'west bengal' && isNorthBengalNepaliBelt(tokens)) {
+        options.push('ne');
+      }
+
+      const uniqueOptions = Array.from(new Set(options));
+      const suggested =
+        uniqueOptions.includes(browserPreferredLanguage) && !['en', 'hi'].includes(browserPreferredLanguage)
+          ? browserPreferredLanguage
+          : stateRegionalLanguage;
+
+      return { suggested, options: uniqueOptions };
+    };
+
+    const detectLanguagePromptFromGeolocation = async () => {
+      if (!navigator.geolocation) return null;
+
+      const position = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: false,
+          timeout: 6000,
+          maximumAge: 600000,
+        })
+      ).catch(() => null);
+
+      if (!position) return null;
+
+      const lat = position.coords.latitude;
+      const lon = position.coords.longitude;
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
+      ).catch(() => null);
+
+      if (!response || !response.ok) return null;
+
+      const payload = await response.json().catch(() => null);
+      const address = payload?.address || {};
+      return resolveLanguagePromptFromAddress(address, detectLanguageFromBrowser());
+    };
+
+    const buildPromptButtonLabel = (lang) => `Continue in ${languages[lang]?.nativeLabel || languages[lang]?.short || lang}`;
+
+    const commitLanguageSelection = (lang) => {
+      localStorage.setItem(langPromptSeenKey, 'true');
+      setLanguage(lang);
+      const prompt = document.getElementById('languagePrompt');
+      prompt.classList.add('hidden');
+      prompt.classList.remove('flex');
+    };
+
+    const showLanguagePrompt = (resolution) => {
+      if (!resolution || localStorage.getItem(langPromptSeenKey) === 'true') return;
+      const suggestedLang = resolution.suggested;
+      const options = Array.isArray(resolution.options) && resolution.options.length
+        ? resolution.options.filter((lang) => languages[lang])
+        : [suggestedLang, 'en'].filter((lang, index, items) => lang && items.indexOf(lang) === index);
+      const orderedOptions = Array.from(new Set([suggestedLang, ...options].filter((lang) => languages[lang])));
+      if (!orderedOptions.length || (orderedOptions.length === 1 && orderedOptions[0] === 'en')) return;
       const prompt = document.getElementById('languagePrompt');
       const body = document.getElementById('languagePromptBody');
-      const accept = document.getElementById('acceptLanguage');
-      body.textContent = `MaiRide can show this page in ${languages[suggestedLang].short}. Your location is used only on this device to suggest a language.`;
-      accept.textContent = `Use ${languages[suggestedLang].short}`;
+      const optionsContainer = document.getElementById('languagePromptOptions');
+      body.textContent = 'We detected a suggested local language for your region. You can change this anytime from the menu.';
+      optionsContainer.innerHTML = '';
+
+      orderedOptions.forEach((lang, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = buildPromptButtonLabel(lang);
+        button.className = index === 0
+          ? 'rounded-2xl bg-mairide-accent px-5 py-4 text-left font-black text-white transition hover:bg-mairide-primary'
+          : 'rounded-2xl border border-mairide-secondary/35 px-5 py-4 text-left font-bold text-mairide-primary transition hover:border-mairide-accent hover:text-mairide-accent';
+        button.addEventListener('click', () => commitLanguageSelection(lang));
+        optionsContainer.appendChild(button);
+      });
+
       prompt.classList.remove('hidden');
       prompt.classList.add('flex');
-      accept.onclick = () => {
-        localStorage.setItem(langPromptSeenKey, 'true');
-        setLanguage(suggestedLang);
-        prompt.classList.add('hidden');
-        prompt.classList.remove('flex');
-      };
-      document.getElementById('keepEnglish').onclick = () => {
-        localStorage.setItem(langPromptSeenKey, 'true');
-        setLanguage('en');
-        prompt.classList.add('hidden');
-        prompt.classList.remove('flex');
-      };
     };
 
     document.querySelectorAll('[data-ride-cta]').forEach((link) => {
@@ -524,15 +641,22 @@
     const savedLanguage = localStorage.getItem(langStorageKey);
     setLanguage(savedLanguage || detectLanguageFromBrowser());
 
-    if (!savedLanguage && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => showLanguagePrompt(detectLanguageFromPosition(position.coords)),
-        () => showLanguagePrompt(detectLanguageFromBrowser()),
-        { enableHighAccuracy: false, timeout: 3500, maximumAge: 1000 * 60 * 60 * 24 }
-      );
-    } else if (!savedLanguage) {
-      showLanguagePrompt(detectLanguageFromBrowser());
-    }
+    const initLanguagePrompt = async () => {
+      if (savedLanguage) return;
+      const resolution = await detectLanguagePromptFromGeolocation();
+      if (resolution) {
+        showLanguagePrompt(resolution);
+        return;
+      }
+
+      const browserLanguage = detectLanguageFromBrowser();
+      showLanguagePrompt({
+        suggested: browserLanguage,
+        options: Array.from(new Set(['en', browserLanguage])).filter((lang) => languages[lang]),
+      });
+    };
+
+    initLanguagePrompt();
   </script>
 </body>
 </html>
