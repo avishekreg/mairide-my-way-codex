@@ -5192,6 +5192,11 @@ const sanitizeDisplayName = (value: string) =>
     .slice(0, 80);
 
 const normalizeEmailValue = (value: string) => String(value || '').trim().toLowerCase();
+const isLandingWebHost = () => {
+  if (typeof window === 'undefined') return false;
+  const hostname = String(window.location.hostname || '').toLowerCase();
+  return hostname === 'mairide.in' || hostname === 'www.mairide.in';
+};
 const getOAuthUrlParam = (key: string) => {
   if (typeof window === 'undefined') return null;
   return new URLSearchParams(window.location.search).get(key);
@@ -22292,6 +22297,17 @@ const App = () => {
     const target = `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash || ''}`;
     window.history.replaceState({}, '', target);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!isLandingWebHost()) return;
+    if (!user) return;
+    const target = new URL(window.location.href);
+    target.protocol = 'https:';
+    target.hostname = 'rides.mairide.in';
+    if (target.port) target.port = '';
+    window.location.replace(target.toString());
+  }, [user]);
 
   useEffect(() => {
     if (!isLocalRazorpayEnabled()) return;
