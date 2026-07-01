@@ -79,6 +79,90 @@
         {
           "type": "host",
           "value": "mairide.in"
+        },
+        {
+          "type": "query",
+          "key": "code"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mairide.in"
+        },
+        {
+          "type": "query",
+          "key": "code"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "mairide.in"
+        },
+        {
+          "type": "query",
+          "key": "oauthMode"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mairide.in"
+        },
+        {
+          "type": "query",
+          "key": "oauthMode"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "mairide.in"
+        },
+        {
+          "type": "query",
+          "key": "error"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mairide.in"
+        },
+        {
+          "type": "query",
+          "key": "error"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "mairide.in"
         }
       ],
       "destination": "/landing.html"
