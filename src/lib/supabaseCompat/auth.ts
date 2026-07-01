@@ -100,6 +100,72 @@ function getOAuthRedirectBase() {
   return window.location.origin || 'https://rides.mairide.in';
 }
 
+function buildOAuthPopupFeatures() {
+  if (typeof window === 'undefined') return 'width=520,height=720';
+  const width = 520;
+  const height = 720;
+  const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+  const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
+  return [
+    'popup=yes',
+    'toolbar=no',
+    'menubar=no',
+    'width=' + width,
+    'height=' + height,
+    'left=' + left,
+    'top=' + top,
+  ].join(',');
+}
+
+async function waitForOAuthPopupSession(authInstance: SupabaseAuthCompat, popup: Window | null) {
+  return await new Promise<UserCredential>((resolve, reject) => {
+    let settled = false;
+    let closePoll: ReturnType<typeof window.setInterval> | null = null;
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
+
+    const cleanup = () => {
+      unsubscribe?.();
+      if (closePoll) window.clearInterval(closePoll);
+      if (timeoutId) window.clearTimeout(timeoutId);
+      window.removeEventListener('message', onMessage);
+    };
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn();
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== 'mairide-oauth-complete') return;
+      if (authInstance.currentUser) {
+        finish(() => resolve({ user: authInstance.currentUser as User }));
+      }
+    };
+
+    const unsubscribe = onAuthStateChanged(authInstance, (nextUser) => {
+      if (!nextUser || nextUser.isAnonymous) return;
+      finish(() => resolve({ user: nextUser }));
+    });
+
+    window.addEventListener('message', onMessage);
+
+    closePoll = window.setInterval(() => {
+      if (popup && popup.closed) {
+        finish(() => {
+          reject(Object.assign(new Error('Google sign-in was closed before it completed.'), { code: 'auth/popup-closed-by-user' }));
+        });
+      }
+    }, 400);
+
+    timeoutId = window.setTimeout(() => {
+      finish(() => reject(new Error('Google sign-in timed out. Please try again.')));
+    }, 120000);
+  });
+}
+
 export class RecaptchaVerifier {
   constructor(
     public container: string | HTMLElement,
@@ -186,7 +252,7 @@ export async function signInAnonymously(authInstance: SupabaseAuthCompat) {
 }
 
 export async function signInWithPopup(
-  _authInstance: SupabaseAuthCompat,
+  authInstance: SupabaseAuthCompat,
   _provider: GoogleAuthProvider
 ) {
   sessionStorage.setItem('mairide_oauth_started', 'google');
@@ -203,12 +269,19 @@ export async function signInWithPopup(
     provider: 'google',
     options: {
       redirectTo: redirectUrl.toString(),
+      skipBrowserRedirect: true,
     },
   });
 
   if (error) throw mapAuthError(error);
   if (data?.url) {
-    window.location.assign(data.url);
+    const popup = window.open(data.url, 'mairide-google-oauth', buildOAuthPopupFeatures());
+    if (!popup) {
+      window.location.assign(data.url);
+      return { user: auth.currentUser as User };
+    }
+    popup.focus?.();
+    return await waitForOAuthPopupSession(authInstance, popup);
   }
 
   return { user: auth.currentUser as User };
