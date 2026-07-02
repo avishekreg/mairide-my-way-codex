@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { Buffer } from "node:buffer";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
 type CapacityMetricSeverity = "healthy" | "watch" | "warning" | "critical";
@@ -22,6 +23,60 @@ function getAction(req: any) {
   if (typeof action === "string") return action;
   if (Array.isArray(action) && action[0]) return action[0];
   return "";
+}
+
+function decodePartnerDocumentDataUrl(dataUrl: string) {
+  const match = String(dataUrl || "").match(/^data:(.*?);base64,(.*)$/);
+  if (!match) {
+    throw new Error("Invalid verification document payload.");
+  }
+
+  return {
+    mimeType: match[1] || "application/octet-stream",
+    buffer: Buffer.from(match[2], "base64"),
+  };
+}
+
+function sanitizePartnerEmail(email: string) {
+  return String(email || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+}
+
+function sanitizePartnerFileExtension(fileName: string, mimeType: string) {
+  const fileExtension = String(fileName || "").split(".").pop()?.toLowerCase() || "";
+  if (fileExtension && /^[a-z0-9]{1,8}$/.test(fileExtension)) {
+    return fileExtension;
+  }
+
+  if (mimeType.includes("pdf")) return "pdf";
+  if (mimeType.includes("png")) return "png";
+  if (mimeType.includes("webp")) return "webp";
+  return "jpg";
+}
+
+function normalizePartnerRow(row: any) {
+  return {
+    id: String(row.id),
+    authUserId: row.auth_user_id || null,
+    businessName: String(row.business_name || ""),
+    type: row.type,
+    gstNumber: row.gst_number || null,
+    contactPerson: String(row.contact_person || ""),
+    phone: String(row.phone || ""),
+    email: String(row.email || ""),
+    documentUrl: String(row.document_url || ""),
+    signupLatitude: row.signup_latitude == null ? null : Number(row.signup_latitude),
+    signupLongitude: row.signup_longitude == null ? null : Number(row.signup_longitude),
+    commissionPercentage: Number(row.commission_percentage || 0),
+    razorpayLinkedAccountId: row.razorpay_linked_account_id || null,
+    status: row.status || "pending",
+    verifiedAt: row.verified_at || null,
+    createdAt: String(row.created_at || new Date().toISOString()),
+    updatedAt: String(row.updated_at || row.created_at || new Date().toISOString()),
+    data: row.data && typeof row.data === "object" ? row.data : {},
+  };
 }
 
 function getAuthHeader(req: any) {
@@ -562,6 +617,136 @@ async function handleForceCancelRide(req: any, res: any) {
   }
 
   return res.status(200).json({ message: "Ride cancelled successfully." });
+}
+
+async function handlePartnerSubmitApplication(req: any, res: any) {
+  const supabaseAdmin = getSupabaseAdmin();
+  const authHeader = getAuthHeader(req);
+  let authUser: any = null;
+
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice("Bearer ".length);
+    const { data } = await supabaseAdmin.auth.getUser(token);
+    authUser = data?.user || null;
+  }
+
+  const body = req.body || {};
+  const partnerType = String(body.partnerType || "").trim();
+  const businessName = String(body.businessName || "").trim();
+  const contactPerson = String(body.contactPerson || "").trim();
+  const phone = String(body.phone || "").trim();
+  const email = String(body.email || authUser?.email || "").trim().toLowerCase();
+  const gstNumber = String(body.gstNumber || "").trim() || null;
+  const documentDataUrl = String(body.documentDataUrl || "").trim();
+  const documentName = String(body.documentName || "").trim();
+  const signupLatitude = body.signupLatitude == null ? null : Number(body.signupLatitude);
+  const signupLongitude = body.signupLongitude == null ? null : Number(body.signupLongitude);
+
+  if (!["fleet_owner", "hotel_partner"].includes(partnerType)) {
+    return res.status(400).json({ error: "Invalid partner type." });
+  }
+
+  if (!businessName || !contactPerson || !phone || !email || !documentDataUrl || !documentName) {
+    return res.status(400).json({ error: "Please complete all required business details and upload a verification document." });
+  }
+
+  const { mimeType, buffer } = decodePartnerDocumentDataUrl(documentDataUrl);
+  const extension = sanitizePartnerFileExtension(documentName, mimeType);
+  const bucket = String(process.env.VITE_SUPABASE_STORAGE_BUCKET || "mairide-assets").trim() || "mairide-assets";
+  const safeEmail = sanitizePartnerEmail(email);
+  const documentPath = `b2b-partners/${partnerType}/${safeEmail}-${Date.now()}.${extension}`;
+
+  const uploadResult = await supabaseAdmin.storage.from(bucket).upload(documentPath, buffer, {
+    upsert: true,
+    contentType: mimeType,
+  });
+  if (uploadResult.error) {
+    return res.status(500).json({ error: uploadResult.error.message || "Failed to upload verification document." });
+  }
+
+  const publicUrlResult = supabaseAdmin.storage.from(bucket).getPublicUrl(documentPath);
+  const documentUrl = String(publicUrlResult.data.publicUrl || "").trim();
+  if (!documentUrl) {
+    return res.status(500).json({ error: "Verification document URL could not be generated." });
+  }
+
+  const { data: existingPartner, error: existingError } = await supabaseAdmin
+    .from("b2b_partners")
+    .select("*")
+    .ilike("email", email)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (existingPartner?.status === "approved") {
+    return res.status(409).json({ error: "This business is already approved. Please sign in to the partner workspace." });
+  }
+
+  const writePayload = {
+    auth_user_id: authUser?.id || existingPartner?.auth_user_id || null,
+    business_name: businessName,
+    type: partnerType,
+    gst_number: gstNumber,
+    contact_person: contactPerson,
+    phone,
+    email,
+    document_url: documentUrl,
+    signup_latitude: Number.isFinite(signupLatitude) ? signupLatitude : null,
+    signup_longitude: Number.isFinite(signupLongitude) ? signupLongitude : null,
+    status: "pending",
+    verified_at: null,
+  };
+
+  const writeResult = existingPartner?.id
+    ? await supabaseAdmin.from("b2b_partners").update(writePayload).eq("id", existingPartner.id).select("*").single()
+    : await supabaseAdmin.from("b2b_partners").insert(writePayload).select("*").single();
+
+  if (writeResult.error || !writeResult.data) {
+    return res.status(500).json({ error: writeResult.error?.message || "Failed to submit partner application." });
+  }
+
+  return res.status(200).json({ partner: normalizePartnerRow(writeResult.data) });
+}
+
+async function handlePartnerList(req: any, res: any) {
+  const auth = await getAuthenticatedAdmin(req, false);
+  if ("error" in auth) {
+    return res.status(auth.error.status).json({ error: auth.error.message });
+  }
+
+  const { data, error } = await auth.supabaseAdmin
+    .from("b2b_partners")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return res.status(200).json({ partners: (data || []).map(normalizePartnerRow) });
+}
+
+async function handlePartnerSetStatus(req: any, res: any) {
+  const auth = await getAuthenticatedAdmin(req, false);
+  if ("error" in auth) {
+    return res.status(auth.error.status).json({ error: auth.error.message });
+  }
+
+  const partnerId = String(req.body?.partnerId || "").trim();
+  const status = String(req.body?.status || "").trim();
+  if (!partnerId || !["approved", "rejected"].includes(status)) {
+    return res.status(400).json({ error: "Invalid partner status request." });
+  }
+
+  const { data, error } = await auth.supabaseAdmin
+    .from("b2b_partners")
+    .update({
+      status,
+      verified_at: status === "approved" ? new Date().toISOString() : null,
+    })
+    .eq("id", partnerId)
+    .select("*")
+    .single();
+
+  if (error || !data) throw error || new Error("Failed to update partner status.");
+  return res.status(200).json({ partner: normalizePartnerRow(data) });
 }
 
 async function handleDeleteUser(req: any, res: any) {
@@ -1651,6 +1836,15 @@ export default async function handler(req: any, res: any) {
       case "mobile-app":
         if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
         return handleMobileApp(req, res);
+      case "partner-submit-application":
+        if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+        return handlePartnerSubmitApplication(req, res);
+      case "partner-list":
+        if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+        return handlePartnerList(req, res);
+      case "partner-set-status":
+        if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+        return handlePartnerSetStatus(req, res);
       default:
         return res.status(404).json({ error: "Admin action not found" });
     }

@@ -97,7 +97,7 @@ const submitPartnerApplication = async ({
 }) => {
   const accessToken = await getOptionalPartnerAccessToken();
   const documentDataUrl = await readFileAsDataUrl(documentFile);
-  const response = await fetch('/api/partner-api?action=submit-application', {
+  const response = await fetch('/api/admin-api?action=partner-submit-application', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -905,7 +905,7 @@ export const AdminB2BVerificationDesk = ({
     void (async () => {
       try {
         const headers = await getAdminRequestHeaders();
-        const response = await fetch('/api/partner-api?action=list', { headers });
+        const response = await fetch('/api/admin-api?action=partner-list', { headers });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(String(payload?.error || 'Failed to load partner applications.'));
@@ -931,7 +931,7 @@ export const AdminB2BVerificationDesk = ({
     setErrorMessage(null);
     try {
       const headers = await getAdminRequestHeaders();
-      const response = await fetch('/api/partner-api?action=set-status', {
+      const response = await fetch('/api/admin-api?action=partner-set-status', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
