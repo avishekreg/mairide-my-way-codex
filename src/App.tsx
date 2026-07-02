@@ -54,8 +54,10 @@ import {
 } from 'firebase/storage';
 import { auth, db, storage } from './lib/firebase';
 import { supabase } from './lib/supabase';
-import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest } from './types';
+import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest, B2BPartner } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
+import { b2bPartnerService } from './services/b2bPartnerService';
+import { AdminB2BVerificationDesk, PartnerApplicationPage, PartnerPortal } from './b2b';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { PushNotifications, type Token } from '@capacitor/push-notifications';
@@ -129,7 +131,8 @@ import {
   Download,
   Upload,
   Bell,
-  Smartphone
+  Smartphone,
+  Building2
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
@@ -150,7 +153,7 @@ type BeforeInstallPromptEvent = Event & {
 
 const deg2rad = (deg: number) => deg * (Math.PI / 180);
 
-const WEB_API_ORIGIN_FALLBACK = 'https://www.mairide.in';
+const WEB_API_ORIGIN_FALLBACK = 'https://rides.mairide.in';
 const WEB_API_ORIGIN_FAILOVER = 'https://mairide-my-way-codex.vercel.app';
 const UI_LANGUAGE_PROMPT_APP_SEEN_KEY = 'mairide_ui_language_prompt_seen_app';
 
@@ -169,7 +172,7 @@ const isAppWebViewRuntime = () => {
 const isAppDisplayMode = () => {
   if (typeof window === "undefined") return false;
   const isStandalone = typeof window.matchMedia === "function" && window.matchMedia("(display-mode: standalone)").matches;
-  return isAppWebViewRuntime() || isAndroidWebViewLikeRuntime() || isStandalone;
+  return isAppWebViewRuntime() || isMobileAppRuntime() || isStandalone;
 };
 
 const isLocalDevFirestoreMode = () => {
@@ -206,6 +209,8 @@ const resolveApiBaseUrl = () => {
 
 const apiPath = (path: string) => `${resolveApiBaseUrl()}${path}`;
 
+const isPartnerRoutePath = (pathname: string) => pathname.startsWith('/partners');
+
 const isAndroidWebViewLikeRuntime = () => {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
   const ua = String(navigator.userAgent || '').toLowerCase();
@@ -233,6 +238,34 @@ const isAndroidWebViewLikeRuntime = () => {
     (/ wv|; wv|version\/\d+\.\d+ mobile/.test(ua) || protocol === 'capacitor:' || protocol === 'ionic:')
   ) || isNativeCapacitorAndroid || (/android/.test(ua) && (hasCordova || hasReactNative));
 };
+
+const isIosAppRuntime = () => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const ua = String(navigator.userAgent || '').toLowerCase();
+  const protocol = String(window.location.protocol || '').toLowerCase();
+  const capacitorPlatform = (() => {
+    try {
+      return typeof Capacitor?.getPlatform === 'function' ? String(Capacitor.getPlatform() || '').toLowerCase() : '';
+    } catch {
+      return '';
+    }
+  })();
+  const isNativeCapacitorIos = (() => {
+    try {
+      return capacitorPlatform === 'ios' && typeof Capacitor?.isNativePlatform === 'function'
+        ? Capacitor.isNativePlatform()
+        : capacitorPlatform === 'ios';
+    } catch {
+      return capacitorPlatform === 'ios';
+    }
+  })();
+  return isNativeCapacitorIos || (
+    /iphone|ipad|ipod/.test(ua)
+    && (protocol === 'capacitor:' || protocol === 'ionic:' || typeof (window as any).cordova !== 'undefined')
+  );
+};
+
+const isMobileAppRuntime = () => isAndroidWebViewLikeRuntime() || isIosAppRuntime();
 
 const buildOriginCandidates = (path?: string) => {
   if (typeof window === 'undefined') {
@@ -1380,15 +1413,31 @@ const AdminMobileAppView = () => {
       productionCommit?: string | null;
       productionDeployId?: string | null;
     };
+    iosDeployment: {
+      metadataStatus?: string;
+      available?: boolean;
+      appVersion?: string | null;
+      distribution?: string | null;
+      ipaUrl?: string | null;
+      manifestUrl?: string | null;
+      installUrl?: string | null;
+      updateUrl?: string | null;
+      buildSha?: string | null;
+      builtAt?: string | null;
+      metadataError?: string | null;
+    };
     installUsage: {
       apkDownloads30d: number;
       appUpdateStarts30d: number;
+      ipaDownloads30d: number;
+      iosUpdateStarts30d: number;
       appOpens30d: number;
       loginEvents30d: number;
       activeAppUsers30d: number;
     };
     pushHealth: {
       fcmConfigured: boolean;
+      apnsConfigured: boolean;
       registeredDevices30d: number;
       activePushDevices: number;
       usersWithPush: number;
@@ -1481,7 +1530,7 @@ const AdminMobileAppView = () => {
       const matchesType =
         eventTypeFilter === 'all'
         || (eventTypeFilter === 'push' && metricKey.startsWith('push_'))
-        || (eventTypeFilter === 'install' && metricKey.startsWith('android_'))
+        || (eventTypeFilter === 'install' && (metricKey.startsWith('android_') || metricKey.startsWith('ios_')))
         || (eventTypeFilter === 'usage' && ['app_opened', 'user_logged_in'].includes(metricKey))
         || (eventTypeFilter === 'proximity' && notificationType.startsWith('nearby_'));
       const matchesSearch = matchesAdminSearch(eventSearch, [
@@ -1524,40 +1573,49 @@ const AdminMobileAppView = () => {
   }
 
   const deployment = payload?.deployment;
+  const iosDeployment = payload?.iosDeployment;
   const installUsage = payload?.installUsage;
   const pushHealth = payload?.pushHealth;
   const proximity = payload?.proximity;
   const shortSha = deployment?.buildSha ? deployment.buildSha.slice(0, 8) : 'N/A';
+  const iosShortSha = iosDeployment?.buildSha ? iosDeployment.buildSha.slice(0, 8) : 'N/A';
 
   return (
     <div className="space-y-8">
       <div className="rounded-[36px] bg-mairide-primary p-6 md:p-8 text-white shadow-xl shadow-mairide-primary/10">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/60">Android Control Room</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/60">Mobile App Control Room</p>
             <h2 className="mt-2 text-3xl font-black tracking-tight">Mobile App Deployment & Push Health</h2>
             <p className="mt-2 max-w-3xl text-sm text-white/70">
-              Dedicated view for APK metadata, app usage, FCM registration, and nearby proximity notification delivery.
+              Android APK and iOS IPA metadata, install activity, device registration, and notification delivery health.
             </p>
           </div>
-          <div className="rounded-[28px] bg-white/10 p-5 backdrop-blur-md">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">Latest APK</p>
-            <p className="mt-2 text-2xl font-black">{deployment?.appVersion || 'Version unavailable'}</p>
-            <p className="mt-1 text-xs text-white/70">
-              Build {shortSha} • {deployment?.builtAt ? new Date(deployment.builtAt).toLocaleString() : 'Build time unavailable'}
-            </p>
-            <p className={cn(
-              "mt-3 inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest",
-              deployment?.metadataStatus === 'live' ? 'bg-green-400/20 text-green-100' : 'bg-orange-400/20 text-orange-100'
-            )}>
-              Metadata {deployment?.metadataStatus || 'unknown'}
-            </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              { label: 'Latest Android APK', version: deployment?.appVersion, sha: shortSha, builtAt: deployment?.builtAt, status: deployment?.metadataStatus },
+              { label: 'Latest iOS IPA', version: iosDeployment?.appVersion, sha: iosShortSha, builtAt: iosDeployment?.builtAt, status: iosDeployment?.metadataStatus },
+            ].map((release) => (
+              <div key={release.label} className="rounded-[28px] bg-white/10 p-5 backdrop-blur-md min-w-[220px]">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">{release.label}</p>
+                <p className="mt-2 text-2xl font-black">{release.version || 'Version unavailable'}</p>
+                <p className="mt-1 text-xs text-white/70">
+                  Build {release.sha} • {release.builtAt ? new Date(release.builtAt).toLocaleString() : 'Build time unavailable'}
+                </p>
+                <p className={cn(
+                  "mt-3 inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest",
+                  release.status === 'live' ? 'bg-green-400/20 text-green-100' : 'bg-orange-400/20 text-orange-100'
+                )}>
+                  Metadata {release.status || 'unknown'}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm lg:col-span-2">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">APK / Deployment Status</p>
@@ -1594,20 +1652,58 @@ const AdminMobileAppView = () => {
         </div>
 
         <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">FCM Runtime</p>
-          <h3 className="mt-2 text-2xl font-black text-mairide-primary">
-            {pushHealth?.fcmConfigured ? 'Ready to send' : 'Credentials missing'}
-          </h3>
+          <div className="flex flex-col gap-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">IPA / Deployment Status</p>
+              <h3 className="mt-2 text-2xl font-black text-mairide-primary">Current iOS release</h3>
+              <p className="mt-1 text-sm text-mairide-secondary">Signed IPA, OTA manifest, and Apple distribution state.</p>
+            </div>
+            <a
+              href={iosDeployment?.installUrl || iosDeployment?.ipaUrl || '/downloads/ios/'}
+              target="_blank"
+              rel="noreferrer"
+              className="w-fit rounded-2xl bg-mairide-accent px-5 py-3 text-sm font-bold text-white hover:bg-mairide-primary"
+            >
+              {iosDeployment?.available ? 'Open iOS Install' : 'Open iOS Release Page'}
+            </a>
+          </div>
+          <div className="mt-5 grid grid-cols-1 gap-3">
+            {[
+              ['App version', iosDeployment?.appVersion || 'N/A'],
+              ['Distribution', iosDeployment?.distribution || 'N/A'],
+              ['Update JSON', iosDeployment?.updateUrl || 'N/A'],
+              ['IPA URL', iosDeployment?.ipaUrl || 'Pending Apple signing'],
+              ['Install manifest', iosDeployment?.manifestUrl || 'Pending Apple signing'],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-2xl bg-mairide-bg p-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{label}</p>
+                <p className="mt-2 break-all text-sm font-bold text-mairide-primary">{value}</p>
+              </div>
+            ))}
+          </div>
+          {iosDeployment?.metadataError ? (
+            <p className="mt-4 rounded-2xl bg-orange-50 p-3 text-xs font-bold text-orange-700">
+              Metadata warning: {iosDeployment.metadataError}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Push Runtime</p>
+          <h3 className="mt-2 text-2xl font-black text-mairide-primary">Android + iOS delivery</h3>
           <p className="mt-2 text-sm text-mairide-secondary">
-            {pushHealth?.fcmConfigured
-              ? 'Firebase service account is present in production, so nearby pushes can be delivered.'
-              : 'Token registration can still work, but delivery will be skipped until Firebase service account JSON is configured.'}
+            Android uses Firebase Cloud Messaging. iOS uses Apple Push Notification service credentials.
           </p>
-          <div className={cn(
-            "mt-5 rounded-2xl p-4 text-sm font-bold",
-            pushHealth?.fcmConfigured ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'
-          )}>
-            Success rate last 24h: {pushHealth?.successRate24h ?? 0}%
+          <div className="mt-5 grid gap-3">
+            <div className={cn("rounded-2xl p-4 text-sm font-bold", pushHealth?.fcmConfigured ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700')}>
+              Android FCM: {pushHealth?.fcmConfigured ? 'Configured' : 'Credentials missing'}
+            </div>
+            <div className={cn("rounded-2xl p-4 text-sm font-bold", pushHealth?.apnsConfigured ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700')}>
+              Apple APNs: {pushHealth?.apnsConfigured ? 'Configured' : 'Credentials missing'}
+            </div>
+            <div className="rounded-2xl bg-mairide-bg p-4 text-sm font-bold text-mairide-primary">
+              Success rate last 24h: {pushHealth?.successRate24h ?? 0}%
+            </div>
           </div>
         </div>
       </div>
@@ -1615,11 +1711,13 @@ const AdminMobileAppView = () => {
       <div className="space-y-4">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-mairide-secondary">Install & Usage</p>
-          <h3 className="mt-1 text-2xl font-black text-mairide-primary">Android install activity</h3>
+          <h3 className="mt-1 text-2xl font-black text-mairide-primary">Android and iOS install activity</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {renderMetricCard('APK downloads', installUsage?.apkDownloads30d ?? 0, 'Started downloads in the last 30 days.', Download, 'orange')}
-          {renderMetricCard('Update starts', installUsage?.appUpdateStarts30d ?? 0, 'App update actions started in the last 30 days.', Upload, 'blue')}
+          {renderMetricCard('Android updates', installUsage?.appUpdateStarts30d ?? 0, 'Android update actions started in the last 30 days.', Upload, 'blue')}
+          {renderMetricCard('IPA downloads', installUsage?.ipaDownloads30d ?? 0, 'Signed iOS package downloads in the last 30 days.', Download, 'orange')}
+          {renderMetricCard('iOS updates', installUsage?.iosUpdateStarts30d ?? 0, 'iOS install or update actions started in the last 30 days.', Upload, 'blue')}
           {renderMetricCard('Active app users', installUsage?.activeAppUsers30d ?? 0, 'Distinct signed-in app users in the last 30 days.', Users, 'green')}
           {renderMetricCard('App opens', installUsage?.appOpens30d ?? 0, 'Recorded app open events in the last 30 days.', Smartphone, 'dark')}
           {renderMetricCard('Login events', installUsage?.loginEvents30d ?? 0, 'Signed-in mobile/web app login telemetry.', UserIcon, 'dark')}
@@ -1938,7 +2036,7 @@ const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
 const TRACKED_ANDROID_APK_URL = '/api/analytics?action=android-download';
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v3.0.1-beta';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v3.0.1-beta+build.248';
 const APP_NAV_HOME_EVENT = 'mairide:navigate-home';
 const APP_NAV_TAB_EVENT = 'mairide:navigate-tab';
 const APP_DIALOG_EVENT = 'mairide:dialog';
@@ -1948,7 +2046,7 @@ const COOKIE_CONSENT_STORAGE_KEY = 'mairide_cookie_consent_v1';
 const COOKIE_CONSENT_OPEN_EVENT = 'mairide:cookie-consent-open';
 const REGISTRATION_CAMERA_PERMISSION_KEY_PREFIX = 'mairide_registration_camera_prompted_v1';
 const REGISTRATION_LOCATION_PERMISSION_KEY_PREFIX = 'mairide_registration_location_prompted_v1';
-const isAndroidAppRuntime = () => isAppWebViewRuntime() || isAndroidWebViewLikeRuntime();
+const isAndroidAppRuntime = () => isAndroidWebViewLikeRuntime();
 const isLocalDevHost = () =>
   typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const safeStorageGet = (storageType: 'local' | 'session', key: string) => {
@@ -1992,13 +2090,13 @@ const requestNativeAndroidCameraPermission = async () => {
 
     return isGrantedNativePermission(cameraPermission);
   } catch (error) {
-    console.warn('Android registration camera permission request failed:', error);
+    console.warn('Mobile registration camera permission request failed:', error);
     return false;
   }
 };
 const requestNativeAndroidLocationPermission = async () => {
   try {
-    if (Capacitor.isNativePlatform() && isAndroidAppRuntime()) {
+    if (Capacitor.isNativePlatform() && isMobileAppRuntime()) {
       const currentPermissions = await Geolocation.checkPermissions().catch(() => null);
       let locationPermission = String(
         currentPermissions?.location || currentPermissions?.coarseLocation || ''
@@ -2022,25 +2120,25 @@ const requestNativeAndroidLocationPermission = async () => {
       navigator.geolocation.getCurrentPosition(
         () => resolve(true),
         (error) => {
-          console.warn('Android registration location permission request failed:', error);
+          console.warn('Mobile registration location permission request failed:', error);
           resolve(false);
         },
         { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
       );
     });
   } catch (error) {
-    console.warn('Android registration location bootstrap failed:', error);
+    console.warn('Mobile registration location bootstrap failed:', error);
     return false;
   }
 };
-const requestAndroidRegistrationPermissions = async ({
+const requestMobileRegistrationPermissions = async ({
   uid,
   role,
 }: {
   uid: string;
   role: 'consumer' | 'driver' | 'admin';
 }) => {
-  if (typeof window === 'undefined' || !isAndroidAppRuntime() || !uid || role === 'admin') return;
+  if (typeof window === 'undefined' || !isMobileAppRuntime() || !uid || role === 'admin') return;
 
   const cameraKey = buildRegistrationPermissionStorageKey(REGISTRATION_CAMERA_PERMISSION_KEY_PREFIX, uid);
   const locationKey = buildRegistrationPermissionStorageKey(REGISTRATION_LOCATION_PERMISSION_KEY_PREFIX, uid);
@@ -2051,7 +2149,7 @@ const requestAndroidRegistrationPermissions = async ({
       safeStorageSet('local', cameraKey, '1');
     } else {
       safeStorageRemove('local', cameraKey);
-      console.warn('Android registration camera permission not granted yet.');
+      console.warn('Mobile registration camera permission not granted yet.');
     }
   }
 
@@ -2061,7 +2159,7 @@ const requestAndroidRegistrationPermissions = async ({
       safeStorageSet('local', locationKey, '1');
     } else {
       safeStorageRemove('local', locationKey);
-      console.warn('Android registration location permission not granted yet.');
+      console.warn('Mobile registration location permission not granted yet.');
     }
   }
 };
@@ -2258,8 +2356,8 @@ const openAndroidAppSettings = async () => {
   return false;
 };
 
-const ensureAndroidDriverSignupPermissions = async () => {
-  if (typeof window === 'undefined' || !isAndroidAppRuntime()) {
+const ensureMobileDriverSignupPermissions = async () => {
+  if (typeof window === 'undefined' || !isMobileAppRuntime()) {
     return { cameraGranted: true, locationGranted: true };
   }
 
@@ -3715,7 +3813,7 @@ const trackPlatformUsageEvent = async (
         value: options.value ?? 1,
         data: {
           appVersion: APP_VERSION,
-          runtime: isAndroidAppRuntime() ? 'android_app' : 'web',
+          runtime: isAndroidAppRuntime() ? 'android_app' : isIosAppRuntime() ? 'ios_app' : 'web',
           path: window.location.pathname,
           ...data,
         },
@@ -3727,8 +3825,11 @@ const trackPlatformUsageEvent = async (
   }
 };
 
-const registerAndroidPushDevice = async (profile: UserProfile, releaseVersion: string) => {
-  if (!isAndroidAppRuntime() || profile.role === 'admin') return () => {};
+const registerMobilePushDevice = async (profile: UserProfile, releaseVersion: string) => {
+  if (!isMobileAppRuntime() || profile.role === 'admin') return () => {};
+
+  const platform = isIosAppRuntime() ? 'ios' : 'android';
+  const runtime = platform === 'ios' ? 'ios_app' : 'android_app';
 
   const permission = await PushNotifications.checkPermissions();
   const nextPermission = permission.receive === 'prompt'
@@ -3736,21 +3837,23 @@ const registerAndroidPushDevice = async (profile: UserProfile, releaseVersion: s
     : permission;
 
   if (nextPermission.receive !== 'granted') {
-    console.warn('Android push notifications permission not granted.');
+    console.warn(`${platform} push notifications permission not granted.`);
     return () => {};
   }
 
-  await PushNotifications.createChannel?.({
-    id: 'mairide_nearby',
-    name: 'Nearby rides',
-    description: 'Nearby travelers, drivers, ride requests, and ride offers.',
-    importance: 4,
-    visibility: 1,
-    sound: 'default',
-    vibration: true,
-  }).catch(() => {
-    // Channel creation is Android-only and should never block token registration.
-  });
+  if (platform === 'android') {
+    await PushNotifications.createChannel?.({
+      id: 'mairide_nearby',
+      name: 'Nearby rides',
+      description: 'Nearby travelers, drivers, ride requests, and ride offers.',
+      importance: 4,
+      visibility: 1,
+      sound: 'default',
+      vibration: true,
+    }).catch(() => {
+      // Channel creation is Android-only and should never block token registration.
+    });
+  }
 
   const registrationHandle = await PushNotifications.addListener('registration', async (token: Token) => {
     const accessToken = await getOptionalAccessToken();
@@ -3764,20 +3867,21 @@ const registerAndroidPushDevice = async (profile: UserProfile, releaseVersion: s
       },
       body: JSON.stringify({
         token: token.value,
-        platform: 'android',
-        runtime: 'android_app',
+        platform,
+        runtime,
+        pushEnvironment: import.meta.env.PROD ? 'production' : 'development',
         appVersion: releaseVersion || APP_VERSION,
         location: profile.location
           ? { lat: profile.location.lat, lng: profile.location.lng }
           : undefined,
       }),
     }).catch((error) => {
-      console.warn('Android push device registration failed:', error);
+      console.warn(`${platform} push device registration failed:`, error);
     });
   });
 
   const registrationErrorHandle = await PushNotifications.addListener('registrationError', (error) => {
-    console.warn('Android push registration error:', error);
+    console.warn(`${platform} push registration error:`, error);
   });
 
   const receivedHandle = await PushNotifications.addListener('pushNotificationReceived', (notification) => {
@@ -4775,7 +4879,7 @@ const Navbar = ({
   isUploadingTravelerAvatar?: boolean,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const isAndroidShell = isAndroidAppRuntime();
+  const isAndroidShell = isMobileAppRuntime();
   const navigate = useNavigate();
   const handleHomeNavigation = () => {
     window.dispatchEvent(new CustomEvent(APP_NAV_HOME_EVENT, { detail: { role: profile?.role } }));
@@ -5904,7 +6008,7 @@ const findUserProfileByPhone = async (value: string) => {
   const completeEmailPasswordSignUp = async () => {
     try {
       if (role === 'driver' && isAndroidAppRuntime()) {
-        const { cameraGranted, locationGranted } = await ensureAndroidDriverSignupPermissions();
+        const { cameraGranted, locationGranted } = await ensureMobileDriverSignupPermissions();
         if (!cameraGranted || !locationGranted) {
           alert('Camera and location permissions are required before driver signup can continue. Please allow both permissions and try again.');
           return;
@@ -6140,7 +6244,7 @@ const findUserProfileByPhone = async (value: string) => {
     setNotRegisteredError(false);
     try {
       if (authMode === 'signup' && role === 'driver' && isAndroidAppRuntime()) {
-        const { cameraGranted, locationGranted } = await ensureAndroidDriverSignupPermissions();
+        const { cameraGranted, locationGranted } = await ensureMobileDriverSignupPermissions();
         if (!cameraGranted || !locationGranted) {
           alert('Camera and location permissions are required before driver signup can continue. Please allow both permissions and try again.');
           return;
@@ -6251,7 +6355,7 @@ const findUserProfileByPhone = async (value: string) => {
           await setDoc(docRef, newProfile);
           clearStoredOAuthIntent();
           if (isSignUp) {
-            void requestAndroidRegistrationPermissions({ uid: user.uid, role: newProfile.role });
+            void requestMobileRegistrationPermissions({ uid: user.uid, role: newProfile.role });
           }
           
           if (oldUid !== user.uid && !oldUid.startsWith('manual_')) {
@@ -6293,7 +6397,7 @@ const findUserProfileByPhone = async (value: string) => {
         await setDoc(docRef, newProfile);
         clearStoredOAuthIntent();
         if (isSignUp) {
-          void requestAndroidRegistrationPermissions({ uid: user.uid, role: newProfile.role });
+          void requestMobileRegistrationPermissions({ uid: user.uid, role: newProfile.role });
         }
         
         // Initialize wallet and referral
@@ -6310,7 +6414,7 @@ const findUserProfileByPhone = async (value: string) => {
         }
         clearStoredOAuthIntent();
         if (isSignUp) {
-          void requestAndroidRegistrationPermissions({ uid: user.uid, role: existingProfile.role });
+          void requestMobileRegistrationPermissions({ uid: user.uid, role: existingProfile.role });
         }
       }
     } catch (error: any) {
@@ -7255,7 +7359,7 @@ const DriverOnboarding = ({
   const aadhaarSegments = splitAadhaarDigits(formData.aadhaarNumber);
 
   useEffect(() => {
-    void requestAndroidRegistrationPermissions({ uid: profile.uid, role: 'driver' });
+    void requestMobileRegistrationPermissions({ uid: profile.uid, role: 'driver' });
   }, [profile.uid]);
 
   const updateAadhaarSegment = (index: number, value: string) => {
@@ -7339,7 +7443,7 @@ const DriverOnboarding = ({
 
   const startDriverCapture = async (field: string) => {
     if (isAndroidAppRuntime()) {
-      const { cameraGranted, locationGranted } = await ensureAndroidDriverSignupPermissions();
+      const { cameraGranted, locationGranted } = await ensureMobileDriverSignupPermissions();
       if (!cameraGranted || !locationGranted) {
         showAppDialog(
           'Camera and location permissions are required for driver verification captures. Please allow them in app settings and try again.',
@@ -7365,7 +7469,7 @@ const DriverOnboarding = ({
         const message = String(error?.message || error || '');
         if (/permission|denied|not authorized|forbidden/i.test(message)) {
           showAppDialog(
-            'Camera permission is still blocked. Please enable camera and location permissions for MaiRide in Android settings, then try again.',
+            'Camera permission is still blocked. Please enable camera and location permissions for MaiRide in your device settings, then try again.',
             'warning',
             'Permissions required'
           );
@@ -10154,6 +10258,7 @@ const MyRides = ({
 };
 
 const DriverHistory = ({ profile }: { profile: UserProfile }) => {
+  const { config } = useAppConfig();
   const [rides, setRides] = useState<any[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -10161,6 +10266,7 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [collectingBookingId, setCollectingBookingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -10274,6 +10380,55 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
     }
   };
 
+  const handleCollectRideFareSecurely = async (booking: Booking) => {
+    setCollectingBookingId(booking.id);
+    try {
+      await startRazorpayPlatformFeeCheckout({
+        booking,
+        payer: 'driver',
+        profile,
+        config,
+        amount: Number(booking.fare || 0),
+        coinsUsed: 0,
+        onVerified: async (payment) => {
+          const completedAt = new Date().toISOString();
+          await updateDoc(doc(db, 'bookings', booking.id), {
+            driverFareCollectionStatus: 'paid',
+            driverFareCollectionMode: 'secure_pay',
+            driverFareCollectionGateway: 'razorpay',
+            driverFareCollectionTransactionId: payment.paymentId,
+            driverFareCollectionOrderId: payment.orderId,
+            driverFareCollectionMetadata: {
+              signature: payment.signature,
+              completedAt,
+            },
+            driverFareCollectionCompletedAt: completedAt,
+          } as any);
+          setBookings((current) =>
+            current.map((candidate) =>
+              candidate.id === booking.id
+                ? ({
+                    ...candidate,
+                    driverFareCollectionStatus: 'paid',
+                    driverFareCollectionMode: 'secure_pay',
+                    driverFareCollectionGateway: 'razorpay',
+                    driverFareCollectionTransactionId: payment.paymentId,
+                    driverFareCollectionOrderId: payment.orderId,
+                    driverFareCollectionCompletedAt: completedAt,
+                  } as any)
+                : candidate
+            )
+          );
+        },
+      });
+      showAppDialog('Ride fare collected through MaiRide Secure Pay.', 'success');
+    } catch (error: any) {
+      showAppDialog(error?.message || 'We could not start secure fare collection right now.', 'error', 'Secure Pay unavailable');
+    } finally {
+      setCollectingBookingId(null);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto p-8">
       <h1 className="text-3xl font-bold text-mairide-primary mb-8">Driver History</h1>
@@ -10355,6 +10510,34 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
                     </button>
                   )}
                 </div>
+              </div>
+              <div className="mt-5 rounded-[24px] border border-mairide-secondary bg-mairide-bg p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Ride-end collection</p>
+                    <h3 className="mt-2 text-lg font-bold text-mairide-primary">Collect Online via MaiRide Secure Pay (Recommended)</h3>
+                    <p className="mt-2 text-sm text-mairide-secondary">
+                      Settle the ride fare digitally first. Manual cash collection remains your fallback only after secure collection is skipped.
+                    </p>
+                  </div>
+                  {(booking as any).driverFareCollectionStatus === 'paid' ? (
+                    <div className="rounded-full bg-green-50 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-green-700">
+                      Secure pay collected
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleCollectRideFareSecurely(booking)}
+                      disabled={collectingBookingId === booking.id}
+                      className="rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-mairide-accent disabled:opacity-60"
+                    >
+                      {collectingBookingId === booking.id ? 'Opening secure pay...' : 'Collect Online via MaiRide Secure Pay'}
+                    </button>
+                  )}
+                </div>
+                <p className="mt-4 text-xs font-medium text-mairide-secondary">
+                  Manual cash collection fallback stays available offline, but MaiRide Secure Pay should be offered first for cleaner settlement tracking.
+                </p>
               </div>
               {booking.driverReview?.comment && (
                 <p className="mt-3 text-sm italic text-mairide-secondary">"{booking.driverReview.comment}"</p>
@@ -19355,7 +19538,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile'>('revenue');
+  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b'>('revenue');
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
@@ -20222,6 +20405,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             { id: 'map', label: 'Live Map', icon: MapPin, roles: ['super_admin', 'support'] },
             { id: 'users', label: 'Users', icon: Users, roles: ['super_admin', 'compliance'] },
             { id: 'rides', label: 'Rides', icon: Car, roles: ['super_admin', 'compliance'] },
+            { id: 'b2b', label: 'B2B Desk', icon: Building2, roles: ['super_admin', 'support', 'compliance'] },
             { id: 'revenue', label: 'Revenue', icon: IndianRupee, roles: ['super_admin', 'finance'] },
             { id: 'capacity', label: 'Capacity', icon: TrendingUp, roles: ['super_admin', 'finance', 'support'] },
             { id: 'mobile', label: 'Mobile App', icon: Smartphone, roles: ['super_admin', 'finance', 'support'] },
@@ -20920,6 +21104,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
               onPageSizeChange={setRidesPageSize}
             />
           </div>
+        )}
+
+        {activeTab === 'b2b' && (
+          <AdminB2BVerificationDesk />
         )}
 
         {activeTab === 'revenue' && (
@@ -22151,6 +22339,7 @@ const App = () => {
   const appConfigState = useAppConfigSource();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [partnerProfile, setPartnerProfile] = useState<B2BPartner | null>(null);
   const [loading, setLoading] = useState(true);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>(() => {
     if (typeof window === 'undefined') return 'login';
@@ -22223,7 +22412,7 @@ const App = () => {
 
     let cleanup: (() => void) | undefined;
     let cancelled = false;
-    void registerAndroidPushDevice(profile, releaseVersion)
+    void registerMobilePushDevice(profile, releaseVersion)
       .then((removeListeners) => {
         if (cancelled) {
           removeListeners();
@@ -22361,10 +22550,20 @@ const App = () => {
   useEffect(() => {
     let active = true;
 
+    const resolvePartnerProfile = async (authUid: string) => {
+      try {
+        return await b2bPartnerService.getPartnerByAuthUser(authUid);
+      } catch (error) {
+        console.warn('Partner profile lookup failed:', error);
+        return null;
+      }
+    };
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setLoading(true);
       setUser(u);
       setProfile(null);
+      setPartnerProfile(null);
 
       if (u) {
         const mappedPhoneProfileId = u.isAnonymous ? safeStorageGet('session', PHONE_LOGIN_PROFILE_KEY) : null;
@@ -22376,6 +22575,7 @@ const App = () => {
           if (!active) return;
           if (snapshot.exists()) {
             setProfile(snapshot.data() as UserProfile);
+            setPartnerProfile(null);
             if (u.isAnonymous) {
               safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
             }
@@ -22414,8 +22614,10 @@ const App = () => {
                     await deleteDoc(doc(db, 'users', existingProfile.uid));
                   }
                   setProfile(newProfile);
+                  setPartnerProfile(null);
                 } else {
                   setProfile(existingProfile);
+                  setPartnerProfile(null);
                 }
                 clearStoredOAuthIntent();
                 setLoading(false);
@@ -22438,17 +22640,26 @@ const App = () => {
                   await setDoc(doc(db, 'users', u.uid), newProfile);
                   await walletService.initializeUserWallet(u.uid);
                   setProfile(newProfile);
+                  setPartnerProfile(null);
                   clearStoredOAuthIntent();
                 } else {
                   clearStoredOAuthIntent();
-                  setNotRegisteredError(true);
-                  await signOut(auth);
-                  setProfile(null);
+                  const matchedPartner = await resolvePartnerProfile(u.uid);
+                  if (matchedPartner) {
+                    setPartnerProfile(matchedPartner);
+                    setProfile(null);
+                  } else {
+                    setNotRegisteredError(true);
+                    await signOut(auth);
+                    setProfile(null);
+                  }
                 }
               }
             } catch (error) {
               console.error("Error linking profile:", error);
+              const matchedPartner = await resolvePartnerProfile(u.uid);
               setProfile(null);
+              setPartnerProfile(matchedPartner);
             }
             setLoading(false);
           } else {
@@ -22459,6 +22670,7 @@ const App = () => {
                   safeStorageSet('session', PHONE_LOGIN_PROFILE_KEY, matchedProfile.uid);
                   safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
                   setProfile(matchedProfile);
+                  setPartnerProfile(null);
                   setNotRegisteredError(false);
                   setLoading(false);
                   return;
@@ -22471,18 +22683,23 @@ const App = () => {
               safeStorageRemove('session', PHONE_LOGIN_PROFILE_KEY);
               safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
             }
+            const matchedPartner = !u.isAnonymous ? await resolvePartnerProfile(u.uid) : null;
             setProfile(null);
+            setPartnerProfile(matchedPartner);
             setLoading(false);
           }
         } catch (error) {
           reportFirestoreError(error, OperationType.GET, `users/${profileDocId}`);
+          const matchedPartner = !u.isAnonymous ? await resolvePartnerProfile(u.uid) : null;
           setProfile(null);
+          setPartnerProfile(matchedPartner);
           setLoading(false);
         }
       } else {
         safeStorageRemove('session', PHONE_LOGIN_PROFILE_KEY);
         safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
         setProfile(null);
+        setPartnerProfile(null);
         setLoading(false);
       }
     });
@@ -23002,81 +23219,148 @@ const App = () => {
       {content}
     </AppConfigContext.Provider>
   );
+  const currentPathname = typeof window === 'undefined' ? '/' : window.location.pathname || '/';
+  const isPartnerRoute = isPartnerRoutePath(currentPathname);
 
   if (loading) return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
 
-  if (user && !profile) return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
+  if (user && !profile && !partnerProfile && !isPartnerRoute) {
+    return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
+  }
 
   if (!user) return withAppConfigProvider(
     <ErrorBoundary>
-      <div className="min-h-screen flex flex-col bg-mairide-bg">
-        <div className="flex-1">
-          <AuthPage 
-            user={user}
-            authMode={authMode} 
-            setAuthMode={setAuthMode} 
-            notRegisteredError={notRegisteredError} 
-            setNotRegisteredError={setNotRegisteredError}
-            role={role}
-            setRole={setRole}
-            referralCodeInput={referralCodeInput}
-            setReferralCodeInput={setReferralCodeInput}
-            releaseVersion={releaseVersion}
-          />
-        </div>
-        <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
-        <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
-          <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
-        </div>
-        <div id="google_translate_element" className="hidden" />
-        <AppDialogHost />
-        {androidUpdatePrompt}
-        {cookieConsentManager}
-        <AnimatePresence>
-          {showLanguagePrompt && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[95] flex items-center justify-center bg-mairide-primary/40 px-4 backdrop-blur-sm"
-            >
+      <Router>
+        <div className="min-h-screen flex flex-col bg-mairide-bg">
+          <div className="flex-1">
+            <Routes>
+              <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={null} />} />
+              <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={null} />} />
+              <Route path="*" element={
+                <AuthPage 
+                  user={user}
+                  authMode={authMode} 
+                  setAuthMode={setAuthMode} 
+                  notRegisteredError={notRegisteredError} 
+                  setNotRegisteredError={setNotRegisteredError}
+                  role={role}
+                  setRole={setRole}
+                  referralCodeInput={referralCodeInput}
+                  setReferralCodeInput={setReferralCodeInput}
+                  releaseVersion={releaseVersion}
+                />
+              } />
+            </Routes>
+          </div>
+          <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
+          <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
+            <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
+          </div>
+          <div id="google_translate_element" className="hidden" />
+          <AppDialogHost />
+          {androidUpdatePrompt}
+          {cookieConsentManager}
+          <AnimatePresence>
+            {showLanguagePrompt && (
               <motion.div
-                initial={{ y: 12, opacity: 0, scale: 0.98 }}
-                animate={{ y: 0, opacity: 1, scale: 1 }}
-                exit={{ y: 12, opacity: 0, scale: 0.98 }}
-                className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[95] flex items-center justify-center bg-mairide-primary/40 px-4 backdrop-blur-sm"
               >
-                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Language preference</p>
-                <h3 className="mt-2 text-2xl font-black text-mairide-primary">Choose your app language</h3>
-                <p className="mt-2 text-sm text-mairide-secondary">
-                  We detected a suggested local language for your region. You can change this anytime from the menu.
-                </p>
-                <div className="mt-5 grid grid-cols-1 gap-3">
-                  <button
-                    onClick={() => commitUiLanguage(suggestedLanguage)}
-                    className="rounded-2xl bg-mairide-accent px-4 py-3 text-left text-sm font-bold text-white"
-                  >
-                    Continue in {getSupportedUiLanguage(suggestedLanguage).nativeLabel}
-                  </button>
-                  {languagePromptOptions
-                    .filter((lang) => lang !== suggestedLanguage)
-                    .map((lang) => (
-                      <button
-                        key={lang}
-                        onClick={() => commitUiLanguage(lang)}
-                        className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
-                      >
-                        Continue in {getSupportedUiLanguage(lang).nativeLabel}
-                      </button>
-                    ))}
-                </div>
+                <motion.div
+                  initial={{ y: 12, opacity: 0, scale: 0.98 }}
+                  animate={{ y: 0, opacity: 1, scale: 1 }}
+                  exit={{ y: 12, opacity: 0, scale: 0.98 }}
+                  className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Language preference</p>
+                  <h3 className="mt-2 text-2xl font-black text-mairide-primary">Choose your app language</h3>
+                  <p className="mt-2 text-sm text-mairide-secondary">
+                    We detected a suggested local language for your region. You can change this anytime from the menu.
+                  </p>
+                  <div className="mt-5 grid grid-cols-1 gap-3">
+                    <button
+                      onClick={() => commitUiLanguage(suggestedLanguage)}
+                      className="rounded-2xl bg-mairide-accent px-4 py-3 text-left text-sm font-bold text-white"
+                    >
+                      Continue in {getSupportedUiLanguage(suggestedLanguage).nativeLabel}
+                    </button>
+                    {languagePromptOptions
+                      .filter((lang) => lang !== suggestedLanguage)
+                      .map((lang) => (
+                        <button
+                          key={lang}
+                          onClick={() => commitUiLanguage(lang)}
+                          className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-semibold text-mairide-primary"
+                        >
+                          Continue in {getSupportedUiLanguage(lang).nativeLabel}
+                        </button>
+                      ))}
+                  </div>
+                </motion.div>
               </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+            )}
+          </AnimatePresence>
+        </div>
+      </Router>
     </ErrorBoundary>
   );
+
+  if (!profile && partnerProfile) {
+    return withAppConfigProvider(
+      <ErrorBoundary>
+        <Router>
+          <div className="min-h-screen bg-mairide-bg">
+            <div className="border-b border-mairide-secondary bg-white">
+              <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-8">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">MaiRide Partner Workspace</p>
+                  <p className="mt-1 text-lg font-black tracking-tight text-mairide-primary">{partnerProfile.businessName}</p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white"
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+            <Routes>
+              <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={user} />} />
+              <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={user} />} />
+              <Route path="/partners/portal" element={<PartnerPortal partner={partnerProfile} currentUser={user} onPartnerUpdated={setPartnerProfile} />} />
+              <Route path="*" element={<Navigate to="/partners/portal" replace />} />
+            </Routes>
+            <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
+            <AppDialogHost />
+            {androidUpdatePrompt}
+            {cookieConsentManager}
+          </div>
+        </Router>
+      </ErrorBoundary>
+    );
+  }
+
+  if (!profile && isPartnerRoute) {
+    return withAppConfigProvider(
+      <ErrorBoundary>
+        <Router>
+          <div className="min-h-screen bg-mairide-bg">
+            <Routes>
+              <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={user} />} />
+              <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={user} />} />
+              <Route path="*" element={<Navigate to="/partners/fleet/apply" replace />} />
+            </Routes>
+            <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
+            <AppDialogHost />
+            {androidUpdatePrompt}
+            {cookieConsentManager}
+          </div>
+        </Router>
+      </ErrorBoundary>
+    );
+  }
 
   if (profile && profile.role === 'driver') {
     if (!profile.onboardingComplete) {
@@ -23136,6 +23420,8 @@ const App = () => {
               <Route path="/support" element={profile ? <SupportSystem profile={profile} /> : <Navigate to="/" />} />
               <Route path="/consumer/bookings" element={profile ? <MyBookings profile={profile} /> : <Navigate to="/" />} />
               <Route path="/driver/rides" element={profile ? <MyRides profile={profile} /> : <Navigate to="/" />} />
+              <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={user} />} />
+              <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={user} />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>

@@ -7,6 +7,7 @@ import authHandler from "./api/auth.ts";
 import bookingsHandler from "./api/bookings.ts";
 import paymentsHandler from "./api/payments.ts";
 import adminHandler from "./api/admin-api.ts";
+import partnerHandler from "./api/partner-api.ts";
 import userHandler from "./api/user.ts";
 import chatHandler from "./api/chat.ts";
 import analyticsHandler from "./api/analytics.ts";
@@ -49,6 +50,7 @@ async function startServer() {
   app.all("/api/analytics", analyticsHandler);
   app.all("/api/notifications", notificationsHandler);
   app.all("/api/admin-api", adminHandler);
+  app.all("/api/partner-api", partnerHandler);
   app.post("/api/user/change-password", handleUserChangePassword);
   app.post("/api/user/create-ride", handleUserCreateRide);
   app.post("/api/user/reject-booking", handleUserRejectBooking);

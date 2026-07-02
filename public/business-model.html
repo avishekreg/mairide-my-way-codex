@@ -362,7 +362,7 @@
         <a href="/terms-and-conditions.html" target="_blank" rel="noopener noreferrer">Terms &amp; Conditions</a>
         <a href="/privacy-policy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
       </div>
-      <p class="footer">Release v3.0.1-beta | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.</p>
+      <p class="footer"><span id="release-version">Release v3.0.1-beta+build.248</span> | Copyright 2026 MaiRide. All rights reserved. | Powered by Razorpay.</p>
     </main>
 
     <div id="google_translate_element"></div>
@@ -390,6 +390,15 @@
             combo.dispatchEvent(new Event("change"));
           }
         }
+        fetch("/downloads/android-update.json", { cache: "no-store" })
+          .then(function (response) { return response.ok ? response.json() : null; })
+          .then(function (data) {
+            var version = data && data.appVersion ? String(data.appVersion).trim() : "";
+            if (!version) return;
+            var target = document.getElementById("release-version");
+            if (target) target.textContent = "Release " + version;
+          })
+          .catch(function () {});
         function init() {
           if (!window.google || !window.google.translate || !window.google.translate.TranslateElement) return;
           new window.google.translate.TranslateElement(
