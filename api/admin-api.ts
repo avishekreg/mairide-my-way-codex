@@ -749,6 +749,31 @@ async function handlePartnerSetStatus(req: any, res: any) {
   return res.status(200).json({ partner: normalizePartnerRow(data) });
 }
 
+async function handlePartnerUpdateCommission(req: any, res: any) {
+  const auth = await getAuthenticatedAdmin(req, false);
+  if ("error" in auth) {
+    return res.status(auth.error.status).json({ error: auth.error.message });
+  }
+
+  const partnerId = String(req.body?.partnerId || "").trim();
+  const commissionPercentage = Number(req.body?.commissionPercentage);
+  if (!partnerId || !Number.isFinite(commissionPercentage) || commissionPercentage < 0 || commissionPercentage > 100) {
+    return res.status(400).json({ error: "Invalid commission update request." });
+  }
+
+  const { data, error } = await auth.supabaseAdmin
+    .from("b2b_partners")
+    .update({
+      commission_percentage: commissionPercentage,
+    })
+    .eq("id", partnerId)
+    .select("*")
+    .single();
+
+  if (error || !data) throw error || new Error("Failed to update partner commission.");
+  return res.status(200).json({ partner: normalizePartnerRow(data) });
+}
+
 async function handleDeleteUser(req: any, res: any) {
   const auth = await getAuthenticatedAdmin(req, true);
   if ("error" in auth) {
@@ -1845,6 +1870,9 @@ export default async function handler(req: any, res: any) {
       case "partner-set-status":
         if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
         return handlePartnerSetStatus(req, res);
+      case "partner-update-commission":
+        if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+        return handlePartnerUpdateCommission(req, res);
       default:
         return res.status(404).json({ error: "Admin action not found" });
     }

@@ -6,13 +6,17 @@ import {
   Car,
   CheckCircle2,
   Clock3,
+  Eye,
   FileBadge2,
   Globe2,
   Hotel,
   IndianRupee,
+  Loader2,
   MapPin,
+  Save,
   ShieldCheck,
   Users,
+  X,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { cn, formatCurrency } from './lib/utils';
@@ -890,15 +894,144 @@ export const PartnerPortal = ({
   );
 };
 
+const adminPartnerStatusTone: Record<ApprovalStatus, string> = {
+  pending: 'bg-amber-100 text-amber-700',
+  approved: 'bg-emerald-100 text-emerald-700',
+  rejected: 'bg-red-100 text-red-700',
+};
+
+const formatPartnerGeo = (partner: B2BPartner) => {
+  if (partner.signupLatitude == null || partner.signupLongitude == null) {
+    return 'Not captured';
+  }
+
+  return `${partner.signupLatitude.toFixed(5)}, ${partner.signupLongitude.toFixed(5)}`;
+};
+
+const B2BDeskSkeleton = () => (
+  <div className="rounded-[36px] border border-mairide-secondary bg-white shadow-sm">
+    <div className="border-b border-mairide-secondary px-8 py-6">
+      <div className="h-3 w-36 animate-pulse rounded-full bg-mairide-bg" />
+      <div className="mt-4 h-8 w-72 animate-pulse rounded-full bg-mairide-bg" />
+      <div className="mt-3 h-4 w-[28rem] max-w-full animate-pulse rounded-full bg-mairide-bg" />
+    </div>
+    <div className="divide-y divide-mairide-secondary/30">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="grid gap-4 px-8 py-6 lg:grid-cols-[1.25fr_1fr_1fr_0.9fr_0.9fr_0.9fr_1.1fr]">
+          {Array.from({ length: 7 }).map((__, cellIndex) => (
+            <div key={cellIndex} className="space-y-3">
+              <div className="h-3 w-24 animate-pulse rounded-full bg-mairide-bg" />
+              <div className="h-5 w-full animate-pulse rounded-2xl bg-mairide-bg" />
+              <div className="h-4 w-2/3 animate-pulse rounded-2xl bg-mairide-bg" />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const B2BAdminModal = ({
+  title,
+  subtitle,
+  children,
+  onClose,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) => (
+  <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[36px] border border-mairide-secondary bg-white shadow-2xl">
+      <div className="flex items-start justify-between border-b border-mairide-secondary px-8 py-6">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Admin review</p>
+          <h3 className="mt-2 text-2xl font-bold text-mairide-primary">{title}</h3>
+          {subtitle ? <p className="mt-2 text-sm text-mairide-secondary">{subtitle}</p> : null}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-2xl border border-mairide-secondary p-3 text-mairide-secondary transition-colors hover:bg-mairide-bg hover:text-mairide-primary"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="max-h-[calc(90vh-112px)] overflow-y-auto p-8">{children}</div>
+    </div>
+  </div>
+);
+
+const B2BDocumentPreview = ({ url }: { url: string }) => {
+  const isPdf = /\.pdf($|\?)/i.test(url);
+  const isImage = /\.(png|jpe?g|webp|gif)($|\?)/i.test(url);
+
+  if (isImage) {
+    return <img src={url} alt="Verification document" className="h-full w-full rounded-[28px] object-contain" />;
+  }
+
+  if (isPdf) {
+    return <iframe title="Verification document" src={url} className="h-[72vh] w-full rounded-[28px] border border-mairide-secondary" />;
+  }
+
+  return (
+    <div className="flex min-h-[22rem] flex-col items-center justify-center rounded-[28px] border border-dashed border-mairide-secondary bg-mairide-bg p-8 text-center">
+      <FileBadge2 className="h-10 w-10 text-mairide-accent" />
+      <p className="mt-4 text-lg font-bold text-mairide-primary">Preview unavailable in-panel</p>
+      <p className="mt-2 max-w-md text-sm text-mairide-secondary">This document type cannot be rendered directly here, but you can still open it in a new tab for verification.</p>
+    </div>
+  );
+};
+
+const B2BStatusActions = ({
+  partner,
+  updatingId,
+  onUpdateStatus,
+}: {
+  partner: B2BPartner;
+  updatingId: string | null;
+  onUpdateStatus: (partnerId: string, status: ApprovalStatus) => Promise<void>;
+}) => {
+  const isBusy = updatingId === partner.id;
+
+  return (
+    <div className="flex flex-wrap gap-3">
+      <button
+        type="button"
+        disabled={isBusy || partner.status === 'approved'}
+        onClick={() => void onUpdateStatus(partner.id, 'approved')}
+        className="inline-flex min-w-[7rem] items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Approve'}
+      </button>
+      <button
+        type="button"
+        disabled={isBusy || partner.status === 'rejected'}
+        onClick={() => void onUpdateStatus(partner.id, 'rejected')}
+        className="inline-flex min-w-[7rem] items-center justify-center rounded-2xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-600 transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Reject'}
+      </button>
+    </div>
+  );
+};
+
 export const AdminB2BVerificationDesk = ({
   onPartnerUpdated,
+  section = 'hotels',
 }: {
   onPartnerUpdated?: (partner: B2BPartner) => void;
+  section?: 'hotels' | 'fleets';
 }) => {
   const [partners, setPartners] = useState<B2BPartner[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [savingCommissionId, setSavingCommissionId] = useState<string | null>(null);
+  const [commissionDrafts, setCommissionDrafts] = useState<Record<string, string>>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [documentPartner, setDocumentPartner] = useState<B2BPartner | null>(null);
+  const [reviewPartner, setReviewPartner] = useState<B2BPartner | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -911,7 +1044,14 @@ export const AdminB2BVerificationDesk = ({
           throw new Error(String(payload?.error || 'Failed to load partner applications.'));
         }
         if (!active) return;
-        setPartners(Array.isArray(payload?.partners) ? payload.partners : []);
+        const nextPartners = (Array.isArray(payload?.partners) ? payload.partners : []) as B2BPartner[];
+        setPartners(nextPartners);
+        setCommissionDrafts(
+          nextPartners.reduce((accumulator: Record<string, string>, partner) => {
+            accumulator[partner.id] = String(partner.commissionPercentage ?? 0);
+            return accumulator;
+          }, {})
+        );
       } catch (error: any) {
         if (!active) return;
         setErrorMessage(String(error?.message || 'Failed to load partner applications.'));
@@ -924,7 +1064,26 @@ export const AdminB2BVerificationDesk = ({
     };
   }, []);
 
+  const hotelPartners = useMemo(
+    () => partners.filter((partner) => partner.type === 'hotel_partner'),
+    [partners]
+  );
+  const fleetPartners = useMemo(
+    () => partners.filter((partner) => partner.type === 'fleet_owner'),
+    [partners]
+  );
   const pendingPartners = useMemo(() => partners.filter((partner) => partner.status === 'pending'), [partners]);
+
+  const activePartners = section === 'hotels' ? hotelPartners : fleetPartners;
+
+  const mergePartner = (updated: B2BPartner) => {
+    setPartners((current) => current.map((partner) => (partner.id === updated.id ? updated : partner)));
+    setCommissionDrafts((current) => ({
+      ...current,
+      [updated.id]: String(updated.commissionPercentage ?? 0),
+    }));
+    onPartnerUpdated?.(updated);
+  };
 
   const updateStatus = async (partnerId: string, status: ApprovalStatus) => {
     setUpdatingId(partnerId);
@@ -943,9 +1102,7 @@ export const AdminB2BVerificationDesk = ({
       if (!response.ok || !payload?.partner) {
         throw new Error(String(payload?.error || 'Failed to update partner status.'));
       }
-      const updated = payload.partner as B2BPartner;
-      setPartners((current) => current.map((partner) => (partner.id === updated.id ? updated : partner)));
-      onPartnerUpdated?.(updated);
+      mergePartner(payload.partner as B2BPartner);
     } catch (error: any) {
       setErrorMessage(String(error?.message || 'Failed to update partner status.'));
     } finally {
@@ -953,91 +1110,328 @@ export const AdminB2BVerificationDesk = ({
     }
   };
 
+  const saveCommission = async (partner: B2BPartner) => {
+    const commissionPercentage = Number(commissionDrafts[partner.id]);
+    if (!Number.isFinite(commissionPercentage) || commissionPercentage < 0 || commissionPercentage > 100) {
+      setErrorMessage('Commission must be a valid percentage between 0 and 100.');
+      return;
+    }
+
+    setSavingCommissionId(partner.id);
+    setErrorMessage(null);
+    try {
+      const headers = await getAdminRequestHeaders();
+      const response = await fetch('/api/admin-api?action=partner-update-commission', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({ partnerId: partner.id, commissionPercentage }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.partner) {
+        throw new Error(String(payload?.error || 'Failed to update hotel commission.'));
+      }
+      mergePartner(payload.partner as B2BPartner);
+    } catch (error: any) {
+      setErrorMessage(String(error?.message || 'Failed to update hotel commission.'));
+    } finally {
+      setSavingCommissionId(null);
+    }
+  };
+
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 md:grid-cols-3">
-        <PartnerStat label="Pending reviews" value={pendingPartners.length} detail="Applications awaiting action from the admin desk" />
-        <PartnerStat label="Approved partners" value={partners.filter((partner) => partner.status === 'approved').length} />
-        <PartnerStat label="Rejected partners" value={partners.filter((partner) => partner.status === 'rejected').length} />
+      <div className="grid gap-6 md:grid-cols-4">
+        <PartnerStat label="Pending reviews" value={pendingPartners.length} detail="Applications waiting at the verification desk" />
+        <PartnerStat label="Hotel partners" value={hotelPartners.length} detail="Properties onboarded into the desk console flow" />
+        <PartnerStat label="Fleet operators" value={fleetPartners.length} detail="Fleet and travel businesses mapped into dispatch control" />
+        <PartnerStat label="Approved partners" value={partners.filter((partner) => partner.status === 'approved').length} detail="Verified businesses with live access" />
       </div>
 
       <div className="rounded-[36px] border border-mairide-secondary bg-white shadow-sm">
         <div className="border-b border-mairide-secondary px-8 py-6">
-          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Restricted admin view</p>
-          <h2 className="mt-2 text-2xl font-bold text-mairide-primary">B2B Verification Desk</h2>
-          <p className="mt-2 text-sm text-mairide-secondary">Review business documents, GST numbers, and geo-tagged signup coordinates before opening either partner dashboard.</p>
-          {errorMessage ? (
-            <p className="mt-3 text-sm font-semibold text-red-600">{errorMessage}</p>
-          ) : null}
-        </div>
-        <div className="divide-y divide-mairide-secondary/30">
-          {loading ? (
-            <div className="px-8 py-10 text-sm text-mairide-secondary">Loading partner applications…</div>
-          ) : pendingPartners.length ? pendingPartners.map((partner) => {
-            const Icon = partner.type === 'hotel_partner' ? Hotel : Building2;
-            return (
-              <div key={partner.id} className="grid gap-6 px-8 py-7 xl:grid-cols-[1.1fr_0.9fr]">
-                <div className="space-y-5">
-                  <div className="flex items-start gap-4">
-                    <div className="rounded-[22px] bg-mairide-bg p-3 text-mairide-accent">
-                      <Icon className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">{partnerTypeMeta[partner.type].eyebrow}</p>
-                      <h3 className="mt-2 text-xl font-bold text-mairide-primary">{partner.businessName}</h3>
-                      <p className="mt-1 text-sm text-mairide-secondary">{partner.contactPerson} • {partner.email} • {partner.phone}</p>
-                    </div>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="rounded-[22px] bg-mairide-bg p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">GSTIN</p>
-                      <p className="mt-2 text-sm font-bold text-mairide-primary">{partner.gstNumber || 'Not provided'}</p>
-                    </div>
-                    <div className="rounded-[22px] bg-mairide-bg p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Signup latitude</p>
-                      <p className="mt-2 text-sm font-bold text-mairide-primary">{partner.signupLatitude?.toFixed(6) || 'Unavailable'}</p>
-                    </div>
-                    <div className="rounded-[22px] bg-mairide-bg p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Signup longitude</p>
-                      <p className="mt-2 text-sm font-bold text-mairide-primary">{partner.signupLongitude?.toFixed(6) || 'Unavailable'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Verification actions</p>
-                  <a href={partner.documentUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-mairide-accent">
-                    Open uploaded document
-                    <ArrowUpRight className="h-4 w-4" />
-                  </a>
-                  <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                    <button
-                      type="button"
-                      disabled={updatingId === partner.id}
-                      onClick={() => updateStatus(partner.id, 'approved')}
-                      className="flex-1 rounded-2xl bg-green-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      disabled={updatingId === partner.id}
-                      onClick={() => updateStatus(partner.id, 'rejected')}
-                      className="flex-1 rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-sm font-bold text-mairide-primary disabled:opacity-60"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          }) : (
-            <div className="px-8 py-12 text-sm text-mairide-secondary">
-              No pending B2B partner applications right now.
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Restricted admin workspace</p>
+              <h2 className="mt-2 text-2xl font-bold text-mairide-primary">B2B Partner Hub</h2>
+              <p className="mt-2 max-w-3xl text-sm text-mairide-secondary">
+                {section === 'hotels'
+                  ? 'Review hotel and resort onboarding, control commission assignments, and verify the desk-console partners before they go live.'
+                  : 'Review fleet and travel operator onboarding, inspect uploaded trade documents, and clear verified operators into the partner stack.'}
+              </p>
             </div>
-          )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-[24px] border border-mairide-secondary bg-mairide-bg px-5 py-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Active section</p>
+                <p className="mt-2 text-lg font-black text-mairide-primary">
+                  {section === 'hotels' ? 'Hotel & Resort Partners' : 'Fleet & Travel Operators'}
+                </p>
+              </div>
+              <div className="rounded-[24px] border border-mairide-secondary bg-mairide-bg px-5 py-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Live rows</p>
+                <p className="mt-2 text-lg font-black text-mairide-primary">{activePartners.length}</p>
+              </div>
+            </div>
+          </div>
+          {errorMessage ? <p className="mt-4 text-sm font-semibold text-red-600">{errorMessage}</p> : null}
         </div>
+
+        {loading ? (
+          <B2BDeskSkeleton />
+        ) : section === 'hotels' ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left">
+              <thead>
+                <tr className="bg-mairide-bg text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">
+                  <th className="px-8 py-4">Business</th>
+                  <th className="px-8 py-4">Contact</th>
+                  <th className="px-8 py-4">GST Number</th>
+                  <th className="px-8 py-4">Commission</th>
+                  <th className="px-8 py-4">Status</th>
+                  <th className="px-8 py-4">Geo-tag</th>
+                  <th className="px-8 py-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-mairide-secondary/30">
+                {hotelPartners.length ? hotelPartners.map((partner) => (
+                  <tr key={partner.id} className="align-top hover:bg-mairide-bg/40">
+                    <td className="px-8 py-6">
+                      <div className="flex items-start gap-4">
+                        <div className="rounded-[20px] bg-mairide-bg p-3 text-mairide-accent">
+                          <Hotel className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-base font-bold text-mairide-primary">{partner.businessName}</p>
+                          <p className="mt-1 text-sm text-mairide-secondary">{partnerTypeMeta[partner.type].label}</p>
+                          <p className="mt-2 text-xs text-mairide-secondary">{new Date(partner.createdAt).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-8 py-6">
+                      <p className="font-bold text-mairide-primary">{partner.contactPerson}</p>
+                      <p className="mt-1 text-sm text-mairide-secondary">{partner.phone}</p>
+                      <p className="mt-1 text-sm text-mairide-secondary">{partner.email}</p>
+                    </td>
+                    <td className="px-8 py-6">
+                      <p className="font-bold text-mairide-primary">{partner.gstNumber || 'Not provided'}</p>
+                    </td>
+                    <td className="px-8 py-6">
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="0.1"
+                            value={commissionDrafts[partner.id] ?? String(partner.commissionPercentage ?? 0)}
+                            onChange={(event) => setCommissionDrafts((current) => ({ ...current, [partner.id]: event.target.value }))}
+                            className="w-28 rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-2 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                          <button
+                            type="button"
+                            disabled={savingCommissionId === partner.id}
+                            onClick={() => void saveCommission(partner)}
+                            className="inline-flex items-center gap-2 rounded-2xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+                          >
+                            {savingCommissionId === partner.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            Save
+                          </button>
+                        </div>
+                        <p className="text-xs text-mairide-secondary">Assigned commission % on guest bookings</p>
+                      </div>
+                    </td>
+                    <td className="px-8 py-6">
+                      <span className={cn('inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em]', adminPartnerStatusTone[partner.status])}>
+                        {partner.status}
+                      </span>
+                    </td>
+                    <td className="px-8 py-6">
+                      <p className="font-bold text-mairide-primary">{formatPartnerGeo(partner)}</p>
+                    </td>
+                    <td className="px-8 py-6">
+                      <div className="space-y-4">
+                        <button
+                          type="button"
+                          onClick={() => setDocumentPartner(partner)}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-4 py-2 text-sm font-bold text-mairide-primary"
+                        >
+                          <Eye className="h-4 w-4" />
+                          View Documents
+                        </button>
+                        <B2BStatusActions partner={partner} updatingId={updatingId} onUpdateStatus={updateStatus} />
+                      </div>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={7} className="px-8 py-12 text-sm text-mairide-secondary">
+                      No hotel or resort partner applications found yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left">
+              <thead>
+                <tr className="bg-mairide-bg text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">
+                  <th className="px-8 py-4">Fleet business</th>
+                  <th className="px-8 py-4">Primary operator</th>
+                  <th className="px-8 py-4">Contact details</th>
+                  <th className="px-8 py-4">GST Number</th>
+                  <th className="px-8 py-4">Fleet count</th>
+                  <th className="px-8 py-4">Status</th>
+                  <th className="px-8 py-4">Geo-tagging</th>
+                  <th className="px-8 py-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-mairide-secondary/30">
+                {fleetPartners.length ? fleetPartners.map((partner) => {
+                  const fleetCount = partner.data?.fleetVehicles?.length ?? 0;
+                  return (
+                    <tr key={partner.id} className="align-top hover:bg-mairide-bg/40">
+                      <td className="px-8 py-6">
+                        <div className="flex items-start gap-4">
+                          <div className="rounded-[20px] bg-mairide-bg p-3 text-mairide-accent">
+                            <Building2 className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <p className="text-base font-bold text-mairide-primary">{partner.businessName}</p>
+                            <p className="mt-1 text-sm text-mairide-secondary">{partnerTypeMeta[partner.type].label}</p>
+                            <p className="mt-2 text-xs text-mairide-secondary">{new Date(partner.createdAt).toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <p className="font-bold text-mairide-primary">{partner.contactPerson}</p>
+                      </td>
+                      <td className="px-8 py-6">
+                        <p className="text-sm font-bold text-mairide-primary">{partner.phone}</p>
+                        <p className="mt-1 text-sm text-mairide-secondary">{partner.email}</p>
+                      </td>
+                      <td className="px-8 py-6">
+                        <p className="font-bold text-mairide-primary">{partner.gstNumber || 'Not provided'}</p>
+                      </td>
+                      <td className="px-8 py-6">
+                        <p className="text-lg font-black text-mairide-primary">{fleetCount}</p>
+                        <p className="mt-1 text-xs text-mairide-secondary">Registered vehicles</p>
+                      </td>
+                      <td className="px-8 py-6">
+                        <span className={cn('inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em]', adminPartnerStatusTone[partner.status])}>
+                          {partner.status}
+                        </span>
+                      </td>
+                      <td className="px-8 py-6">
+                        <p className="font-bold text-mairide-primary">{formatPartnerGeo(partner)}</p>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="space-y-4">
+                          <button
+                            type="button"
+                            onClick={() => setReviewPartner(partner)}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-4 py-2 text-sm font-bold text-mairide-primary"
+                          >
+                            <Eye className="h-4 w-4" />
+                            Review Application
+                          </button>
+                          <B2BStatusActions partner={partner} updatingId={updatingId} onUpdateStatus={updateStatus} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }) : (
+                  <tr>
+                    <td colSpan={8} className="px-8 py-12 text-sm text-mairide-secondary">
+                      No fleet or travel operator applications found yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      {documentPartner ? (
+        <B2BAdminModal
+          title={`${documentPartner.businessName} documents`}
+          subtitle={`${documentPartner.contactPerson} • ${documentPartner.email}`}
+          onClose={() => setDocumentPartner(null)}
+        >
+          <div className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-[24px] border border-mairide-secondary bg-mairide-bg p-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Partner type</p>
+                <p className="mt-2 font-bold text-mairide-primary">{partnerTypeMeta[documentPartner.type].label}</p>
+              </div>
+              <div className="rounded-[24px] border border-mairide-secondary bg-mairide-bg p-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">GST Number</p>
+                <p className="mt-2 font-bold text-mairide-primary">{documentPartner.gstNumber || 'Not provided'}</p>
+              </div>
+              <div className="rounded-[24px] border border-mairide-secondary bg-mairide-bg p-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Geo-location</p>
+                <p className="mt-2 font-bold text-mairide-primary">{formatPartnerGeo(documentPartner)}</p>
+              </div>
+            </div>
+            <B2BDocumentPreview url={documentPartner.documentUrl} />
+            <a href={documentPartner.documentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-bold text-mairide-accent">
+              Open verification document in a new tab
+              <ArrowUpRight className="h-4 w-4" />
+            </a>
+          </div>
+        </B2BAdminModal>
+      ) : null}
+
+      {reviewPartner ? (
+        <B2BAdminModal
+          title={`${reviewPartner.businessName} application review`}
+          subtitle="Split review of fleet documents and signup coordinates"
+          onClose={() => setReviewPartner(null)}
+        >
+          <div className="grid gap-8 xl:grid-cols-[1.15fr_0.85fr]">
+            <div className="space-y-4">
+              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Verification document</p>
+              <B2BDocumentPreview url={reviewPartner.documentUrl} />
+            </div>
+            <div className="space-y-4">
+              <div className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Primary operator</p>
+                <p className="mt-2 text-xl font-bold text-mairide-primary">{reviewPartner.contactPerson}</p>
+                <p className="mt-2 text-sm text-mairide-secondary">{reviewPartner.email}</p>
+                <p className="mt-1 text-sm text-mairide-secondary">{reviewPartner.phone}</p>
+              </div>
+              <div className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Geo-tagging metadata</p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[20px] bg-white p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-mairide-secondary">Latitude</p>
+                    <p className="mt-2 font-bold text-mairide-primary">
+                      {reviewPartner.signupLatitude != null ? reviewPartner.signupLatitude.toFixed(6) : 'Unavailable'}
+                    </p>
+                  </div>
+                  <div className="rounded-[20px] bg-white p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-mairide-secondary">Longitude</p>
+                    <p className="mt-2 font-bold text-mairide-primary">
+                      {reviewPartner.signupLongitude != null ? reviewPartner.signupLongitude.toFixed(6) : 'Unavailable'}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-4 text-sm text-mairide-secondary">Mini-map is optional here, so this review surface keeps the raw geo-tagged coordinates visible for verification and audit.</p>
+              </div>
+              <div className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Registered fleet count</p>
+                <p className="mt-2 text-3xl font-black text-mairide-primary">{reviewPartner.data?.fleetVehicles?.length ?? 0}</p>
+                <p className="mt-2 text-sm text-mairide-secondary">Calculated from the partner profile payload without touching the traveler-driver booking flow.</p>
+              </div>
+              <B2BStatusActions partner={reviewPartner} updatingId={updatingId} onUpdateStatus={updateStatus} />
+            </div>
+          </div>
+        </B2BAdminModal>
+      ) : null}
     </div>
   );
 };

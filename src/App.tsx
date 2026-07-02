@@ -19638,6 +19638,8 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [ridesPage, setRidesPage] = useState(1);
   const [ridesPageSize, setRidesPageSize] = useState<number>(10);
   const [usersInsightView, setUsersInsightView] = useState<UsersInsightView>(null);
+  const [activeB2BSection, setActiveB2BSection] = useState<'hotels' | 'fleets'>('hotels');
+  const [isB2BNavOpen, setIsB2BNavOpen] = useState(true);
   const [adminNotice, setAdminNotice] = useState<{
     title: string;
     message: string;
@@ -20170,6 +20172,16 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         }
       : { lat: 22.5937, lng: 78.9629 });
   const adminMapZoom = adminLocation ? 13 : usersWithLocation.length ? 5 : 4;
+  const adminTabTitle = activeTab === 'b2b'
+    ? activeB2BSection === 'hotels'
+      ? 'Hotel & Resort Partners'
+      : 'Fleet & Travel Operators'
+    : activeTab;
+  const adminTabDescription = activeTab === 'b2b'
+    ? activeB2BSection === 'hotels'
+      ? 'Review hospitality partners, control hotel commission assignments, and verify their onboarding documents.'
+      : 'Review fleet and travel operator applications, verify geo-tagged onboarding, and clear active operators.'
+    : `Manage and monitor platform ${activeTab} details.`;
 
   const handleVerifyDriver = async (userId: string, status: 'approved' | 'rejected') => {
     if (!selectedDriver || selectedDriver.verificationStatus !== 'pending') {
@@ -20405,7 +20417,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             { id: 'map', label: 'Live Map', icon: MapPin, roles: ['super_admin', 'support'] },
             { id: 'users', label: 'Users', icon: Users, roles: ['super_admin', 'compliance'] },
             { id: 'rides', label: 'Rides', icon: Car, roles: ['super_admin', 'compliance'] },
-            { id: 'b2b', label: 'B2B Desk', icon: Building2, roles: ['super_admin', 'support', 'compliance'] },
+            { id: 'b2b', label: 'B2B Partner Hub', icon: Building2, roles: ['super_admin', 'support', 'compliance'] },
             { id: 'revenue', label: 'Revenue', icon: IndianRupee, roles: ['super_admin', 'finance'] },
             { id: 'capacity', label: 'Capacity', icon: TrendingUp, roles: ['super_admin', 'finance', 'support'] },
             { id: 'mobile', label: 'Mobile App', icon: Smartphone, roles: ['super_admin', 'finance', 'support'] },
@@ -20415,36 +20427,96 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             { id: 'support', label: 'Support', icon: LifeBuoy, roles: ['super_admin', 'support'] },
             { id: 'security', label: 'Security', icon: Lock, roles: ['super_admin'] },
             { id: 'profile', label: 'Profile', icon: UserIcon, roles: ['super_admin', 'support', 'finance', 'compliance'] },
-          ].filter(item => item.roles.includes(effectiveAdminRole)).map(item => (
-            <button
-              key={item.id}
-              onClick={() => {
-                setActiveTab(item.id as any);
-                if (window.innerWidth < 1024) {
-                  setIsSidebarOpen(false);
-                }
-              }}
-              className={cn(
-                "w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all group relative",
-                activeTab === item.id 
-                  ? "bg-mairide-primary text-white shadow-lg shadow-mairide-primary/20" 
-                  : "text-mairide-secondary hover:bg-mairide-bg hover:text-mairide-primary"
-              )}
-            >
-              <item.icon className={cn("w-5 h-5 shrink-0", activeTab === item.id ? "text-white" : "group-hover:scale-110 transition-transform")} />
-              <span className={cn("whitespace-nowrap transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
-                {item.label}
-              </span>
-              {item.id === 'verification' && pendingVerificationDrivers.length > 0 && (
-                <span className={cn(
-                  "bg-mairide-accent text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full ml-auto",
-                  !isSidebarOpen && "absolute top-1 right-1"
-                )}>
-                  {pendingVerificationDrivers.length}
+          ].filter(item => item.roles.includes(effectiveAdminRole)).map(item => {
+            if (item.id === 'b2b') {
+              return (
+                <div key={item.id} className="space-y-2">
+                  <button
+                    onClick={() => {
+                      setActiveTab('b2b');
+                      setIsB2BNavOpen((current) => !current);
+                    }}
+                    className={cn(
+                      "w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all group relative",
+                      activeTab === item.id
+                        ? "bg-mairide-primary text-white shadow-lg shadow-mairide-primary/20"
+                        : "text-mairide-secondary hover:bg-mairide-bg hover:text-mairide-primary"
+                    )}
+                  >
+                    <item.icon className={cn("w-5 h-5 shrink-0", activeTab === item.id ? "text-white" : "group-hover:scale-110 transition-transform")} />
+                    <span className={cn("whitespace-nowrap transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
+                      {item.label}
+                    </span>
+                    {isSidebarOpen ? (
+                      <ChevronDown className={cn("ml-auto h-4 w-4 transition-transform", isB2BNavOpen ? "rotate-180" : "rotate-0")} />
+                    ) : null}
+                  </button>
+                  {isSidebarOpen && isB2BNavOpen ? (
+                    <div className="space-y-2 pl-4">
+                      {[
+                        { id: 'hotels', label: 'Hotel & Resort Partners', icon: ShieldCheck },
+                        { id: 'fleets', label: 'Fleet & Travel Operators', icon: Car },
+                      ].map((sectionItem) => {
+                        const isActiveSection = activeTab === 'b2b' && activeB2BSection === sectionItem.id;
+                        return (
+                          <button
+                            key={sectionItem.id}
+                            onClick={() => {
+                              setActiveTab('b2b');
+                              setActiveB2BSection(sectionItem.id as 'hotels' | 'fleets');
+                              if (window.innerWidth < 1024) {
+                                setIsSidebarOpen(false);
+                              }
+                            }}
+                            className={cn(
+                              "w-full flex items-center space-x-3 rounded-2xl px-4 py-3 text-sm font-bold transition-all",
+                              isActiveSection
+                                ? "bg-mairide-bg text-mairide-primary"
+                                : "text-mairide-secondary hover:bg-mairide-bg hover:text-mairide-primary"
+                            )}
+                          >
+                            <sectionItem.icon className="h-4 w-4 shrink-0" />
+                            <span>{sectionItem.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            }
+
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab(item.id as any);
+                  if (window.innerWidth < 1024) {
+                    setIsSidebarOpen(false);
+                  }
+                }}
+                className={cn(
+                  "w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all group relative",
+                  activeTab === item.id 
+                    ? "bg-mairide-primary text-white shadow-lg shadow-mairide-primary/20" 
+                    : "text-mairide-secondary hover:bg-mairide-bg hover:text-mairide-primary"
+                )}
+              >
+                <item.icon className={cn("w-5 h-5 shrink-0", activeTab === item.id ? "text-white" : "group-hover:scale-110 transition-transform")} />
+                <span className={cn("whitespace-nowrap transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
+                  {item.label}
                 </span>
-              )}
-            </button>
-          ))}
+                {item.id === 'verification' && pendingVerificationDrivers.length > 0 && (
+                  <span className={cn(
+                    "bg-mairide-accent text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full ml-auto",
+                    !isSidebarOpen && "absolute top-1 right-1"
+                  )}>
+                    {pendingVerificationDrivers.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-mairide-bg">
@@ -20488,9 +20560,9 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
           <div className="max-w-7xl mx-auto">
             <div className="mb-12">
               <h2 className="text-4xl font-black text-mairide-primary tracking-tighter capitalize mb-2">
-                {activeTab}
+                {adminTabTitle}
               </h2>
-              <p className="text-mairide-secondary italic serif text-lg">Manage and monitor platform {activeTab} details.</p>
+              <p className="text-mairide-secondary italic serif text-lg">{adminTabDescription}</p>
             </div>
 
             {activeTab === 'verification' && (
@@ -21107,7 +21179,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         )}
 
         {activeTab === 'b2b' && (
-          <AdminB2BVerificationDesk />
+          <AdminB2BVerificationDesk section={activeB2BSection} />
         )}
 
         {activeTab === 'revenue' && (

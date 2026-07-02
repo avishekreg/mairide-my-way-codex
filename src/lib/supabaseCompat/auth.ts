@@ -120,8 +120,8 @@ function buildOAuthPopupFeatures() {
 async function waitForOAuthPopupSession(authInstance: SupabaseAuthCompat, popup: Window | null) {
   return await new Promise<UserCredential>((resolve, reject) => {
     let settled = false;
-    let closePoll: ReturnType<typeof window.setInterval> | null = null;
-    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
+    let closePoll: number | null = null;
+    let timeoutId: number | null = null;
 
     const cleanup = () => {
       unsubscribe?.();

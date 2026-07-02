@@ -265,6 +265,95 @@ export interface AppConfig {
   updatedBy: string;
 }
 
+export type PartnerType = 'fleet_owner' | 'hotel_partner';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface PartnerVehicle {
+  id: string;
+  label: string;
+  registrationNumber: string;
+  assignedDriverName?: string;
+  assignedDriverId?: string;
+  status: 'active' | 'idle' | 'maintenance';
+  liveLog?: string;
+  updatedAt?: string;
+}
+
+export interface PartnerPayoutModel {
+  model: 'flat_salary' | 'per_ride_cut' | 'fixed_percentage';
+  value: number;
+  description?: string;
+  updatedAt?: string;
+}
+
+export interface PartnerCommissionRequest {
+  requestedPercentage: number;
+  note?: string;
+  status: 'draft' | 'requested' | 'approved' | 'rejected';
+  updatedAt?: string;
+}
+
+export interface B2BPartnerData {
+  notes?: string;
+  commissionRequest?: PartnerCommissionRequest;
+  payoutModel?: PartnerPayoutModel;
+  fleetVehicles?: PartnerVehicle[];
+  liveLogs?: Array<{
+    id: string;
+    vehicleId?: string;
+    title: string;
+    detail?: string;
+    createdAt: string;
+  }>;
+}
+
+export interface B2BPartner {
+  id: string;
+  authUserId?: string | null;
+  businessName: string;
+  type: PartnerType;
+  gstNumber?: string | null;
+  contactPerson: string;
+  phone: string;
+  email: string;
+  documentUrl: string;
+  signupLatitude?: number | null;
+  signupLongitude?: number | null;
+  commissionPercentage: number;
+  razorpayLinkedAccountId?: string | null;
+  status: ApprovalStatus;
+  verifiedAt?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  data?: B2BPartnerData;
+}
+
+export interface PartnerBooking {
+  id: string;
+  partnerId: string;
+  rideId?: string | null;
+  totalFare: number;
+  partnerCut: number;
+  driverCut: number;
+  settlementStatus: 'pending' | 'processed' | 'failed';
+  createdAt: string;
+  updatedAt?: string;
+  data?: {
+    guestName?: string;
+    guestPhone?: string;
+    bookedBy?: string;
+    source?: string;
+    notes?: string;
+    paymentPreference?: 'secure_pay' | 'manual';
+    rideLabel?: string;
+    pickup?: string;
+    dropoff?: string;
+    pickupTime?: string;
+    coreRideId?: string;
+    bookingSource?: string;
+  };
+}
+
 export interface Booking {
   id: string;
   rideId: string;
