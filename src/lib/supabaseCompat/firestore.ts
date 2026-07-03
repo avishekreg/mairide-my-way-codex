@@ -181,6 +181,7 @@ function inflateRecord<T>(table: string, row: any): T {
       forcePasswordChange:
         row.force_password_change ?? base.forcePasswordChange ?? false,
       wallet: row.wallet ?? base.wallet,
+      cashWallet: base.cashWallet,
       location: row.location ?? base.location,
       driverDetails: row.driver_details ?? base.driverDetails,
     } as T;

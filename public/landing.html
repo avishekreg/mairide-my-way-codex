@@ -227,13 +227,13 @@
             <p class="text-xs font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="fleetEyebrow">Fleet Layer</p>
             <h3 class="mt-5 text-3xl font-black" data-i18n="fleetTitle">For Fleet Owners & Travel Agents</h3>
             <p class="mt-5 text-base leading-7 text-mairide-secondary" data-i18n="fleetBody">Manage multiple cars, secure guaranteed return loads, reduce idle losses, and monitor every empty-leg opportunity from a custom dashboard.</p>
-            <a href="mailto:partners@mairide.in?subject=Request%20Fleet%20Access" class="mt-8 inline-flex rounded-2xl bg-mairide-primary px-6 py-4 font-black text-white transition hover:bg-mairide-accent" data-i18n="fleetCta">Request Fleet Access</a>
+            <a href="https://rides.mairide.in/partners/fleet/apply" data-partner-cta class="mt-8 inline-flex rounded-2xl bg-mairide-primary px-6 py-4 font-black text-white transition hover:bg-mairide-accent" data-i18n="fleetCta">Request Fleet Access</a>
           </article>
           <article class="reveal rounded-[40px] border border-mairide-secondary/25 bg-white p-8 shadow-sm transition hover:-translate-y-1 hover:border-mairide-accent">
             <p class="text-xs font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="hotelEyebrow">Hospitality Layer</p>
             <h3 class="mt-5 text-3xl font-black" data-i18n="hotelTitle">For Hotel & Resort Partners</h3>
             <p class="mt-5 text-base leading-7 text-mairide-secondary" data-i18n="hotelBody">Book scam-free rides for guests through a desk console, add a premium travel service, and earn a 10% revenue share on successful bookings.</p>
-            <a href="mailto:partners@mairide.in?subject=Become%20a%20Hotel%20Partner" class="mt-8 inline-flex rounded-2xl bg-mairide-accent px-6 py-4 font-black text-white shadow-mairide transition hover:bg-mairide-primary" data-i18n="hotelCta">Become a Hotel Partner</a>
+            <a href="https://rides.mairide.in/partners/hotel/apply" data-partner-cta class="mt-8 inline-flex rounded-2xl bg-mairide-accent px-6 py-4 font-black text-white shadow-mairide transition hover:bg-mairide-primary" data-i18n="hotelCta">Become a Hotel Partner</a>
           </article>
         </div>
       </div>
@@ -607,6 +607,15 @@
       link.addEventListener('click', (event) => {
         event.preventDefault();
         window.location.assign(withMarketingParams(rideDomain));
+      });
+    });
+
+    document.querySelectorAll('[data-partner-cta]').forEach((link) => {
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        const targetUrl = link.getAttribute('href');
+        if (!targetUrl) return;
+        window.location.assign(withMarketingParams(targetUrl));
       });
     });
 

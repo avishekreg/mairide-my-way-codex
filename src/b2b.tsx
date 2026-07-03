@@ -6,6 +6,7 @@ import {
   Car,
   CheckCircle2,
   Clock3,
+  Trash2,
   Eye,
   FileBadge2,
   Globe2,
@@ -21,7 +22,7 @@ import {
 import { supabase } from './lib/supabase';
 import { cn, formatCurrency } from './lib/utils';
 import { b2bPartnerService } from './services/b2bPartnerService';
-import type { ApprovalStatus, B2BPartner, PartnerBooking, PartnerType, PartnerVehicle, Ride } from './types';
+import type { ApprovalStatus, B2BPartner, PartnerBooking, PartnerType, PartnerVehicle, Ride, Booking, UserProfile } from './types';
 
 const partnerTypeMeta: Record<PartnerType, { label: string; eyebrow: string; icon: typeof Hotel; copy: string }> = {
   fleet_owner: {
@@ -43,6 +44,20 @@ const payoutModelOptions = [
   { value: 'per_ride_cut', label: 'Per-ride cut' },
   { value: 'fixed_percentage', label: 'Fixed percentage' },
 ] as const;
+
+const normalizeSearchText = (value: string) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const tokenizeSearchText = (value: string) =>
+  normalizeSearchText(value)
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
 
 const readFileAsDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -399,6 +414,9 @@ const PartnerStatusPanel = ({ partner }: { partner: B2BPartner }) => {
   );
 };
 
+const computeHotelMarkupRate = (partner: B2BPartner) =>
+  Number(partner.data?.hotelMarkupPercentage ?? partner.commissionPercentage ?? 0);
+
 const HotelPartnerDashboard = ({
   partner,
   bookings,
@@ -415,10 +433,8 @@ const HotelPartnerDashboard = ({
   const activeRides = bookings.filter((booking) => booking.settlementStatus === 'pending').length;
   const totalGross = bookings.reduce((sum, booking) => sum + booking.totalFare, 0);
   const totalCommission = bookings.reduce((sum, booking) => sum + booking.partnerCut, 0);
-  const [commissionRequest, setCommissionRequest] = useState(
-    String((partner.data?.commissionRequest?.requestedPercentage ?? partner.commissionPercentage) || 0)
-  );
-  const [commissionNote, setCommissionNote] = useState(partner.data?.commissionRequest?.note || '');
+  const activeMarkupRate = computeHotelMarkupRate(partner);
+  const [markupPercentage, setMarkupPercentage] = useState(String(activeMarkupRate || 0));
   const [deskForm, setDeskForm] = useState({
     guestName: '',
     guestPhone: '',
@@ -426,28 +442,66 @@ const HotelPartnerDashboard = ({
     dropoff: '',
     pickupTime: '',
     rideId: '',
-    quotedFare: '',
-    paymentPreference: 'secure_pay' as NonNullable<PartnerBooking['data']>['paymentPreference'],
+    notes: '',
   });
   const [isSavingCommission, setIsSavingCommission] = useState(false);
   const [isCreatingDeskBooking, setIsCreatingDeskBooking] = useState(false);
   const [deskNotice, setDeskNotice] = useState<string | null>(null);
+  const [routeQuery, setRouteQuery] = useState({
+    pickup: '',
+    dropoff: '',
+  });
 
-  const submitCommissionRequest = async () => {
+  useEffect(() => {
+    setMarkupPercentage(String(activeMarkupRate || 0));
+  }, [activeMarkupRate]);
+
+  const routeMatchedRides = useMemo(() => {
+    const pickupTokens = tokenizeSearchText(routeQuery.pickup || deskForm.pickup);
+    const dropoffTokens = tokenizeSearchText(routeQuery.dropoff || deskForm.dropoff);
+    if (!pickupTokens.length && !dropoffTokens.length) {
+      return rides.slice(0, 12);
+    }
+
+    return rides.filter((ride) => {
+      const haystack = normalizeSearchText([ride.origin, ride.destination, ride.driverName, ride.fleetPartnerName].filter(Boolean).join(' '));
+      const pickupMatch = !pickupTokens.length || pickupTokens.every((token) => haystack.includes(token));
+      const dropoffMatch = !dropoffTokens.length || dropoffTokens.every((token) => haystack.includes(token));
+      return pickupMatch && dropoffMatch;
+    });
+  }, [deskForm.dropoff, deskForm.pickup, rides, routeQuery.dropoff, routeQuery.pickup]);
+
+  const selectedRide = useMemo(
+    () => routeMatchedRides.find((ride) => ride.id === deskForm.rideId) || rides.find((ride) => ride.id === deskForm.rideId) || null,
+    [deskForm.rideId, rides, routeMatchedRides]
+  );
+
+  const bookingPreview = useMemo(() => {
+    if (!selectedRide) return null;
+    const commissionPercentage = Number(markupPercentage || activeMarkupRate || 0);
+    const baseFare = Number(selectedRide.price || 0);
+    const commissionAmount = Number(((baseFare * commissionPercentage) / 100).toFixed(2));
+    const travelerCharge = Number((baseFare + commissionAmount).toFixed(2));
+    return {
+      commissionPercentage,
+      baseFare,
+      commissionAmount,
+      travelerCharge,
+      driverPayout: baseFare,
+    };
+  }, [activeMarkupRate, markupPercentage, selectedRide]);
+
+  const saveHotelMarkup = async () => {
     setIsSavingCommission(true);
     try {
       const updated = await b2bPartnerService.updatePartnerProfile(partner.id, {
         data: {
           ...(partner.data || {}),
-          commissionRequest: {
-            requestedPercentage: Number(commissionRequest || 0),
-            note: commissionNote.trim(),
-            status: 'requested',
-            updatedAt: new Date().toISOString(),
-          },
+          hotelMarkupPercentage: Number(markupPercentage || 0),
         },
       });
       onPartnerUpdated(updated);
+      setDeskNotice('Hotel traveler markup saved. New guest bookings will charge this markup on top of the driver base fare.');
     } finally {
       setIsSavingCommission(false);
     }
@@ -458,26 +512,19 @@ const HotelPartnerDashboard = ({
     setIsCreatingDeskBooking(true);
     setDeskNotice(null);
     try {
-      const selectedRide = rides.find((ride) => ride.id === deskForm.rideId);
-      const totalFare = Number(deskForm.quotedFare || selectedRide?.price || 0);
-      const partnerCut = Number(((totalFare * partner.commissionPercentage) / 100).toFixed(2));
-      const driverCut = Number((totalFare - partnerCut).toFixed(2));
-      const createdBooking = await b2bPartnerService.createPartnerBooking({
+      if (!selectedRide || !bookingPreview) {
+        throw new Error('Please select a matched network ride before creating a guest booking.');
+      }
+      const createdBooking = await b2bPartnerService.createHotelDeskBooking({
         partnerId: partner.id,
-        totalFare,
-        partnerCut,
-        driverCut,
-        data: {
-          guestName: deskForm.guestName,
-          guestPhone: deskForm.guestPhone,
-          pickup: deskForm.pickup,
-          dropoff: deskForm.dropoff,
-          pickupTime: deskForm.pickupTime,
-          rideLabel: selectedRide ? `${selectedRide.origin} → ${selectedRide.destination}` : `${deskForm.pickup} → ${deskForm.dropoff}`,
-          coreRideId: selectedRide?.id,
-          bookingSource: 'hotel_desk',
-          paymentPreference: deskForm.paymentPreference,
-        },
+        rideId: selectedRide.id,
+        guestName: deskForm.guestName,
+        guestPhone: deskForm.guestPhone,
+        pickup: deskForm.pickup || selectedRide.origin,
+        dropoff: deskForm.dropoff || selectedRide.destination,
+        pickupTime: deskForm.pickupTime,
+        commissionPercentage: bookingPreview.commissionPercentage,
+        notes: deskForm.notes,
       });
       onBookingCreated(createdBooking);
       setDeskForm({
@@ -487,10 +534,10 @@ const HotelPartnerDashboard = ({
         dropoff: '',
         pickupTime: '',
         rideId: '',
-        quotedFare: '',
-        paymentPreference: 'secure_pay',
+        notes: '',
       });
-      setDeskNotice('Guest desk booking logged successfully. Settlement can now flow through the isolated partner ledger.');
+      setRouteQuery({ pickup: '', dropoff: '' });
+      setDeskNotice('Guest booking created. Traveler charge uses the hotel markup, driver payout stays protected, and settlement is locked to MaiRide Secure Pay.');
     } catch (error: any) {
       setDeskNotice(String(error?.message || 'We could not create the desk booking right now.'));
     } finally {
@@ -516,42 +563,39 @@ const HotelPartnerDashboard = ({
         <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Commission control</p>
-              <h2 className="mt-2 text-xl font-bold text-mairide-primary">Custom commission setting</h2>
+              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Traveler markup control</p>
+              <h2 className="mt-2 text-xl font-bold text-mairide-primary">Hotel commission on top of base fare</h2>
             </div>
             <div className="rounded-[22px] bg-mairide-bg px-4 py-3 text-right">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Current live rate</p>
-              <p className="mt-1 text-2xl font-black text-mairide-primary">{partner.commissionPercentage.toFixed(2)}%</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Current traveler markup</p>
+              <p className="mt-1 text-2xl font-black text-mairide-primary">{activeMarkupRate.toFixed(2)}%</p>
             </div>
           </div>
           <div className="mt-6 space-y-4">
             <label className="block">
-              <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-mairide-secondary">Requested commission percentage</span>
+              <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-mairide-secondary">Hotel markup percentage</span>
               <input
                 type="number"
                 min="0"
                 step="0.01"
-                value={commissionRequest}
-                onChange={(event) => setCommissionRequest(event.target.value)}
+                value={markupPercentage}
+                onChange={(event) => setMarkupPercentage(event.target.value)}
                 className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
               />
             </label>
-            <label className="block">
-              <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-mairide-secondary">Commercial note</span>
-              <textarea
-                value={commissionNote}
-                onChange={(event) => setCommissionNote(event.target.value)}
-                className="min-h-[120px] w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
-                placeholder="Why should MaiRide adjust this property’s revenue share?"
-              />
-            </label>
+            <div className="rounded-[24px] border border-mairide-secondary bg-mairide-bg p-4">
+              <p className="text-sm font-bold text-mairide-primary">Commercial rule</p>
+              <p className="mt-2 text-sm text-mairide-secondary">
+                This markup is added to the traveler-facing total. The listed driver or fleet fare stays intact, so the partner revenue never reduces driver payout.
+              </p>
+            </div>
             <button
               type="button"
-              onClick={submitCommissionRequest}
+              onClick={saveHotelMarkup}
               disabled={isSavingCommission}
               className="rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-mairide-accent disabled:opacity-60"
             >
-              {isSavingCommission ? 'Saving request...' : 'Save commission request'}
+              {isSavingCommission ? 'Saving markup...' : 'Save traveler markup'}
             </button>
           </div>
         </div>
@@ -559,30 +603,48 @@ const HotelPartnerDashboard = ({
         <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
           <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Desk console</p>
           <h2 className="mt-2 text-xl font-bold text-mairide-primary">Book a ride for a guest</h2>
-          <p className="mt-2 text-sm text-mairide-secondary">This console creates an isolated partner ledger entry while preserving the core traveler-driver flow untouched.</p>
+          <p className="mt-2 text-sm text-mairide-secondary">Search across the live MaiRide network, including mapped fleet inventory, then create a guest booking that is settled only through MaiRide Secure Pay.</p>
           <form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={createDeskBooking}>
             <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Guest name" value={deskForm.guestName} onChange={(event) => setDeskForm((current) => ({ ...current, guestName: event.target.value }))} required />
             <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Guest phone" value={deskForm.guestPhone} onChange={(event) => setDeskForm((current) => ({ ...current, guestPhone: event.target.value }))} required />
-            <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent md:col-span-2" placeholder="Pickup" value={deskForm.pickup} onChange={(event) => setDeskForm((current) => ({ ...current, pickup: event.target.value }))} required />
-            <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent md:col-span-2" placeholder="Dropoff" value={deskForm.dropoff} onChange={(event) => setDeskForm((current) => ({ ...current, dropoff: event.target.value }))} required />
+            <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent md:col-span-2" placeholder="Pickup" value={deskForm.pickup} onChange={(event) => { const value = event.target.value; setDeskForm((current) => ({ ...current, pickup: value })); setRouteQuery((current) => ({ ...current, pickup: value })); }} required />
+            <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent md:col-span-2" placeholder="Dropoff" value={deskForm.dropoff} onChange={(event) => { const value = event.target.value; setDeskForm((current) => ({ ...current, dropoff: value })); setRouteQuery((current) => ({ ...current, dropoff: value })); }} required />
             <input type="datetime-local" className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" value={deskForm.pickupTime} onChange={(event) => setDeskForm((current) => ({ ...current, pickupTime: event.target.value }))} />
-            <select className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" value={deskForm.rideId} onChange={(event) => setDeskForm((current) => ({ ...current, rideId: event.target.value, quotedFare: event.target.value ? String(rides.find((ride) => ride.id === event.target.value)?.price || '') : current.quotedFare }))}>
-              <option value="">Select an available ride</option>
-              {rides.map((ride) => (
+            <select className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" value={deskForm.rideId} onChange={(event) => setDeskForm((current) => ({ ...current, rideId: event.target.value }))}>
+              <option value="">Select a matched live ride</option>
+              {routeMatchedRides.map((ride) => (
                 <option key={ride.id} value={ride.id}>
-                  {ride.origin} → {ride.destination} ({formatCurrency(ride.price)})
+                  {ride.origin} → {ride.destination} ({formatCurrency(ride.price)}){ride.fleetPartnerName ? ` • ${ride.fleetPartnerName}` : ''}
                 </option>
               ))}
             </select>
-            <input type="number" min="0" className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Fare to log" value={deskForm.quotedFare} onChange={(event) => setDeskForm((current) => ({ ...current, quotedFare: event.target.value }))} required />
-            <select className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent md:col-span-2" value={deskForm.paymentPreference} onChange={(event) => setDeskForm((current) => ({ ...current, paymentPreference: event.target.value as NonNullable<PartnerBooking['data']>['paymentPreference'] }))}>
-              <option value="secure_pay">Collect Online via MaiRide Secure Pay</option>
-              <option value="cash">Manual cash fallback</option>
-              <option value="hybrid">Hybrid settlement</option>
-            </select>
+            <textarea className="min-h-[110px] rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent md:col-span-2" placeholder="Guest notes or concierge instructions (optional)" value={deskForm.notes} onChange={(event) => setDeskForm((current) => ({ ...current, notes: event.target.value }))} />
+            <div className="rounded-[24px] border border-mairide-accent/25 bg-mairide-accent/5 p-4 md:col-span-2">
+              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-accent">Payment policy</p>
+              <p className="mt-2 text-sm font-medium text-mairide-primary">
+                All B2B bookings are collected only through <span className="font-black">MaiRide Secure Pay (Razorpay)</span>. No off-platform or cash collection is allowed in this channel.
+              </p>
+            </div>
+            {selectedRide && bookingPreview ? (
+              <div className="grid gap-3 rounded-[24px] border border-mairide-secondary bg-mairide-bg p-4 md:col-span-2 md:grid-cols-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Selected network ride</p>
+                  <p className="mt-2 text-sm font-bold text-mairide-primary">{selectedRide.origin} → {selectedRide.destination}</p>
+                  <p className="mt-1 text-sm text-mairide-secondary">
+                    Driver: {selectedRide.driverName || 'Assigned driver'}
+                    {selectedRide.fleetPartnerName ? ` • Fleet: ${selectedRide.fleetPartnerName}` : ''}
+                  </p>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between"><span className="text-mairide-secondary">Driver / fleet base fare</span><span className="font-bold text-mairide-primary">{formatCurrency(bookingPreview.baseFare)}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-mairide-secondary">Hotel markup ({bookingPreview.commissionPercentage.toFixed(2)}%)</span><span className="font-bold text-mairide-accent">{formatCurrency(bookingPreview.commissionAmount)}</span></div>
+                  <div className="flex items-center justify-between border-t border-mairide-secondary/25 pt-2"><span className="font-bold text-mairide-primary">Traveler charge</span><span className="text-lg font-black text-mairide-primary">{formatCurrency(bookingPreview.travelerCharge)}</span></div>
+                </div>
+              </div>
+            ) : null}
             {deskNotice ? <div className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm text-mairide-primary md:col-span-2">{deskNotice}</div> : null}
             <button type="submit" disabled={isCreatingDeskBooking} className="rounded-2xl bg-mairide-primary px-5 py-4 text-sm font-bold text-white transition-colors hover:bg-mairide-accent disabled:opacity-60 md:col-span-2">
-              {isCreatingDeskBooking ? 'Creating desk booking...' : 'Create guest booking'}
+              {isCreatingDeskBooking ? 'Creating secure booking...' : 'Create secure guest booking'}
             </button>
           </form>
         </div>
@@ -625,10 +687,16 @@ const HotelPartnerDashboard = ({
 const FleetPartnerDashboard = ({
   partner,
   bookings,
+  fleetDrivers,
+  fleetRides,
+  fleetBookings,
   onPartnerUpdated,
 }: {
   partner: B2BPartner;
   bookings: PartnerBooking[];
+  fleetDrivers: UserProfile[];
+  fleetRides: Ride[];
+  fleetBookings: Booking[];
   onPartnerUpdated: (partner: B2BPartner) => void;
 }) => {
   const fleetVehicles = partner.data?.fleetVehicles || [];
@@ -636,11 +704,16 @@ const FleetPartnerDashboard = ({
   const payoutModel = partner.data?.payoutModel || { model: 'per_ride_cut', value: 0, description: '' };
   const totalGross = bookings.reduce((sum, booking) => sum + booking.totalFare, 0);
   const activeVehicles = fleetVehicles.filter((vehicle) => vehicle.status === 'active').length;
+  const totalPendingCash = fleetDrivers.reduce((sum, driver) => sum + Number(driver.cashWallet?.pendingBalance || 0), 0);
+  const totalAvailableCash = fleetDrivers.reduce((sum, driver) => sum + Number(driver.cashWallet?.availableBalance || 0), 0);
   const [vehicleDraft, setVehicleDraft] = useState<PartnerVehicle>({
     id: '',
     label: '',
     registrationNumber: '',
     assignedDriverName: '',
+    assignedDriverId: '',
+    assignedDriverPhone: '',
+    assignedDriverEmail: '',
     status: 'active',
     liveLog: '',
   });
@@ -682,14 +755,17 @@ const FleetPartnerDashboard = ({
         ...liveLogs,
       ].slice(0, 20),
     });
-    setVehicleDraft({
-      id: '',
-      label: '',
-      registrationNumber: '',
-      assignedDriverName: '',
-      status: 'active',
-      liveLog: '',
-    });
+      setVehicleDraft({
+        id: '',
+        label: '',
+        registrationNumber: '',
+        assignedDriverName: '',
+        assignedDriverId: '',
+        assignedDriverPhone: '',
+        assignedDriverEmail: '',
+        status: 'active',
+        liveLog: '',
+      });
     setSaveMessage('Fleet vehicle added.');
   };
 
@@ -716,8 +792,8 @@ const FleetPartnerDashboard = ({
 
       <div className="grid gap-6 md:grid-cols-3">
         <PartnerStat label="Vehicles in console" value={fleetVehicles.length} detail={`${activeVehicles} currently marked active`} />
-        <PartnerStat label="Gross fares tracked" value={formatCurrency(totalGross)} detail="From the isolated partner ledger only" />
-        <PartnerStat label="Pending settlements" value={bookings.filter((booking) => booking.settlementStatus === 'pending').length} detail="Awaiting downstream batch settlement" />
+        <PartnerStat label="Fleet gross fares" value={formatCurrency(totalGross || fleetBookings.reduce((sum, booking) => sum + Number(booking.totalPrice || booking.fare || 0), 0))} detail={`${fleetRides.filter((ride) => ['available', 'negotiating', 'started', 'in_progress'].includes(String(ride.status))).length} live listed rides`} />
+        <PartnerStat label="Driver cash wallet" value={formatCurrency(totalPendingCash)} detail={`Available INR: ${formatCurrency(totalAvailableCash)}`} />
       </div>
 
       <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
@@ -745,7 +821,11 @@ const FleetPartnerDashboard = ({
                     <p className="text-mairide-secondary">{vehicle.registrationNumber}</p>
                     {vehicle.liveLog ? <p className="mt-2 text-xs text-mairide-secondary">{vehicle.liveLog}</p> : null}
                   </div>
-                  <div className="font-medium text-mairide-primary">{vehicle.assignedDriverName || 'Unassigned'}</div>
+                    <div className="font-medium text-mairide-primary">
+                      <p>{vehicle.assignedDriverName || 'Unassigned'}</p>
+                      {vehicle.assignedDriverPhone ? <p className="mt-1 text-xs text-mairide-secondary">{vehicle.assignedDriverPhone}</p> : null}
+                      {vehicle.assignedDriverId ? <p className="mt-1 text-[11px] font-mono text-mairide-secondary">{vehicle.assignedDriverId}</p> : null}
+                    </div>
                   <div>
                     <span className={cn(
                       'inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest',
@@ -771,6 +851,9 @@ const FleetPartnerDashboard = ({
             <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Vehicle label" value={vehicleDraft.label} onChange={(event) => setVehicleDraft((current) => ({ ...current, label: event.target.value }))} required />
             <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Registration number" value={vehicleDraft.registrationNumber} onChange={(event) => setVehicleDraft((current) => ({ ...current, registrationNumber: event.target.value }))} required />
             <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Assigned driver name" value={vehicleDraft.assignedDriverName} onChange={(event) => setVehicleDraft((current) => ({ ...current, assignedDriverName: event.target.value }))} />
+            <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Assigned driver UID" value={vehicleDraft.assignedDriverId || ''} onChange={(event) => setVehicleDraft((current) => ({ ...current, assignedDriverId: event.target.value }))} />
+            <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Assigned driver phone" value={vehicleDraft.assignedDriverPhone || ''} onChange={(event) => setVehicleDraft((current) => ({ ...current, assignedDriverPhone: event.target.value }))} />
+            <input className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" placeholder="Assigned driver email" value={vehicleDraft.assignedDriverEmail || ''} onChange={(event) => setVehicleDraft((current) => ({ ...current, assignedDriverEmail: event.target.value }))} />
             <select className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-4 text-sm font-medium text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent" value={vehicleDraft.status} onChange={(event) => setVehicleDraft((current) => ({ ...current, status: event.target.value as PartnerVehicle['status'] }))}>
               <option value="active">Active</option>
               <option value="idle">Idle</option>
@@ -819,6 +902,35 @@ const FleetPartnerDashboard = ({
               )}
             </div>
           </div>
+          <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Mapped fleet earnings</p>
+            <h2 className="mt-2 text-xl font-bold text-mairide-primary">Driver wallet and booking visibility</h2>
+            <div className="mt-5 space-y-3">
+              {fleetDrivers.length ? fleetDrivers.map((driver) => (
+                <div key={driver.uid} className="rounded-[22px] bg-mairide-bg p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-mairide-primary">{driver.displayName || driver.email || driver.uid}</p>
+                      <p className="mt-1 text-xs text-mairide-secondary">{driver.phoneNumber || driver.email || 'Driver mapping pending contact details'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Pending INR</p>
+                      <p className="mt-1 text-lg font-black text-mairide-primary">{formatCurrency(Number(driver.cashWallet?.pendingBalance || 0))}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-mairide-secondary md:grid-cols-3">
+                    <div className="rounded-2xl bg-white px-3 py-2">Available: <span className="font-bold text-mairide-primary">{formatCurrency(Number(driver.cashWallet?.availableBalance || 0))}</span></div>
+                    <div className="rounded-2xl bg-white px-3 py-2">Lifetime gross: <span className="font-bold text-mairide-primary">{formatCurrency(Number(driver.cashWallet?.lifetimeGross || 0))}</span></div>
+                    <div className="rounded-2xl bg-white px-3 py-2">Fleet bookings: <span className="font-bold text-mairide-primary">{fleetBookings.filter((booking) => booking.driverId === driver.uid).length}</span></div>
+                  </div>
+                </div>
+              )) : (
+                <div className="rounded-[22px] bg-mairide-bg p-4 text-sm text-mairide-secondary">
+                  No mapped drivers yet. Add the assigned driver UID inside each fleet vehicle so live rides, bookings, and earnings attach correctly.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -842,21 +954,66 @@ export const PartnerPortal = ({
 }) => {
   const [bookings, setBookings] = useState<PartnerBooking[]>([]);
   const [rides, setRides] = useState<Ride[]>([]);
+  const [fleetDrivers, setFleetDrivers] = useState<UserProfile[]>([]);
+  const [fleetRides, setFleetRides] = useState<Ride[]>([]);
+  const [fleetBookings, setFleetBookings] = useState<Booking[]>([]);
 
   useEffect(() => {
     let active = true;
-    void b2bPartnerService.listPartnerBookings(partner.id).then((result) => {
-      if (active) setBookings(result);
-    }).catch(() => undefined);
+    const reloadPartnerWorkspace = async () => {
+      try {
+        const nextBookings = await b2bPartnerService.listPartnerBookings(partner.id);
+        if (!active) return;
+        setBookings(nextBookings);
+
+        if (partner.type === 'hotel_partner') {
+          const nextRides = await b2bPartnerService.listDispatchableRides();
+          if (!active) return;
+          setRides(nextRides);
+        } else {
+          const driverIds = Array.from(new Set((partner.data?.fleetVehicles || []).map((vehicle) => vehicle.assignedDriverId).filter(Boolean))) as string[];
+          const nextFleet = await b2bPartnerService.listFleetMappedRidesAndBookings(driverIds);
+          if (!active) return;
+          setFleetDrivers(nextFleet.drivers);
+          setFleetRides(nextFleet.rides);
+          setFleetBookings(nextFleet.bookings);
+        }
+      } catch {
+        return;
+      }
+    };
+
+    void reloadPartnerWorkspace();
+
+    const channel = supabase.channel(`partner-portal-${partner.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'partner_bookings', filter: `partner_id=eq.${partner.id}` }, () => {
+        void reloadPartnerWorkspace();
+      });
+
     if (partner.type === 'hotel_partner') {
-      void b2bPartnerService.listDispatchableRides().then((result) => {
-        if (active) setRides(result);
-      }).catch(() => undefined);
+      channel.on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, () => {
+        void reloadPartnerWorkspace();
+      });
+    } else {
+      channel
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, () => {
+          void reloadPartnerWorkspace();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
+          void reloadPartnerWorkspace();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+          void reloadPartnerWorkspace();
+        });
     }
+
+    channel.subscribe();
+
     return () => {
       active = false;
+      void supabase.removeChannel(channel);
     };
-  }, [partner.id, partner.type]);
+  }, [partner.data?.fleetVehicles, partner.id, partner.type]);
 
   if (partner.status !== 'approved') {
     return <PartnerStatusPanel partner={partner} />;
@@ -888,7 +1045,14 @@ export const PartnerPortal = ({
           onBookingCreated={(booking) => setBookings((current) => [booking, ...current])}
         />
       ) : (
-        <FleetPartnerDashboard partner={partner} bookings={bookings} onPartnerUpdated={onPartnerUpdated} />
+        <FleetPartnerDashboard
+          partner={partner}
+          bookings={bookings}
+          fleetDrivers={fleetDrivers}
+          fleetRides={fleetRides}
+          fleetBookings={fleetBookings}
+          onPartnerUpdated={onPartnerUpdated}
+        />
       )}
     </div>
   );
@@ -1028,6 +1192,7 @@ export const AdminB2BVerificationDesk = ({
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [savingCommissionId, setSavingCommissionId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [commissionDrafts, setCommissionDrafts] = useState<Record<string, string>>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [documentPartner, setDocumentPartner] = useState<B2BPartner | null>(null);
@@ -1138,6 +1303,41 @@ export const AdminB2BVerificationDesk = ({
       setErrorMessage(String(error?.message || 'Failed to update hotel commission.'));
     } finally {
       setSavingCommissionId(null);
+    }
+  };
+
+  const deletePartner = async (partner: B2BPartner) => {
+    const confirmed = window.confirm(`Delete ${partner.businessName} from the B2B partner system? This removes the partner record from the admin desk.`);
+    if (!confirmed) return;
+
+    setDeletingId(partner.id);
+    setErrorMessage(null);
+    try {
+      const headers = await getAdminRequestHeaders();
+      const response = await fetch('/api/admin-api?action=partner-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({ partnerId: partner.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(String(payload?.error || 'Failed to delete partner.'));
+      }
+      setPartners((current) => current.filter((currentPartner) => currentPartner.id !== partner.id));
+      setCommissionDrafts((current) => {
+        const next = { ...current };
+        delete next[partner.id];
+        return next;
+      });
+      if (documentPartner?.id === partner.id) setDocumentPartner(null);
+      if (reviewPartner?.id === partner.id) setReviewPartner(null);
+    } catch (error: any) {
+      setErrorMessage(String(error?.message || 'Failed to delete partner.'));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -1260,6 +1460,15 @@ export const AdminB2BVerificationDesk = ({
                           <Eye className="h-4 w-4" />
                           View Documents
                         </button>
+                        <button
+                          type="button"
+                          disabled={deletingId === partner.id}
+                          onClick={() => void deletePartner(partner)}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-600 disabled:opacity-60"
+                        >
+                          {deletingId === partner.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                          Delete
+                        </button>
                         <B2BStatusActions partner={partner} updatingId={updatingId} onUpdateStatus={updateStatus} />
                       </div>
                     </td>
@@ -1337,6 +1546,15 @@ export const AdminB2BVerificationDesk = ({
                           >
                             <Eye className="h-4 w-4" />
                             Review Application
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deletingId === partner.id}
+                            onClick={() => void deletePartner(partner)}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-600 disabled:opacity-60"
+                          >
+                            {deletingId === partner.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            Delete
                           </button>
                           <B2BStatusActions partner={partner} updatingId={updatingId} onUpdateStatus={updateStatus} />
                         </div>

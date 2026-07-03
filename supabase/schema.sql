@@ -129,6 +129,66 @@ create table if not exists public.platform_usage_events (
   updated_at timestamptz not null default now()
 );
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_type
+    where typname = 'partner_type'
+      and typnamespace = 'public'::regnamespace
+  ) then
+    create type public.partner_type as enum ('fleet_owner', 'hotel_partner');
+  end if;
+end
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_type
+    where typname = 'approval_status'
+      and typnamespace = 'public'::regnamespace
+  ) then
+    create type public.approval_status as enum ('pending', 'approved', 'rejected');
+  end if;
+end
+$$;
+
+create table if not exists public.b2b_partners (
+  id uuid primary key default gen_random_uuid(),
+  auth_user_id uuid references auth.users(id) on delete set null,
+  business_name varchar(255) not null,
+  type public.partner_type not null,
+  gst_number varchar(15),
+  contact_person varchar(150) not null,
+  phone varchar(15) not null,
+  email varchar(255) not null,
+  document_url text not null,
+  signup_latitude numeric(10, 7),
+  signup_longitude numeric(10, 7),
+  commission_percentage numeric(5, 2) not null default 0.00,
+  razorpay_linked_account_id varchar(100),
+  status public.approval_status not null default 'pending',
+  verified_at timestamptz,
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.partner_bookings (
+  id uuid primary key default gen_random_uuid(),
+  partner_id uuid references public.b2b_partners(id) on delete cascade,
+  ride_id uuid,
+  total_fare numeric(10, 2) not null,
+  partner_cut numeric(10, 2) not null,
+  driver_cut numeric(10, 2) not null,
+  settlement_status varchar(50) not null default 'pending',
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -183,6 +243,14 @@ drop trigger if exists platform_usage_events_set_updated_at on public.platform_u
 create trigger platform_usage_events_set_updated_at before update on public.platform_usage_events
 for each row execute procedure public.set_updated_at();
 
+drop trigger if exists b2b_partners_set_updated_at on public.b2b_partners;
+create trigger b2b_partners_set_updated_at before update on public.b2b_partners
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists partner_bookings_set_updated_at on public.partner_bookings;
+create trigger partner_bookings_set_updated_at before update on public.partner_bookings
+for each row execute procedure public.set_updated_at();
+
 alter table public.users enable row level security;
 alter table public.app_config enable row level security;
 alter table public.rides enable row level security;
@@ -194,6 +262,8 @@ alter table public.otp_sessions enable row level security;
 alter table public.platform_capacity_snapshots enable row level security;
 alter table public.platform_capacity_alerts enable row level security;
 alter table public.platform_usage_events enable row level security;
+alter table public.b2b_partners enable row level security;
+alter table public.partner_bookings enable row level security;
 
 drop policy if exists "authenticated users can read users" on public.users;
 create policy "authenticated users can read users"
@@ -335,7 +405,127 @@ on public.platform_usage_events for select
 to authenticated
 using (true);
 
+drop policy if exists "partners can read own partner profile" on public.b2b_partners;
+create policy "partners can read own partner profile"
+on public.b2b_partners for select
+to authenticated
+using (auth.uid() = auth_user_id);
+
+drop policy if exists "partners can create own partner profile" on public.b2b_partners;
+create policy "partners can create own partner profile"
+on public.b2b_partners for insert
+to anon, authenticated
+with check (auth_user_id is null or auth.uid() = auth_user_id);
+
+drop policy if exists "partners can update own pending partner profile" on public.b2b_partners;
+create policy "partners can update own pending partner profile"
+on public.b2b_partners for update
+to authenticated
+using (auth.uid() = auth_user_id)
+with check (auth.uid() = auth_user_id);
+
+drop policy if exists "admins can read partner profiles" on public.b2b_partners;
+create policy "admins can read partner profiles"
+on public.b2b_partners for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users admin_user
+    where admin_user.id = auth.uid()::text
+      and admin_user.role = 'admin'
+  )
+);
+
+drop policy if exists "admins can update partner profiles" on public.b2b_partners;
+create policy "admins can update partner profiles"
+on public.b2b_partners for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users admin_user
+    where admin_user.id = auth.uid()::text
+      and admin_user.role = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.users admin_user
+    where admin_user.id = auth.uid()::text
+      and admin_user.role = 'admin'
+  )
+);
+
+drop policy if exists "partners can read own partner bookings" on public.partner_bookings;
+create policy "partners can read own partner bookings"
+on public.partner_bookings for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.b2b_partners partner
+    where partner.id = partner_bookings.partner_id
+      and partner.auth_user_id = auth.uid()
+  )
+);
+
+drop policy if exists "partners can create own partner bookings" on public.partner_bookings;
+create policy "partners can create own partner bookings"
+on public.partner_bookings for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.b2b_partners partner
+    where partner.id = partner_bookings.partner_id
+      and partner.auth_user_id = auth.uid()
+  )
+);
+
+drop policy if exists "admins can read partner bookings" on public.partner_bookings;
+create policy "admins can read partner bookings"
+on public.partner_bookings for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users admin_user
+    where admin_user.id = auth.uid()::text
+      and admin_user.role = 'admin'
+  )
+);
+
+drop policy if exists "admins can manage partner bookings" on public.partner_bookings;
+create policy "admins can manage partner bookings"
+on public.partner_bookings for all
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users admin_user
+    where admin_user.id = auth.uid()::text
+      and admin_user.role = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.users admin_user
+    where admin_user.id = auth.uid()::text
+      and admin_user.role = 'admin'
+  )
+);
+
 create index if not exists idx_capacity_snapshots_day on public.platform_capacity_snapshots(snapshot_day);
 create index if not exists idx_capacity_alerts_observed on public.platform_capacity_alerts(observed_at desc);
 create index if not exists idx_capacity_alerts_metric on public.platform_capacity_alerts(metric_key);
 create index if not exists idx_platform_usage_events_observed on public.platform_usage_events(observed_at desc);
+create index if not exists idx_b2b_partners_auth_user_id on public.b2b_partners(auth_user_id);
+create index if not exists idx_b2b_partners_type on public.b2b_partners(type);
+create index if not exists idx_b2b_partners_status on public.b2b_partners(status);
+create unique index if not exists idx_b2b_partners_email on public.b2b_partners(lower(email));
+create index if not exists idx_partner_bookings_partner_id on public.partner_bookings(partner_id);
+create index if not exists idx_partner_bookings_ride_id on public.partner_bookings(ride_id);
+create index if not exists idx_partner_bookings_settlement_status on public.partner_bookings(settlement_status);

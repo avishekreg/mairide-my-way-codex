@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
 type CapacityMetricSeverity = "healthy" | "watch" | "warning" | "critical";
@@ -154,6 +155,62 @@ function parseWallet(raw: any) {
     return null;
   }
   return { balance, pendingBalance };
+}
+
+function parseCashWallet(raw: any) {
+  const availableBalance = Number(raw?.availableBalance);
+  const pendingBalance = Number(raw?.pendingBalance);
+  const lifetimeGross = Number(raw?.lifetimeGross);
+  return {
+    currency: "INR",
+    availableBalance: Number.isFinite(availableBalance) ? availableBalance : 0,
+    pendingBalance: Number.isFinite(pendingBalance) ? pendingBalance : 0,
+    lifetimeGross: Number.isFinite(lifetimeGross) ? lifetimeGross : 0,
+    lastUpdated: raw?.lastUpdated || null,
+    lastPartnerBookingId: raw?.lastPartnerBookingId || null,
+  };
+}
+
+async function getAuthenticatedPartnerOrAdmin(req: any) {
+  const authHeader = getAuthHeader(req);
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return { error: { status: 401, message: "Unauthorized" } };
+  }
+
+  const accessToken = authHeader.slice("Bearer ".length);
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
+
+  if (authError || !authData.user) {
+    return { error: { status: 401, message: "Unauthorized" } };
+  }
+
+  const [{ data: userProfile, error: profileError }, { data: partnerProfile, error: partnerError }] = await Promise.all([
+    supabaseAdmin.from("users").select("*").eq("id", authData.user.id).maybeSingle(),
+    supabaseAdmin
+      .from("b2b_partners")
+      .select("*")
+      .or(`auth_user_id.eq.${authData.user.id},email.ilike.${String(authData.user.email || "").trim().toLowerCase()}`)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (profileError) throw profileError;
+  if (partnerError) throw partnerError;
+
+  const isAdmin = Boolean(userProfile?.role === "admin");
+  if (!isAdmin && !partnerProfile) {
+    return { error: { status: 403, message: "Forbidden: Partner access required" } };
+  }
+
+  return {
+    supabaseAdmin,
+    user: authData.user,
+    userProfile,
+    partnerProfile,
+    isAdmin,
+  };
 }
 
 async function backfillDriverJoiningBonuses(supabaseAdmin: any) {
@@ -340,6 +397,7 @@ async function handleGetUsers(req: any, res: any) {
         typeof row.force_password_change === "boolean"
           ? row.force_password_change
           : Boolean(payload.forcePasswordChange),
+      cashWallet: payload.cashWallet,
       driverDetails: row.driver_details || payload.driverDetails,
       createdAt: row.created_at || payload.createdAt,
       updatedAt: row.updated_at || payload.updatedAt,
@@ -772,6 +830,279 @@ async function handlePartnerUpdateCommission(req: any, res: any) {
 
   if (error || !data) throw error || new Error("Failed to update partner commission.");
   return res.status(200).json({ partner: normalizePartnerRow(data) });
+}
+
+async function handlePartnerDelete(req: any, res: any) {
+  const auth = await getAuthenticatedAdmin(req, false);
+  if ("error" in auth) {
+    return res.status(auth.error.status).json({ error: auth.error.message });
+  }
+
+  const partnerId = String(req.body?.partnerId || "").trim();
+  if (!partnerId) {
+    return res.status(400).json({ error: "Missing partnerId." });
+  }
+
+  const { error } = await auth.supabaseAdmin
+    .from("b2b_partners")
+    .delete()
+    .eq("id", partnerId);
+
+  if (error) throw error;
+  return res.status(200).json({ success: true, partnerId });
+}
+
+async function handlePartnerCreateBooking(req: any, res: any) {
+  const auth = await getAuthenticatedPartnerOrAdmin(req);
+  if ("error" in auth) {
+    return res.status(auth.error.status).json({ error: auth.error.message });
+  }
+
+  const body = req.body || {};
+  const partnerId = String(body.partnerId || auth.partnerProfile?.id || "").trim();
+  const rideId = String(body.rideId || "").trim();
+  const guestName = String(body.guestName || "").trim();
+  const guestPhone = String(body.guestPhone || "").trim();
+  const pickup = String(body.pickup || "").trim();
+  const dropoff = String(body.dropoff || "").trim();
+  const pickupTime = String(body.pickupTime || "").trim() || null;
+  const notes = String(body.notes || "").trim() || null;
+  const requestedCommissionPercentage = Number(body.commissionPercentage);
+
+  if (!partnerId || !rideId || !guestName || !guestPhone || !pickup || !dropoff) {
+    return res.status(400).json({ error: "Missing required booking details." });
+  }
+
+  const partnerProfile = auth.partnerProfile?.id === partnerId
+    ? auth.partnerProfile
+    : (
+        await auth.supabaseAdmin
+          .from("b2b_partners")
+          .select("*")
+          .eq("id", partnerId)
+          .maybeSingle()
+      ).data;
+
+  if (!partnerProfile) {
+    return res.status(404).json({ error: "Partner profile not found." });
+  }
+
+  if (!auth.isAdmin && partnerProfile.auth_user_id !== auth.user.id) {
+    return res.status(403).json({ error: "Forbidden: This partner booking does not belong to your account." });
+  }
+
+  if (partnerProfile.status !== "approved") {
+    return res.status(403).json({ error: "Partner account must be approved before booking rides." });
+  }
+
+  if (partnerProfile.type !== "hotel_partner") {
+    return res.status(400).json({ error: "Only hotel and resort partners can create guest desk bookings." });
+  }
+
+  const { data: rideRow, error: rideError } = await auth.supabaseAdmin
+    .from("rides")
+    .select("*")
+    .eq("id", rideId)
+    .maybeSingle();
+
+  if (rideError) throw rideError;
+  if (!rideRow) {
+    return res.status(404).json({ error: "Selected ride was not found." });
+  }
+
+  const rideData = (rideRow.data as Record<string, any>) || {};
+  const rideStatus = String(rideRow.status || rideData.status || "").toLowerCase();
+  if (rideStatus !== "available") {
+    return res.status(400).json({ error: "This ride is no longer available for B2B guest dispatch." });
+  }
+
+  const baseFare = Number(rideData.price || rideData.fare || 0);
+  if (!Number.isFinite(baseFare) || baseFare <= 0) {
+    return res.status(400).json({ error: "The selected ride does not have a valid listed fare." });
+  }
+
+  const partnerData = (partnerProfile.data as Record<string, any>) || {};
+  const effectiveCommissionPercentage = Number.isFinite(requestedCommissionPercentage)
+    ? requestedCommissionPercentage
+    : Number(partnerData.hotelMarkupPercentage ?? partnerProfile.commission_percentage ?? 0);
+  const commissionPercentage = Math.max(0, Math.min(100, effectiveCommissionPercentage));
+  const commissionAmount = Number(((baseFare * commissionPercentage) / 100).toFixed(2));
+  const totalFare = Number((baseFare + commissionAmount).toFixed(2));
+  const driverCut = Number(baseFare.toFixed(2));
+  const driverId = String(rideRow.driver_id || rideData.driverId || "").trim();
+  const driverName = String(rideData.driverName || "").trim();
+
+  let fleetPartnerId: string | null = null;
+  let fleetPartnerName: string | null = null;
+  if (driverId) {
+    const { data: fleetRows, error: fleetError } = await auth.supabaseAdmin
+      .from("b2b_partners")
+      .select("*")
+      .eq("type", "fleet_owner")
+      .eq("status", "approved");
+    if (fleetError) throw fleetError;
+    for (const fleetRow of fleetRows || []) {
+      const fleetData = (fleetRow.data as Record<string, any>) || {};
+      const fleetVehicles = Array.isArray(fleetData.fleetVehicles) ? fleetData.fleetVehicles : [];
+      const ownsDriver = fleetVehicles.some((vehicle: any) => String(vehicle?.assignedDriverId || "").trim() === driverId);
+      if (ownsDriver) {
+        fleetPartnerId = String(fleetRow.id);
+        fleetPartnerName = String(fleetRow.business_name || "");
+        break;
+      }
+    }
+  }
+
+  const createdAt = new Date().toISOString();
+  const bookingPayload = {
+    partner_id: partnerId,
+    ride_id: String(rideRow.id),
+    total_fare: totalFare,
+    partner_cut: commissionAmount,
+    driver_cut: driverCut,
+    settlement_status: "pending",
+    data: {
+      guestName,
+      guestPhone,
+      pickup,
+      dropoff,
+      pickupTime,
+      notes,
+      rideLabel: `${String(rideData.origin || "")} → ${String(rideData.destination || "")}`.trim(),
+      coreRideId: String(rideRow.id),
+      bookingSource: "hotel_desk",
+      paymentPreference: "secure_pay",
+      paymentGateway: "razorpay",
+      baseFare,
+      commissionPercentageApplied: commissionPercentage,
+      commissionAmount,
+      chargedFare: totalFare,
+      driverPayoutAmount: driverCut,
+      driverId: driverId || null,
+      driverName: driverName || null,
+      fleetPartnerId,
+      fleetPartnerName,
+      settlementTargetWallet: "driver_cash_wallet",
+      riderChargeResponsibility: "traveler",
+      createdAt,
+    },
+  };
+
+  const { data: insertedBooking, error: insertError } = await auth.supabaseAdmin
+    .from("partner_bookings")
+    .insert(bookingPayload)
+    .select("*")
+    .single();
+
+  if (insertError || !insertedBooking) {
+    throw insertError || new Error("Failed to create partner booking.");
+  }
+
+  const nextRideData = {
+    ...rideData,
+    status: "full",
+    bookingSource: "hotel_desk",
+    securePayRequired: true,
+    linkedPartnerBookingId: String(insertedBooking.id),
+    linkedPartnerId: partnerId,
+    linkedHotelPartnerId: partnerId,
+    linkedHotelPartnerName: String(partnerProfile.business_name || partnerProfile.businessName || ""),
+    reservedGuestName: guestName,
+    reservedGuestPhone: guestPhone,
+    reservedAt: createdAt,
+    updatedAt: createdAt,
+  };
+
+  const { error: reserveRideError } = await auth.supabaseAdmin
+    .from("rides")
+    .update({
+      status: "full",
+      updated_at: createdAt,
+      data: nextRideData,
+    })
+    .eq("id", rideId)
+    .eq("status", "available");
+
+  if (reserveRideError) {
+    throw reserveRideError;
+  }
+
+  if (driverId) {
+    const { data: driverUser, error: driverUserError } = await auth.supabaseAdmin
+      .from("users")
+      .select("*")
+      .eq("id", driverId)
+      .maybeSingle();
+    if (driverUserError) throw driverUserError;
+
+    if (driverUser) {
+      const driverData = (driverUser.data as Record<string, any>) || {};
+      const currentCashWallet = parseCashWallet(driverData.cashWallet);
+      const nextCashWallet = {
+        currency: "INR",
+        availableBalance: currentCashWallet.availableBalance,
+        pendingBalance: Number((currentCashWallet.pendingBalance + driverCut).toFixed(2)),
+        lifetimeGross: Number((currentCashWallet.lifetimeGross + driverCut).toFixed(2)),
+        lastUpdated: createdAt,
+        lastPartnerBookingId: String(insertedBooking.id),
+      };
+
+      await auth.supabaseAdmin
+        .from("users")
+        .update({
+          data: {
+            ...driverData,
+            cashWallet: nextCashWallet,
+          },
+          updated_at: createdAt,
+        })
+        .eq("id", driverId);
+
+      const transactionId = `b2b_secure_pay_${insertedBooking.id}`;
+      await auth.supabaseAdmin.from("transactions").upsert({
+        id: transactionId,
+        user_id: driverId,
+        type: "fintech_payment",
+        status: "pending",
+        data: {
+          id: transactionId,
+          userId: driverId,
+          type: "fintech_payment",
+          amount: driverCut,
+          currency: "INR",
+          status: "pending",
+          description: `Pending B2B secure-pay payout for ${guestName}`,
+          relatedId: String(insertedBooking.id),
+          createdAt,
+          metadata: {
+            source: "b2b_partner_booking",
+            partnerId,
+            partnerType: "hotel_partner",
+            coreRideId: String(rideRow.id),
+            fleetPartnerId,
+            fleetPartnerName,
+          },
+        },
+        created_at: createdAt,
+        updated_at: createdAt,
+      });
+    }
+  }
+
+  return res.status(200).json({
+    booking: {
+      id: String(insertedBooking.id),
+      partnerId: String(insertedBooking.partner_id || ""),
+      rideId: String(insertedBooking.ride_id || rideId),
+      totalFare: Number(insertedBooking.total_fare || 0),
+      partnerCut: Number(insertedBooking.partner_cut || 0),
+      driverCut: Number(insertedBooking.driver_cut || 0),
+      settlementStatus: String(insertedBooking.settlement_status || "pending"),
+      createdAt: String(insertedBooking.created_at || createdAt),
+      updatedAt: String(insertedBooking.updated_at || insertedBooking.created_at || createdAt),
+      data: insertedBooking.data && typeof insertedBooking.data === "object" ? insertedBooking.data : {},
+    },
+  });
 }
 
 async function handleDeleteUser(req: any, res: any) {
@@ -1639,7 +1970,7 @@ async function fetchAndroidUpdateMetadata(configData: Record<string, any>) {
   const updateUrl =
     String(configData.androidUpdateUrl || "").trim() ||
     process.env.MAIRIDE_ANDROID_UPDATE_URL ||
-    "https://www.mairide.in/downloads/android-update.json";
+    "https://rides.mairide.in/downloads/android-update.json";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3500);
   try {
@@ -1665,6 +1996,53 @@ async function fetchAndroidUpdateMetadata(configData: Record<string, any>) {
       updateUrl,
       appVersion: configData.appVersion || null,
       apkUrl: process.env.MAIRIDE_ANDROID_APK_URL || "https://downloads.mairide.in/mairide-android.apk",
+      buildSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
+      builtAt: null,
+      error: error?.name === "AbortError" ? "Metadata request timed out" : error?.message || "Metadata unavailable",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchIosUpdateMetadata(configData: Record<string, any>) {
+  const updateUrl =
+    String(configData.iosUpdateUrl || "").trim() ||
+    process.env.MAIRIDE_IOS_UPDATE_URL ||
+    "https://rides.mairide.in/downloads/ios/ios-update.json";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+  try {
+    const response = await fetch(updateUrl, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(`Metadata returned ${response.status}`);
+    }
+    return {
+      status: body?.available ? "live" : "pending",
+      updateUrl,
+      available: Boolean(body?.available),
+      appVersion: body?.appVersion || null,
+      distribution: body?.distribution || null,
+      ipaUrl: body?.ipaUrl || null,
+      manifestUrl: body?.manifestUrl || null,
+      installUrl: body?.installUrl || null,
+      buildSha: body?.buildSha || null,
+      builtAt: body?.builtAt || null,
+    };
+  } catch (error: any) {
+    return {
+      status: "unavailable",
+      updateUrl,
+      available: false,
+      appVersion: configData.appVersion || null,
+      distribution: "unavailable",
+      ipaUrl: process.env.MAIRIDE_IOS_IPA_URL || null,
+      manifestUrl: process.env.MAIRIDE_IOS_MANIFEST_URL || null,
+      installUrl: null,
       buildSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
       builtAt: null,
       error: error?.name === "AbortError" ? "Metadata request timed out" : error?.message || "Metadata unavailable",
@@ -1741,12 +2119,17 @@ async function handleMobileApp(req: any, res: any) {
     .filter((row: any) => String(row?.data?.notificationType || "").startsWith("nearby_"))
     .reduce((total: number, row: any) => total + safeNumber(row?.value, 1), 0);
 
-  const metadata = await fetchAndroidUpdateMetadata(configData);
+  const [metadata, iosMetadata] = await Promise.all([
+    fetchAndroidUpdateMetadata(configData),
+    fetchIosUpdateMetadata(configData),
+  ]);
   const mobileEventKeys = new Set([
     "app_opened",
     "user_logged_in",
     "android_apk_download_started",
     "android_app_update_started",
+    "ios_ipa_download_started",
+    "ios_app_update_started",
     "push_token_registered",
     "push_notification_sent",
     "push_notification_failed",
@@ -1786,15 +2169,36 @@ async function handleMobileApp(req: any, res: any) {
       productionCommit: process.env.VERCEL_GIT_COMMIT_SHA || null,
       productionDeployId: process.env.VERCEL_DEPLOYMENT_ID || process.env.VERCEL_URL || null,
     },
+    iosDeployment: {
+      metadataStatus: iosMetadata.status,
+      available: iosMetadata.available,
+      appVersion: iosMetadata.appVersion,
+      distribution: iosMetadata.distribution,
+      ipaUrl: iosMetadata.ipaUrl,
+      manifestUrl: iosMetadata.manifestUrl,
+      installUrl: iosMetadata.installUrl,
+      updateUrl: iosMetadata.updateUrl,
+      buildSha: iosMetadata.buildSha,
+      builtAt: iosMetadata.builtAt,
+      metadataError: "error" in iosMetadata ? iosMetadata.error : null,
+    },
     installUsage: {
       apkDownloads30d: sumUsageMetric(usageEvents30d, "android_apk_download_started"),
       appUpdateStarts30d: sumUsageMetric(usageEvents30d, "android_app_update_started"),
+      ipaDownloads30d: sumUsageMetric(usageEvents30d, "ios_ipa_download_started"),
+      iosUpdateStarts30d: sumUsageMetric(usageEvents30d, "ios_app_update_started"),
       appOpens30d: sumUsageMetric(usageEvents30d, "app_opened"),
       loginEvents30d: sumUsageMetric(usageEvents30d, "user_logged_in"),
       activeAppUsers30d: countDistinctUsageUsers(usageEvents30d, ["app_opened", "user_logged_in"]),
     },
     pushHealth: {
       fcmConfigured: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FCM_SERVICE_ACCOUNT_JSON),
+      apnsConfigured: Boolean(
+        process.env.APNS_TEAM_ID
+        && process.env.APNS_KEY_ID
+        && process.env.APNS_PRIVATE_KEY
+        && process.env.APNS_BUNDLE_ID
+      ),
       registeredDevices30d: sumUsageMetric(usageEvents30d, "push_token_registered"),
       activePushDevices: activePushDevices.length,
       usersWithPush,
@@ -1813,8 +2217,9 @@ async function handleMobileApp(req: any, res: any) {
     },
     recentEvents,
     notes: [
-      "This tab reads platform_usage_events and Android update metadata.",
-      "Push delivery requires FIREBASE_SERVICE_ACCOUNT_JSON or FCM_SERVICE_ACCOUNT_JSON in production.",
+      "This tab reads platform_usage_events plus Android and iOS release metadata.",
+      "Android push delivery requires FIREBASE_SERVICE_ACCOUNT_JSON or FCM_SERVICE_ACCOUNT_JSON in production.",
+      "iOS push delivery requires APNS_TEAM_ID, APNS_KEY_ID, APNS_PRIVATE_KEY, and APNS_BUNDLE_ID.",
     ],
   });
 }
@@ -1873,6 +2278,12 @@ export default async function handler(req: any, res: any) {
       case "partner-update-commission":
         if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
         return handlePartnerUpdateCommission(req, res);
+      case "partner-create-booking":
+        if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+        return handlePartnerCreateBooking(req, res);
+      case "partner-delete":
+        if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+        return handlePartnerDelete(req, res);
       default:
         return res.status(404).json({ error: "Admin action not found" });
     }
