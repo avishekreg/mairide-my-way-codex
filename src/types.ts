@@ -34,6 +34,14 @@ export interface UserProfile {
     balance: number; // MaiCoins
     pendingBalance: number; // Coins from referrals not yet "ready"
   };
+  cashWallet?: {
+    currency: 'INR';
+    availableBalance: number;
+    pendingBalance: number;
+    lifetimeGross: number;
+    lastUpdated?: string;
+    lastPartnerBookingId?: string;
+  };
   reviewStats?: {
     averageRating: number;
     ratingCount: number;
@@ -140,6 +148,8 @@ export interface Ride {
   driverName: string;
   driverPhotoUrl?: string;
   driverRating?: number;
+  fleetPartnerId?: string;
+  fleetPartnerName?: string;
   origin: string;
   destination: string;
   originLocation?: {
@@ -204,6 +214,15 @@ export interface AppConfig {
   razorpayKeyId?: string;
   razorpayKeySecret?: string;
   razorpayWebhookSecret?: string;
+  razorpayRouteEnabled?: boolean;
+  razorpayRouteKeyId?: string;
+  razorpayRouteKeySecret?: string;
+  razorpayRouteWebhookSecret?: string;
+  razorpayXEnabled?: boolean;
+  razorpayXKeyId?: string;
+  razorpayXKeySecret?: string;
+  razorpayXPayoutSourceAccount?: string;
+  razorpayXPayoutWebhookSecret?: string;
   smsApiUrl?: string;
   smsApiKey?: string;
   twoFactorApiKey?: string;
@@ -274,6 +293,8 @@ export interface PartnerVehicle {
   registrationNumber: string;
   assignedDriverName?: string;
   assignedDriverId?: string;
+  assignedDriverPhone?: string;
+  assignedDriverEmail?: string;
   status: 'active' | 'idle' | 'maintenance';
   liveLog?: string;
   updatedAt?: string;
@@ -297,6 +318,7 @@ export interface B2BPartnerData {
   notes?: string;
   commissionRequest?: PartnerCommissionRequest;
   payoutModel?: PartnerPayoutModel;
+  hotelMarkupPercentage?: number;
   fleetVehicles?: PartnerVehicle[];
   liveLogs?: Array<{
     id: string;
@@ -344,13 +366,25 @@ export interface PartnerBooking {
     bookedBy?: string;
     source?: string;
     notes?: string;
-    paymentPreference?: 'secure_pay' | 'manual';
-    rideLabel?: string;
     pickup?: string;
     dropoff?: string;
     pickupTime?: string;
+    rideLabel?: string;
     coreRideId?: string;
-    bookingSource?: string;
+    bookingSource?: 'hotel_desk' | 'fleet_dispatch' | string;
+    paymentPreference?: 'secure_pay';
+    paymentGateway?: 'razorpay';
+    driverId?: string;
+    driverName?: string;
+    baseFare?: number;
+    commissionPercentageApplied?: number;
+    commissionAmount?: number;
+    chargedFare?: number;
+    driverPayoutAmount?: number;
+    fleetPartnerId?: string;
+    fleetPartnerName?: string;
+    settlementTargetWallet?: 'driver_cash_wallet';
+    riderChargeResponsibility?: 'traveler';
   };
 }
 

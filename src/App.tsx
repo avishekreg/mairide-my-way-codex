@@ -3678,6 +3678,45 @@ const sendBrowserNotification = async (
   }
 };
 
+const canUseSpeechAnnouncements = () =>
+  typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+
+const spokenAnnouncementTimestamps = new Map<string, number>();
+
+const speakDeviceAnnouncement = (
+  message: string,
+  options?: {
+    dedupeKey?: string;
+    minIntervalMs?: number;
+    rate?: number;
+    pitch?: number;
+    volume?: number;
+    lang?: string;
+  }
+) => {
+  if (!message || !canUseSpeechAnnouncements()) return false;
+  const dedupeKey = options?.dedupeKey || message;
+  const minIntervalMs = Number.isFinite(options?.minIntervalMs) ? Number(options?.minIntervalMs) : 4000;
+  const lastSpokenAt = spokenAnnouncementTimestamps.get(dedupeKey) || 0;
+  const now = Date.now();
+  if (now - lastSpokenAt < minIntervalMs) return false;
+
+  try {
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.rate = Number.isFinite(options?.rate) ? Number(options?.rate) : 1;
+    utterance.pitch = Number.isFinite(options?.pitch) ? Number(options?.pitch) : 1;
+    utterance.volume = Number.isFinite(options?.volume) ? Number(options?.volume) : 1;
+    if (options?.lang) {
+      utterance.lang = options.lang;
+    }
+    spokenAnnouncementTimestamps.set(dedupeKey, now);
+    window.speechSynthesis.speak(utterance);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const buildVerificationMarkers = (driverDetails?: UserProfile['driverDetails'] | null): VerificationMarker[] => {
   if (!driverDetails) return [];
   const candidates = [
@@ -11269,6 +11308,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   );
   const seenDriverCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedDriverCountersRef = useRef(false);
+  const travelerStatusAnnouncementKeysRef = useRef<Record<string, string>>({});
+  const hasHydratedTravelerStatusAnnouncementsRef = useRef(false);
   const lastTravelerLocationWriteRef = useRef(0);
   const activeRideFeedRef = useRef<Ride[]>([]);
   const activeRideBookingsRef = useRef<Booking[]>([]);
@@ -11318,6 +11359,38 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       (travelerRequests.some(isUnifiedRideActive) || dashboardBookings.some(isBookingTrackable)),
     [activeTab, dashboardBookings, travelerRequests]
   );
+  const nearbyAvailableCabCount = useMemo(() => {
+    const driverIds = new Set<string>();
+    drivers.forEach((driver) => {
+      if (driver.uid) {
+        driverIds.add(driver.uid);
+      }
+    });
+    [...rides, ...partialRides].forEach((ride) => {
+      if (!ride?.driverId || String(ride.status || '') !== 'available') return;
+      if (travelerFeedLocation && !isWithinDashboardMatchRadius(travelerFeedLocation, getFeedItemOriginLocation(ride))) {
+        return;
+      }
+      driverIds.add(String(ride.driverId));
+    });
+    return driverIds.size;
+  }, [drivers, partialRides, rides, travelerFeedLocation]);
+  const liveFareWatcherCount = useMemo(() => {
+    if (!activeTravelerRequestRoutes.length) return 0;
+    const driverIds = new Set<string>();
+    [...rides, ...partialRides].forEach((ride) => {
+      if (!ride?.driverId || String(ride.status || '') !== 'available') return;
+      const rideRoute = getFeedItemRoute(ride);
+      if (
+        isWithinAnyDashboardCorridor(rideRoute, activeTravelerRequestRoutes) ||
+        isWithinAnyPartialDashboardCorridor(rideRoute, activeTravelerRequestRoutes)
+      ) {
+        driverIds.add(String(ride.driverId));
+      }
+    });
+    if (driverIds.size > 0) return driverIds.size;
+    return Math.min(nearbyAvailableCabCount, drivers.length);
+  }, [activeTravelerRequestRoutes, drivers.length, nearbyAvailableCabCount, partialRides, rides]);
 
   useEffect(() => {
     dashboardBookingsRef.current = dashboardBookings;
@@ -11326,6 +11399,31 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   useEffect(() => {
     travelerRequestsRef.current = travelerRequests;
   }, [travelerRequests]);
+
+  const refreshNearbyDrivers = useCallback(async (reason = 'manual') => {
+    try {
+      const snapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'driver')));
+      const driverList: UserProfile[] = [];
+      snapshot.forEach((snapshotDoc) => {
+        const data = snapshotDoc.data() as UserProfile;
+        const driverOriginLocation = getFeedItemOriginLocation(data);
+        if (
+          data.driverDetails?.isOnline &&
+          isWithinDashboardMatchRadius(travelerFeedLocation, driverOriginLocation)
+        ) {
+          driverList.push(data);
+        }
+      });
+      setDrivers(driverList);
+      recordInternalDebugEvent('traveler_nearby_drivers_refreshed', {
+        userId: profile.uid,
+        reason,
+        count: driverList.length,
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, 'users');
+    }
+  }, [profile.uid, travelerFeedLocation]);
 
   const buildTravelerNegotiationFromRealtimeRow = useCallback(
     (row: any, sourceTable: 'bookings' | 'negotiations' | 'ride_offers'): Booking | null => {
@@ -11901,11 +11999,59 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           `${booking.driverName} proposed ${formatCurrency(getNegotiationDisplayFare(booking))} for ${booking.origin} to ${booking.destination}.`,
           { tag: `traveler-counter-${booking.id}` }
         );
+        speakDeviceAnnouncement(
+          `${booking.driverName || 'Your driver'} sent a counter offer of ${Math.round(getNegotiationDisplayFare(booking))} rupees.`,
+          {
+            dedupeKey: `traveler-driver-counter-${booking.id}-${nextKey}`,
+            minIntervalMs: 3000,
+            rate: Number(config?.chatbotTtsRate || 1),
+            pitch: Number(config?.chatbotTtsPitch || 1),
+          }
+        );
       }
     });
 
     seenDriverCounterNotificationsRef.current = currentKeys;
-  }, [dashboardBookings]);
+  }, [config?.chatbotTtsPitch, config?.chatbotTtsRate, dashboardBookings]);
+
+  useEffect(() => {
+    const currentKeys = dashboardBookings.reduce((acc: Record<string, string>, booking) => {
+      acc[booking.id] = [
+        booking.status,
+        booking.rideLifecycleStatus || '',
+        booking.rideStartedAt || '',
+        booking.rideEndedAt || '',
+        (booking as any).updatedAt || booking.createdAt || '',
+      ].join('|');
+      return acc;
+    }, {});
+
+    if (!hasHydratedTravelerStatusAnnouncementsRef.current) {
+      travelerStatusAnnouncementKeysRef.current = currentKeys;
+      hasHydratedTravelerStatusAnnouncementsRef.current = true;
+      return;
+    }
+
+    dashboardBookings.forEach((booking) => {
+      const nextKey = currentKeys[booking.id];
+      const previousKey = travelerStatusAnnouncementKeysRef.current[booking.id];
+      if (!nextKey || nextKey === previousKey) return;
+
+      if (booking.status === 'confirmed' && previousKey && !previousKey.startsWith('confirmed|')) {
+        speakDeviceAnnouncement(
+          `Ride booked successfully. ${booking.driverName || 'Your driver'} is now confirmed.`,
+          {
+            dedupeKey: `traveler-booking-confirmed-${booking.id}`,
+            minIntervalMs: 5000,
+            rate: Number(config?.chatbotTtsRate || 1),
+            pitch: Number(config?.chatbotTtsPitch || 1),
+          }
+        );
+      }
+    });
+
+    travelerStatusAnnouncementKeysRef.current = currentKeys;
+  }, [config?.chatbotTtsPitch, config?.chatbotTtsRate, dashboardBookings]);
 
   useEffect(() => {
     if (reviewBooking) return;
@@ -12068,33 +12214,46 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, [dashboardBookings, profile.uid, userLocation, tripNetworkState, tripAppState]);
 
   useEffect(() => {
-    // Listen for online drivers within the local dashboard radius only.
-    let isMounted = true;
-    const loadOnlineDrivers = async () => {
-      try {
-        const snapshot = await getDocs(query(collection(db, 'users'), where('role', '==', 'driver')));
-        if (!isMounted) return;
-        const driverList: UserProfile[] = [];
-        snapshot.forEach((snapshotDoc) => {
-          const data = snapshotDoc.data() as UserProfile;
-          const driverOriginLocation = getFeedItemOriginLocation(data);
-          if (
-            data.driverDetails?.isOnline &&
-            isWithinDashboardMatchRadius(travelerFeedLocation, driverOriginLocation)
-          ) {
-            driverList.push(data);
-          }
-        });
-        setDrivers(driverList);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'users');
+    void refreshNearbyDrivers('mount');
+  }, [refreshNearbyDrivers]);
+
+  useEffect(() => {
+    if (isLocalDevFirestoreMode()) return;
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = (reason: string) => {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
       }
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refreshNearbyDrivers(reason);
+      }, 250);
     };
-    void loadOnlineDrivers();
+
+    const channels = [
+      supabase
+        .channel(`traveler-nearby-driver-users:${profile.uid}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+          scheduleRefresh('users-realtime');
+        })
+        .subscribe(),
+      supabase
+        .channel(`traveler-nearby-driver-rides:${profile.uid}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, () => {
+          scheduleRefresh('rides-realtime');
+        })
+        .subscribe(),
+    ];
+
     return () => {
-      isMounted = false;
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      channels.forEach((channel) => {
+        void supabase.removeChannel(channel);
+      });
     };
-  }, [profile.uid]);
+  }, [profile.uid, refreshNearbyDrivers]);
 
   const geocodeAddress = async (address: string) => {
     if (!window.google || !window.google.maps) return null;
@@ -12382,6 +12541,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     setRequestDestinationLocation(null);
     setShowRequestForm(false);
     showAppDialog('Ride request posted successfully. Drivers can now match your request.', 'success');
+    speakDeviceAnnouncement('Your ride request is now live. Nearby drivers have been notified.', {
+      dedupeKey: `traveler-request-posted-${persistedRequest?.id || draft.origin}-${draft.destination}`,
+      minIntervalMs: 4000,
+      rate: Number(config?.chatbotTtsRate || 1),
+      pitch: Number(config?.chatbotTtsPitch || 1),
+    });
   };
 
   const openTravelerNegotiationFromSmartMatch = (ride: Ride) => {
@@ -12704,6 +12869,14 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           ? "Counter offer sent to the driver."
           : "Booking request sent! Once confirmed, you'll be notified."
       );
+      if (!requestedFare || requestedFare === ride.price) {
+        speakDeviceAnnouncement('Booking request sent successfully. Waiting for the driver to respond.', {
+          dedupeKey: `traveler-booking-request-${ride.id}`,
+          minIntervalMs: 4000,
+          rate: Number(config?.chatbotTtsRate || 1),
+          pitch: Number(config?.chatbotTtsPitch || 1),
+        });
+      }
       setTravelerCounterFare('');
       setSelectedRide(null);
     } catch (error) {
@@ -13107,6 +13280,26 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </button>
           </div>
 
+          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Nearby cabs ready</p>
+              <p className="mt-3 text-3xl font-black tracking-tight text-mairide-primary">{nearbyAvailableCabCount}</p>
+              <p className="mt-2 text-sm text-mairide-secondary">Drivers currently online in your dashboard radius.</p>
+            </div>
+            <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Drivers watching your fare</p>
+              <p className="mt-3 text-3xl font-black tracking-tight text-mairide-primary">{liveFareWatcherCount}</p>
+              <p className="mt-2 text-sm text-mairide-secondary">Live route-overlap count across the negotiation feed.</p>
+            </div>
+            <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Active requests</p>
+              <p className="mt-3 text-3xl font-black tracking-tight text-mairide-primary">
+                {travelerRequests.filter(isUnifiedRideActive).length}
+              </p>
+              <p className="mt-2 text-sm text-mairide-secondary">Open or negotiating traveler threads being tracked live.</p>
+            </div>
+          </div>
+
           <TravelerDashboardSummary
             bookings={dashboardBookings}
             tripSessions={tripSessions}
@@ -13158,7 +13351,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                 </p>
               </div>
               <div className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
-                {drivers.filter(d => d.location && typeof d.location.lat === 'number' && typeof d.location.lng === 'number').length} Cabs Visible
+                {nearbyAvailableCabCount} Cabs Visible
               </div>
             </div>
             <div className="h-[360px] relative">
@@ -14020,6 +14213,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   } | null>(null);
   const seenTravelerCounterNotificationsRef = useRef<Record<string, string>>({});
   const hasHydratedTravelerCountersRef = useRef(false);
+  const seenNearbyTravelerRequestSpeechRef = useRef<Record<string, string>>({});
+  const hasHydratedNearbyTravelerRequestSpeechRef = useRef(false);
+  const nearTripCompletionSpeechRef = useRef<Record<string, string>>({});
+  const hasHydratedNearTripCompletionSpeechRef = useRef(false);
   const lastDriverLocationWriteRef = useRef(0);
   const driverRideFeedRef = useRef<Ride[]>([]);
   const driverTripSessionSyncKeysRef = useRef<Record<string, string>>({});
@@ -14562,11 +14759,93 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           `${booking.consumerName} offered ${formatCurrency(getNegotiationDisplayFare(booking))} for ${booking.origin} to ${booking.destination}.`,
           { tag: `driver-counter-${booking.id}` }
         );
+        speakDeviceAnnouncement(
+          `${booking.consumerName || 'Traveler'} sent a counter offer of ${Math.round(getNegotiationDisplayFare(booking))} rupees.`,
+          {
+            dedupeKey: `driver-traveler-counter-${booking.id}-${nextKey}`,
+            minIntervalMs: 3000,
+            rate: Number(config?.chatbotTtsRate || 1),
+            pitch: Number(config?.chatbotTtsPitch || 1),
+          }
+        );
       }
     });
 
     seenTravelerCounterNotificationsRef.current = currentKeys;
-  }, [requests]);
+  }, [config?.chatbotTtsPitch, config?.chatbotTtsRate, requests]);
+
+  useEffect(() => {
+    const currentKeys = activeTravelerRideRequests.reduce((acc: Record<string, string>, request) => {
+      acc[request.id] = `${request.updatedAt || request.createdAt}|${request.fare}|${request.origin}|${request.destination}`;
+      return acc;
+    }, {});
+
+    if (!hasHydratedNearbyTravelerRequestSpeechRef.current) {
+      seenNearbyTravelerRequestSpeechRef.current = currentKeys;
+      hasHydratedNearbyTravelerRequestSpeechRef.current = true;
+      return;
+    }
+
+    if (isOnline) {
+      activeTravelerRideRequests.forEach((request) => {
+        const nextKey = currentKeys[request.id];
+        const previousKey = seenNearbyTravelerRequestSpeechRef.current[request.id];
+        if (nextKey && nextKey !== previousKey) {
+          speakDeviceAnnouncement(
+            `New traveler request nearby for ${request.destination}. Offered fare ${Math.round(request.fare)} rupees.`,
+            {
+              dedupeKey: `driver-nearby-request-${request.id}-${nextKey}`,
+              minIntervalMs: 3000,
+              rate: Number(config?.chatbotTtsRate || 1),
+              pitch: Number(config?.chatbotTtsPitch || 1),
+            }
+          );
+        }
+      });
+    }
+
+    seenNearbyTravelerRequestSpeechRef.current = currentKeys;
+  }, [activeTravelerRideRequests, config?.chatbotTtsPitch, config?.chatbotTtsRate, isOnline]);
+
+  useEffect(() => {
+    const currentKeys = requests.reduce((acc: Record<string, string>, booking) => {
+      const session = tripSessions[booking.id];
+      acc[booking.id] = `${booking.rideLifecycleStatus || ''}|${session?.etaMinutes || 0}|${session?.lastSignalAt || ''}`;
+      return acc;
+    }, {});
+
+    if (!hasHydratedNearTripCompletionSpeechRef.current) {
+      nearTripCompletionSpeechRef.current = currentKeys;
+      hasHydratedNearTripCompletionSpeechRef.current = true;
+      return;
+    }
+
+    requests.forEach((booking) => {
+      const session = tripSessions[booking.id];
+      if (!session) return;
+      const nextKey = currentKeys[booking.id];
+      const previousKey = nearTripCompletionSpeechRef.current[booking.id];
+      const etaMinutes = Number(session.etaMinutes || 0);
+      const isNearingCompletion =
+        (booking.rideLifecycleStatus === 'in_progress' || Boolean(booking.rideStartedAt)) &&
+        Number.isFinite(etaMinutes) &&
+        etaMinutes > 0 &&
+        etaMinutes <= 5;
+      if (isNearingCompletion && nextKey !== previousKey) {
+        speakDeviceAnnouncement(
+          `Trip is nearing completion. Prepare for drop off in about ${Math.max(1, Math.round(etaMinutes))} minutes.`,
+          {
+            dedupeKey: `driver-trip-ending-${booking.id}`,
+            minIntervalMs: 120000,
+            rate: Number(config?.chatbotTtsRate || 1),
+            pitch: Number(config?.chatbotTtsPitch || 1),
+          }
+        );
+      }
+    });
+
+    nearTripCompletionSpeechRef.current = currentKeys;
+  }, [config?.chatbotTtsPitch, config?.chatbotTtsRate, requests, tripSessions]);
 
   useEffect(() => {
     const handleOnline = () => setTripNetworkState('recovered');
@@ -15870,6 +16149,12 @@ const finalizeDriverDashboardRazorpayPayment = async (
       applyStartedBookingState(startedBooking, session);
       setIsOnline(false);
       showAppDialog('Ride started. Driver visibility is now hidden until the trip is closed.', 'success');
+      speakDeviceAnnouncement('Ride started successfully. Driver visibility is now hidden until trip completion.', {
+        dedupeKey: `driver-ride-started-${booking.id}`,
+        minIntervalMs: 5000,
+        rate: Number(config?.chatbotTtsRate || 1),
+        pitch: Number(config?.chatbotTtsPitch || 1),
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
     }
@@ -20417,7 +20702,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             { id: 'map', label: 'Live Map', icon: MapPin, roles: ['super_admin', 'support'] },
             { id: 'users', label: 'Users', icon: Users, roles: ['super_admin', 'compliance'] },
             { id: 'rides', label: 'Rides', icon: Car, roles: ['super_admin', 'compliance'] },
-            { id: 'b2b', label: 'B2B Partner Hub', icon: Building2, roles: ['super_admin', 'support', 'compliance'] },
+            { id: 'b2b', label: 'B2B Partner Hub', icon: Building2, roles: ['super_admin', 'support', 'compliance', 'finance'] },
             { id: 'revenue', label: 'Revenue', icon: IndianRupee, roles: ['super_admin', 'finance'] },
             { id: 'capacity', label: 'Capacity', icon: TrendingUp, roles: ['super_admin', 'finance', 'support'] },
             { id: 'mobile', label: 'Mobile App', icon: Smartphone, roles: ['super_admin', 'finance', 'support'] },
