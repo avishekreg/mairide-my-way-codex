@@ -22846,31 +22846,6 @@ const App = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!window.opener) return;
-    const searchParams = new URLSearchParams(window.location.search || '');
-    const hashParams = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
-    const hasOAuthMarkers = ['code', 'access_token', 'refresh_token', 'oauthMode', 'oauthRole'].some(
-      (key) => searchParams.has(key) || hashParams.has(key)
-    );
-    if (!hasOAuthMarkers || !user || user.isAnonymous) return;
-
-    try {
-      window.opener.postMessage({ type: 'mairide-oauth-complete' }, window.location.origin);
-    } catch {
-      // Ignore opener messaging issues; auth broadcast still updates the main tab.
-    }
-
-    window.setTimeout(() => {
-      try {
-        window.close();
-      } catch {
-        // If the popup cannot close itself, leaving it open is harmless.
-      }
-    }, 250);
-  }, [user]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
     if (!isLandingWebHost()) return;
     if (!user) return;
     const target = new URL(window.location.href);

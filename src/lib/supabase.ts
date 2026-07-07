@@ -20,7 +20,7 @@ export const supabase = createClient(supabaseUrl || 'https://invalid-project.sup
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
   },
 });
 
