@@ -74,6 +74,86 @@
   ],
   "rewrites": [
     {
+      "source": "/terms",
+      "has": [
+        {
+          "type": "host",
+          "value": "mairide.in"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/terms",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mairide.in"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/privacy",
+      "has": [
+        {
+          "type": "host",
+          "value": "mairide.in"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/privacy",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mairide.in"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/refund",
+      "has": [
+        {
+          "type": "host",
+          "value": "mairide.in"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/refund",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mairide.in"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/terms-of-use",
+      "has": [
+        {
+          "type": "host",
+          "value": "mairide.in"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/terms-of-use",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mairide.in"
+        }
+      ],
+      "destination": "/index.html"
+    },
+    {
       "source": "/",
       "has": [
         {
