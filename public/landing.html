@@ -772,7 +772,40 @@
       document.getElementById('policyEyebrow').textContent = policy.eyebrow;
       document.getElementById('policyTitle').textContent = policy.title;
       document.getElementById('policyIntro').textContent = policy.intro;
-      document.getElementById('policyContent').innerHTML = policy.body;
+      const policyContent = document.getElementById('policyContent');
+      policyContent.innerHTML = policy.body;
+
+      policyContent.querySelectorAll('h2').forEach((heading, index) => {
+        heading.style.display = 'block';
+        heading.style.marginTop = index === 0 ? '0' : '2.5rem';
+        heading.style.marginBottom = '0.9rem';
+        heading.style.lineHeight = '1.2';
+      });
+
+      policyContent.querySelectorAll('h3').forEach((heading) => {
+        heading.style.display = 'block';
+        heading.style.marginTop = '1.1rem';
+        heading.style.marginBottom = '0.55rem';
+        heading.style.lineHeight = '1.35';
+      });
+
+      policyContent.querySelectorAll('p').forEach((paragraph) => {
+        paragraph.style.display = 'block';
+        paragraph.style.marginTop = '0';
+        paragraph.style.marginBottom = '1rem';
+      });
+
+      policyContent.querySelectorAll('ul').forEach((list) => {
+        list.style.display = 'block';
+        list.style.marginTop = '0.75rem';
+        list.style.marginBottom = '1.35rem';
+        list.style.paddingLeft = '1.35rem';
+      });
+
+      policyContent.querySelectorAll('li').forEach((item) => {
+        item.style.marginBottom = '0.6rem';
+      });
+
       home.classList.add('hidden');
       policyView.classList.remove('hidden');
       window.scrollTo({ top: 0, behavior: 'instant' });
@@ -868,9 +901,13 @@
 
       const lat = position.coords.latitude;
       const lon = position.coords.longitude;
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timeoutId = window.setTimeout(() => controller?.abort(), 3500);
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`,
+        controller ? { signal: controller.signal, cache: 'no-store' } : { cache: 'no-store' }
       ).catch(() => null);
+      window.clearTimeout(timeoutId);
 
       if (!response || !response.ok) return null;
 
@@ -982,7 +1019,8 @@
       return pathnameMap[pathname] || null;
     };
 
-    renderPolicyView(resolvePolicyView());
+    const activePolicyView = resolvePolicyView();
+    renderPolicyView(activePolicyView);
 
     const initLanguagePrompt = async () => {
       if (savedLanguage) return;
@@ -1001,7 +1039,9 @@
       });
     };
 
-    initLanguagePrompt();
+    if (!activePolicyView) {
+      initLanguagePrompt();
+    }
   </script>
 </body>
 </html>
