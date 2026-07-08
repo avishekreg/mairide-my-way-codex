@@ -5062,6 +5062,10 @@ const legalRichTextClassName =
   'prose-h3:text-mairide-primary prose-h3:text-base prose-h3:font-semibold prose-h3:mt-5 prose-h3:mb-2 ' +
   'prose-p:mb-4 prose-ul:my-4 prose-li:mb-2';
 
+const LEGAL_ROUTE_PATHS = ['/terms', '/privacy', '/refund', '/terms-of-use', '/business-model', '/tutorials'];
+
+const getAuthHomeHref = () => '/';
+
 const getLegalHomeHref = () => {
   if (typeof window === 'undefined') return '/';
   const host = String(window.location.hostname || '').toLowerCase();
@@ -5070,6 +5074,11 @@ const getLegalHomeHref = () => {
 };
 
 const isExternalLegalHomeHref = (href: string) => /^https?:\/\//i.test(href);
+
+const navigateWithReload = (targetHref: string) => {
+  if (typeof window === 'undefined') return;
+  window.location.assign(targetHref);
+};
 
 const DomainAwareHomeLink = ({
   className,
@@ -5096,6 +5105,59 @@ const DomainAwareHomeLink = ({
   );
 };
 
+const LegalRichText = ({ html }: { html: string }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.querySelectorAll('h2').forEach((heading, index) => {
+      const element = heading as HTMLElement;
+      element.style.display = 'block';
+      element.style.marginTop = index === 0 ? '2rem' : '2.85rem';
+      element.style.marginBottom = '1rem';
+      element.style.lineHeight = '1.25';
+      element.style.fontWeight = '800';
+      element.style.fontSize = '1.25rem';
+      element.style.color = '#E65F2B';
+    });
+
+    container.querySelectorAll('h3').forEach((heading) => {
+      const element = heading as HTMLElement;
+      element.style.display = 'block';
+      element.style.marginTop = '1.2rem';
+      element.style.marginBottom = '0.8rem';
+      element.style.lineHeight = '1.35';
+      element.style.fontWeight = '600';
+      element.style.fontSize = '1rem';
+      element.style.color = '#25343F';
+    });
+
+    container.querySelectorAll('p').forEach((paragraph) => {
+      const element = paragraph as HTMLElement;
+      element.style.display = 'block';
+      element.style.marginTop = '0';
+      element.style.marginBottom = '1.25rem';
+    });
+
+    container.querySelectorAll('ul').forEach((list) => {
+      const element = list as HTMLElement;
+      element.style.display = 'block';
+      element.style.marginTop = '0.85rem';
+      element.style.marginBottom = '1.5rem';
+      element.style.paddingLeft = '1.35rem';
+    });
+
+    container.querySelectorAll('li').forEach((item) => {
+      const element = item as HTMLElement;
+      element.style.marginBottom = '0.7rem';
+    });
+  }, [html]);
+
+  return <div ref={containerRef} className={legalRichTextClassName} dangerouslySetInnerHTML={{ __html: html }} />;
+};
+
 const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections, bodyHtml }: LegalPageProps) => (
   <div className="px-4 py-8 md:px-8 md:py-10">
     <div className="mx-auto max-w-4xl">
@@ -5108,17 +5170,18 @@ const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections, bodyHtml }:
             <img src={LOGO_URL} alt="MaiRide Logo" className="h-11 w-11 rounded-2xl object-contain" />
             <span className="text-xl font-black tracking-tight">MaiRide</span>
           </DomainAwareHomeLink>
-          <Link
-            to="/"
+          <button
+            type="button"
+            onClick={() => navigateWithReload(getAuthHomeHref())}
             className="inline-flex items-center rounded-2xl border border-mairide-secondary px-4 py-2.5 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg"
           >
             ← Back to Login
-          </Link>
+          </button>
         </div>
         <h1 className="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl">{title}</h1>
         <p className="mt-5 text-base leading-8 text-mairide-secondary">{intro}</p>
         {bodyHtml ? (
-          <div className={legalRichTextClassName} dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+          <LegalRichText html={bodyHtml} />
         ) : (
           <div className="mt-8 space-y-5">
             {sections.map((section) => (
@@ -5189,7 +5252,7 @@ const FooterResourceModal = ({
             <h2 className="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl">{definition.title}</h2>
             <p className="mt-5 text-base leading-8 text-mairide-secondary">{definition.intro}</p>
             {definition.bodyHtml ? (
-              <div className={legalRichTextClassName} dangerouslySetInnerHTML={{ __html: definition.bodyHtml }} />
+              <LegalRichText html={definition.bodyHtml} />
             ) : (
               <div className="mt-8 space-y-5">
                 {definition.sections.map((section) => (
@@ -5477,15 +5540,25 @@ const Navbar = ({
   const [isOpen, setIsOpen] = useState(false);
   const isAndroidShell = isMobileAppRuntime();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isFooterResourceContext = LEGAL_ROUTE_PATHS.includes(location.pathname);
   const handleHomeNavigation = () => {
     window.dispatchEvent(new CustomEvent(APP_NAV_HOME_EVENT, { detail: { role: profile?.role } }));
-    navigate('/');
     setIsOpen(false);
+    if (isFooterResourceContext) {
+      navigateWithReload('/');
+      return;
+    }
+    navigate('/');
   };
   const navigateToRoleTab = (tab: string) => {
     window.dispatchEvent(new CustomEvent(APP_NAV_TAB_EVENT, { detail: { role: profile?.role, tab } }));
-    navigate('/');
     setIsOpen(false);
+    if (isFooterResourceContext) {
+      navigateWithReload('/');
+      return;
+    }
+    navigate('/');
   };
 
   const roleTabs =
@@ -5624,12 +5697,9 @@ const Navbar = ({
         </button>
       </div>
 
-      <Link
-        to="/"
-        onClick={() => {
-          window.dispatchEvent(new CustomEvent(APP_NAV_HOME_EVENT, { detail: { role: profile?.role } }));
-          setIsOpen(false);
-        }}
+      <button
+        type="button"
+        onClick={handleHomeNavigation}
         className="flex min-w-0 items-center justify-start rounded-2xl pr-1 text-left"
         aria-label="Go to home"
       >
@@ -5646,7 +5716,7 @@ const Navbar = ({
             my way
           </span>
         </div>
-      </Link>
+      </button>
 
       <div className={cn("flex items-center justify-end", rightLaneClassName)}>
         {renderProfileAvatar("h-10 w-10", "text-xs")}
@@ -5692,12 +5762,9 @@ const Navbar = ({
                 >
                   <Menu className="h-5 w-5" />
                 </button>
-                <Link
-                  to="/"
-                  onClick={() => {
-                    window.dispatchEvent(new CustomEvent(APP_NAV_HOME_EVENT, { detail: { role: profile?.role } }));
-                    setIsOpen(false);
-                  }}
+                <button
+                  type="button"
+                  onClick={handleHomeNavigation}
                   className="flex min-w-0 cursor-pointer items-center justify-start"
                 >
                   <img src={LOGO_URL} className="mr-4 h-[84px] w-[84px] shrink-0 rounded-[22%] object-contain" alt="MaiRide Logo" />
@@ -5705,7 +5772,7 @@ const Navbar = ({
                     <span className="truncate text-[2.55rem] font-black leading-[1.02] tracking-tighter text-mairide-primary">MaiRide</span>
                     <span className="mt-1.5 truncate text-[1.2rem] font-black leading-[1.04] tracking-[0.1em] text-mairide-primary">my way</span>
                   </div>
-                </Link>
+                </button>
               </div>
 
               <div className="flex shrink-0 items-center gap-3 border-l border-mairide-secondary pl-5">
