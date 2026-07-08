@@ -2031,7 +2031,7 @@ class ErrorBoundary extends Component<any, any> {
 // --- Components ---
 
 const LOGO_URL = "/logo.svg";
-const BRAND_NAME = "MaiRide my way";
+const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
 const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
 const TRACKED_ANDROID_APK_URL = '/api/analytics?action=android-download';
@@ -2076,6 +2076,32 @@ const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
   } catch {
     // Ignore storage-remove failures in restricted browsers
   }
+};
+const getCrossDomainCookieDomain = () => {
+  if (typeof window === 'undefined') return '';
+  return window.location.hostname.endsWith('mairide.in') ? '; domain=.mairide.in' : '';
+};
+const getCookieValue = (name: string) => {
+  if (typeof document === 'undefined') return null;
+  const prefix = `${name}=`;
+  const match = document.cookie
+    .split('; ')
+    .find((entry) => entry.startsWith(prefix));
+  if (!match) return null;
+  return decodeURIComponent(match.slice(prefix.length));
+};
+const setCookieValue = (name: string, value: string, maxAge = 60 * 60 * 24 * 365) => {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}${getCrossDomainCookieDomain()}`;
+};
+const getSharedPreferenceValue = (key: string) => getCookieValue(key) || safeStorageGet('local', key);
+const setSharedPreferenceValue = (key: string, value: string) => {
+  safeStorageSet('local', key, value);
+  setCookieValue(key, value);
+};
+const removeSharedPreferenceValue = (key: string) => {
+  safeStorageRemove('local', key);
+  expireCookie(key);
 };
 const buildRegistrationPermissionStorageKey = (prefix: string, uid: string) => `${prefix}:${uid}`;
 const isGrantedNativePermission = (status?: unknown) => ['granted', 'limited'].includes(String(status || '').trim().toLowerCase());
@@ -2225,7 +2251,7 @@ const normalizeCookieConsent = (value: unknown): CookieConsentRecord | null => {
 };
 
 const getStoredCookieConsent = (): CookieConsentRecord | null => {
-  const raw = safeStorageGet('local', COOKIE_CONSENT_STORAGE_KEY);
+  const raw = getSharedPreferenceValue(COOKIE_CONSENT_STORAGE_KEY);
   if (!raw) return null;
   try {
     return normalizeCookieConsent(JSON.parse(raw));
@@ -2263,7 +2289,7 @@ const clearOptionalConsentArtifacts = (consent: CookieConsentRecord) => {
       UI_LANGUAGE_PROMPT_SEEN_KEY,
       UI_LANGUAGE_PROMPT_APP_SEEN_KEY,
       'mairide_android_update_dismissed_version',
-    ].forEach((key) => safeStorageRemove('local', key));
+    ].forEach(removeSharedPreferenceValue);
     clearGoogleTranslateArtifacts();
   }
 
@@ -2286,7 +2312,7 @@ const persistCookieConsent = (choices: Partial<Record<CookieConsentCategory, boo
       necessary: true,
     },
   };
-  safeStorageSet('local', COOKIE_CONSENT_STORAGE_KEY, JSON.stringify(consent));
+  setSharedPreferenceValue(COOKIE_CONSENT_STORAGE_KEY, JSON.stringify(consent));
   clearOptionalConsentArtifacts(consent);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<CookieConsentRecord>('mairide:cookie-consent-updated', { detail: consent }));
@@ -2684,6 +2710,34 @@ const SUPPORTED_UI_LANGUAGES: SupportedUiLanguage[] = [
   { value: 'en', label: 'English', nativeLabel: 'English', googleCode: 'en' },
   { value: 'hi', label: 'Hindi', nativeLabel: 'हिंदी', googleCode: 'hi' },
   { value: 'bn', label: 'Bengali', nativeLabel: 'বাংলা', googleCode: 'bn' },
+  { value: 'pt', label: 'Portuguese', nativeLabel: 'Português', googleCode: 'pt' },
+  { value: 'es', label: 'Spanish', nativeLabel: 'Español', googleCode: 'es' },
+  { value: 'nl', label: 'Dutch', nativeLabel: 'Nederlands', googleCode: 'nl' },
+  { value: 'fr', label: 'French', nativeLabel: 'Français', googleCode: 'fr' },
+  { value: 'de', label: 'German', nativeLabel: 'Deutsch', googleCode: 'de' },
+  { value: 'it', label: 'Italian', nativeLabel: 'Italiano', googleCode: 'it' },
+  { value: 'ar', label: 'Arabic', nativeLabel: 'العربية', googleCode: 'ar' },
+  { value: 'ja', label: 'Japanese', nativeLabel: '日本語', googleCode: 'ja' },
+  { value: 'ko', label: 'Korean', nativeLabel: '한국어', googleCode: 'ko' },
+  { value: 'zh', label: 'Chinese', nativeLabel: '中文', googleCode: 'zh-CN' },
+  { value: 'ru', label: 'Russian', nativeLabel: 'Русский', googleCode: 'ru' },
+  { value: 'tr', label: 'Turkish', nativeLabel: 'Türkçe', googleCode: 'tr' },
+  { value: 'pl', label: 'Polish', nativeLabel: 'Polski', googleCode: 'pl' },
+  { value: 'uk', label: 'Ukrainian', nativeLabel: 'Українська', googleCode: 'uk' },
+  { value: 'vi', label: 'Vietnamese', nativeLabel: 'Tiếng Việt', googleCode: 'vi' },
+  { value: 'th', label: 'Thai', nativeLabel: 'ไทย', googleCode: 'th' },
+  { value: 'id', label: 'Indonesian', nativeLabel: 'Bahasa Indonesia', googleCode: 'id' },
+  { value: 'ms', label: 'Malay', nativeLabel: 'Bahasa Melayu', googleCode: 'ms' },
+  { value: 'sv', label: 'Swedish', nativeLabel: 'Svenska', googleCode: 'sv' },
+  { value: 'no', label: 'Norwegian', nativeLabel: 'Norsk', googleCode: 'no' },
+  { value: 'da', label: 'Danish', nativeLabel: 'Dansk', googleCode: 'da' },
+  { value: 'fi', label: 'Finnish', nativeLabel: 'Suomi', googleCode: 'fi' },
+  { value: 'cs', label: 'Czech', nativeLabel: 'Čeština', googleCode: 'cs' },
+  { value: 'hu', label: 'Hungarian', nativeLabel: 'Magyar', googleCode: 'hu' },
+  { value: 'ro', label: 'Romanian', nativeLabel: 'Română', googleCode: 'ro' },
+  { value: 'el', label: 'Greek', nativeLabel: 'Ελληνικά', googleCode: 'el' },
+  { value: 'he', label: 'Hebrew', nativeLabel: 'עברית', googleCode: 'iw' },
+  { value: 'fa', label: 'Persian', nativeLabel: 'فارسی', googleCode: 'fa' },
   { value: 'gu', label: 'Gujarati', nativeLabel: 'ગુજરાતી', googleCode: 'gu' },
   { value: 'mr', label: 'Marathi', nativeLabel: 'मराठी', googleCode: 'mr' },
   { value: 'ta', label: 'Tamil', nativeLabel: 'தமிழ்', googleCode: 'ta' },
@@ -2695,45 +2749,6 @@ const SUPPORTED_UI_LANGUAGES: SupportedUiLanguage[] = [
   { value: 'as', label: 'Assamese', nativeLabel: 'অসমীয়া', googleCode: 'as' },
   { value: 'ne', label: 'Nepali', nativeLabel: 'नेपाली', googleCode: 'ne' },
 ];
-const IN_STATE_LANGUAGE_MAP: Record<string, string> = {
-  assam: 'as',
-  bihar: 'hi',
-  chandigarh: 'hi',
-  chhattisgarh: 'hi',
-  delhi: 'hi',
-  'goa': 'hi',
-  gujarat: 'gu',
-  haryana: 'hi',
-  'himachal pradesh': 'hi',
-  'jammu and kashmir': 'hi',
-  jharkhand: 'hi',
-  karnataka: 'kn',
-  kerala: 'ml',
-  ladakh: 'hi',
-  'madhya pradesh': 'hi',
-  maharashtra: 'mr',
-  odisha: 'or',
-  orissa: 'or',
-  punjab: 'pa',
-  rajasthan: 'hi',
-  sikkim: 'hi',
-  'tamil nadu': 'ta',
-  telangana: 'te',
-  tripura: 'bn',
-  'uttar pradesh': 'hi',
-  uttarakhand: 'hi',
-  'west bengal': 'bn',
-};
-
-const NORTH_BENGAL_NEPALI_KEYWORDS = [
-  'siliguri',
-  'darjeeling',
-  'kalimpong',
-  'kurseong',
-  'mirik',
-  'jalpaiguri',
-];
-
 type LanguagePromptResolution = {
   suggested: string;
   options: string[];
@@ -2748,46 +2763,6 @@ const buildLanguagePromptOptions = (...languages: Array<string | null | undefine
     .filter(Boolean);
   const deduped = Array.from(new Set(ordered));
   return deduped.filter(isSupportedUiLanguage);
-};
-
-const isNorthBengalNepaliBelt = (tokens: string[]) =>
-  tokens.some((token) => NORTH_BENGAL_NEPALI_KEYWORDS.some((keyword) => token.includes(keyword)));
-
-const resolveLanguagePromptFromAddress = (
-  address: Record<string, unknown>,
-  browserPreferredLanguage: string
-): LanguagePromptResolution | null => {
-  const state = String(address.state || address.region || '').trim().toLowerCase();
-  if (!state) return null;
-
-  const district = String(address.state_district || address.county || address.city_district || '').trim().toLowerCase();
-  const city = String(address.city || address.town || address.village || address.municipality || '').trim().toLowerCase();
-  const suburb = String(address.suburb || address.hamlet || address.neighbourhood || '').trim().toLowerCase();
-  const tokens = [city, suburb, district, state].filter(Boolean);
-
-  const stateRegionalLanguage = IN_STATE_LANGUAGE_MAP[state];
-  if (!stateRegionalLanguage) {
-    return {
-      suggested: ['en', 'hi'].includes(browserPreferredLanguage) ? browserPreferredLanguage : 'en',
-      options: ['en', 'hi'],
-    };
-  }
-
-  const options = buildLanguagePromptOptions('en', 'hi', stateRegionalLanguage);
-  if (state === 'west bengal' && isNorthBengalNepaliBelt(tokens)) {
-    options.push('ne');
-  }
-
-  const uniqueOptions = Array.from(new Set(options));
-  const suggested =
-    uniqueOptions.includes(browserPreferredLanguage) && !['en', 'hi'].includes(browserPreferredLanguage)
-      ? browserPreferredLanguage
-      : stateRegionalLanguage;
-
-  return {
-    suggested,
-    options: uniqueOptions,
-  };
 };
 
 const getSupportedUiLanguage = (value: string) =>
@@ -2868,14 +2843,21 @@ const detectLanguagePromptFromGeolocation = async (): Promise<LanguagePromptReso
 
   const lat = position.coords.latitude;
   const lon = position.coords.longitude;
-
+  const browserLanguage = detectBrowserPreferredLanguage();
   const response = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
+    apiPath(
+      `/api/location?action=language-context&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lon)}&browserLanguage=${encodeURIComponent(browserLanguage)}`
+    ),
+    { cache: 'no-store' }
   ).catch(() => null);
   if (!response || !response.ok) return null;
   const payload = await response.json().catch(() => null);
-  const address = payload?.address || {};
-  return resolveLanguagePromptFromAddress(address, detectBrowserPreferredLanguage());
+  if (!payload?.ok) return null;
+  if (!Array.isArray(payload?.options) || !payload?.suggested) return null;
+  return {
+    suggested: getSupportedUiLanguage(String(payload.suggested)).value,
+    options: buildLanguagePromptOptions(...payload.options),
+  };
 };
 
 const LanguageSwitcher = ({
@@ -2952,13 +2934,13 @@ const GeoTagMeta = ({ geoTag }: { geoTag?: { lat: number; lng: number; timestamp
 };
 
 const TRAVELER_DISCLOSURE_TEXT =
-  "I confirm that the personal, contact, pickup, destination, and account details I submit are true, accurate, and complete to the best of my knowledge. I agree to MaiRide's terms of use, safety rules, verification checks, and community standards. I understand that false, misleading, or incomplete information may lead to suspension, account closure, or legal reporting where required.";
+  "I confirm that the personal, contact, pickup, destination, and account details I submit are true, accurate, and complete to the best of my knowledge. I agree to mAIRide's terms of use, safety rules, verification checks, and community standards. I understand that false, misleading, or incomplete information may lead to suspension, account closure, or legal reporting where required.";
 
 const DRIVER_DISCLOSURE_TEXT =
-  "I confirm that the personal, contact, vehicle, insurance, and identity details I submit are true, accurate, and complete to the best of my knowledge. I agree to MaiRide's terms of use, safety rules, verification checks, and community standards. I understand that false, misleading, or incomplete information may lead to suspension, account closure, or legal reporting where required.";
+  "I confirm that the personal, contact, vehicle, insurance, and identity details I submit are true, accurate, and complete to the best of my knowledge. I agree to mAIRide's terms of use, safety rules, verification checks, and community standards. I understand that false, misleading, or incomplete information may lead to suspension, account closure, or legal reporting where required.";
 
 const MARKETING_DISCLOSURE_TEXT =
-  "I agree to receive account updates, safety notices, service alerts, offers, and promotional communications from MaiRide by email, SMS, and WhatsApp. I understand I can change these preferences later if MaiRide provides that option.";
+  "I agree to receive account updates, safety notices, service alerts, offers, and promotional communications from mAIRide by email, SMS, and WhatsApp. I understand I can change these preferences later if mAIRide provides that option.";
 
 const DRIVER_DECLARATION_TEXT =
   "I confirm that my vehicle, registration, license, insurance, and identity documents belong to me or are lawfully under my control, and that every document and image submitted is current, genuine, and captured by me during this onboarding process.";
@@ -3971,7 +3953,7 @@ const registerMobilePushDevice = async (profile: UserProfile, releaseVersion: st
   });
 
   const receivedHandle = await PushNotifications.addListener('pushNotificationReceived', (notification) => {
-    console.info('MaiRide push notification received:', notification?.title || notification);
+    console.info('mAIRide push notification received:', notification?.title || notification);
   });
 
   const actionHandle = await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
@@ -4538,7 +4520,7 @@ const LoadingScreen = ({ releaseVersion: releaseVersionProp }: { releaseVersion?
         className="mb-4"
       >
         <div className="flex flex-col items-center">
-          <img src={LOGO_URL} className="w-48 h-48 object-contain rounded-[22%]" alt="MaiRide Logo" />
+          <img src={LOGO_URL} className="w-48 h-48 object-contain rounded-[22%]" alt="mAIRide Logo" />
           <h1 className="text-4xl font-black text-mairide-primary mt-4 tracking-tighter">
             {BRAND_NAME}
           </h1>
@@ -4714,7 +4696,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
           </div>
         </div>
         <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
-          Release {releaseVersion} | Copyright 2026 Syncra Systems LLP · MaiRide. All rights reserved. | Powered by Razorpay.
+          Release {releaseVersion} | Copyright 2026 Syncra Systems LLP · mAIRide. All rights reserved. | Powered by Razorpay.
         </p>
         <p className="text-[10px] text-mairide-secondary/70 tracking-wide text-center mt-1">
           {buildMeta}
@@ -4760,20 +4742,20 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
     path: '/terms',
     eyebrow: 'Terms & Conditions',
     title: 'Terms & Conditions',
-    effectiveLine: 'Entity: Syncra Systems LLP · Platform: MaiRide · Effective July 2026',
-    intro: 'MaiRide, including mairide.in and rides.mairide.in, is a digital mobility network platform wholly owned, operated, controlled, and commercially administered by Syncra Systems LLP. These Terms and Conditions govern every visitor, rider, driver, fleet owner, hotel partner, resort partner, guest operator, and administrator who accesses any part of the MaiRide ecosystem.',
+    effectiveLine: 'Entity: Syncra Systems LLP · Platform: mAIRide · Effective July 2026',
+    intro: 'mAIRide, including mairide.in and rides.mairide.in, is a digital mobility network platform wholly owned, operated, controlled, and commercially administered by Syncra Systems LLP. These Terms and Conditions govern every visitor, rider, driver, fleet owner, hotel partner, resort partner, guest operator, and administrator who accesses any part of the mAIRide ecosystem.',
     sections: [],
     bodyHtml: `
       <h2>1. Platform Identity &amp; Ownership</h2>
       <h3>1.1 Corporate Ownership</h3>
-      <p><strong>MaiRide</strong> is a dynamic empty-leg mobility network and digital aggregator platform wholly owned, controlled, copyrighted, and operated by <strong>Syncra Systems LLP</strong>. All source code, user-interface systems, matching workflows, brand identifiers, payment routing logic, partner dashboards, analytics layers, support tooling, and platform transaction architecture are proprietary assets administered under the legal and commercial control of Syncra Systems LLP.</p>
+      <p><strong>mAIRide</strong> is a dynamic empty-leg mobility network and digital aggregator platform wholly owned, controlled, copyrighted, and operated by <strong>Syncra Systems LLP</strong>. All source code, user-interface systems, matching workflows, brand identifiers, payment routing logic, partner dashboards, analytics layers, support tooling, and platform transaction architecture are proprietary assets administered under the legal and commercial control of Syncra Systems LLP.</p>
       <h3>1.2 Legal Relationship</h3>
-      <p>By accessing, browsing, registering on, or transacting through MaiRide, you acknowledge that your relationship is with Syncra Systems LLP as the platform operator. Any use of the MaiRide name, service, infrastructure, or subdomain interfaces constitutes acceptance of the rules, limitations, and platform controls set out in these Terms and Conditions.</p>
+      <p>By accessing, browsing, registering on, or transacting through mAIRide, you acknowledge that your relationship is with Syncra Systems LLP as the platform operator. Any use of the mAIRide name, service, infrastructure, or subdomain interfaces constitutes acceptance of the rules, limitations, and platform controls set out in these Terms and Conditions.</p>
       <h2>2. User Eligibility &amp; Compliance</h2>
       <h3>2.1 Individual and Business Access</h3>
-      <p>You may use MaiRide only if you have the legal capacity to enter into binding agreements under applicable law. If you are creating or operating an account on behalf of a business entity, hotel, resort, fleet, travel agency, or other commercial organization, you represent that you are duly authorized to bind that entity to these Terms and that the information submitted to the platform is accurate, current, and complete.</p>
+      <p>You may use mAIRide only if you have the legal capacity to enter into binding agreements under applicable law. If you are creating or operating an account on behalf of a business entity, hotel, resort, fleet, travel agency, or other commercial organization, you represent that you are duly authorized to bind that entity to these Terms and that the information submitted to the platform is accurate, current, and complete.</p>
       <h3>2.2 Verification Rights</h3>
-      <p>MaiRide may suspend, restrict, or refuse access where eligibility cannot be verified, where identity information appears inconsistent, or where platform usage presents fraud, compliance, reputational, or operational risk. Syncra Systems LLP reserves the right to request additional verification at any point, including business documentation, driver credentials, location verification, or transaction validation records.</p>
+      <p>mAIRide may suspend, restrict, or refuse access where eligibility cannot be verified, where identity information appears inconsistent, or where platform usage presents fraud, compliance, reputational, or operational risk. Syncra Systems LLP reserves the right to request additional verification at any point, including business documentation, driver credentials, location verification, or transaction validation records.</p>
       <ul>
         <li><strong>Individual users:</strong> must be legally competent to contract and to submit truthful booking information.</li>
         <li><strong>Business users:</strong> must hold valid internal authority to bind their organization to platform obligations.</li>
@@ -4781,7 +4763,7 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
       </ul>
       <h2>3. Nature of Service</h2>
       <h3>3.1 Platform Function</h3>
-      <p>Syncra Systems LLP provides the technological layer that matches travelers with independent drivers, fleet operators, and approved B2B partners. MaiRide is not a direct transport carrier, does not itself own every vehicle surfaced on the network, and does not guarantee that every route request will result in a confirmed ride assignment.</p>
+      <p>Syncra Systems LLP provides the technological layer that matches travelers with independent drivers, fleet operators, and approved B2B partners. mAIRide is not a direct transport carrier, does not itself own every vehicle surfaced on the network, and does not guarantee that every route request will result in a confirmed ride assignment.</p>
       <h3>3.2 Matching Variables</h3>
       <p>The platform may display empty-leg return journeys, direct route offers, negotiated opportunities, hotel desk bookings, fleet-linked ride inventory, and associated payment workflows. Matching decisions may depend on route overlap, driver availability, partner approval status, safety constraints, payment readiness, operational policies, and real-time telemetry. Syncra Systems LLP may adjust or refine these systems to improve safety, performance, pricing transparency, network efficiency, or dispute prevention.</p>
       <h2>4. Accounts, Authentication &amp; Google Identity Security</h2>
@@ -4801,7 +4783,7 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
       <p>Any conduct that attempts to exploit the matching engine, manipulate fares, circumvent payment rails, fabricate ride completion status, trigger false disputes, misstate service delivery, or scrape protected operational data may result in immediate suspension, permanent banning, legal escalation, or reporting to appropriate authorities.</p>
       <h2>6. Dynamic Fare Parameters &amp; Booking Logic</h2>
       <h3>6.1 Fare Composition</h3>
-      <p>Fares shown on MaiRide may be influenced by listed driver fares, traveler route demands, negotiated offers, B2B commission overlays, convenience fees, platform service logic, applicable taxes, and risk-management controls. A displayed price does not become final until the platform records a confirmed state transition under its active booking or negotiation workflow.</p>
+      <p>Fares shown on mAIRide may be influenced by listed driver fares, traveler route demands, negotiated offers, B2B commission overlays, convenience fees, platform service logic, applicable taxes, and risk-management controls. A displayed price does not become final until the platform records a confirmed state transition under its active booking or negotiation workflow.</p>
       <h3>6.2 Non-Final Displayed Values</h3>
       <p>Syncra Systems LLP may invalidate, re-price, reject, or pause a ride request or partner booking where fare mismatch, route inconsistency, payment failure, partner non-compliance, driver unavailability, or technical irregularity is detected. Users may not claim entitlement to stale, cached, duplicated, incorrectly rendered, or technically broken fare displays.</p>
       <ul>
@@ -4818,14 +4800,14 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
       <h3>8.1 Excluded Loss Categories</h3>
       <p>To the fullest extent permitted by law, Syncra Systems LLP shall not be liable for indirect, incidental, exemplary, punitive, reputational, or consequential losses arising from ride delays, route mismatches, device failures, telecom outages, third-party payment interruptions, driver conduct, partner conduct, geolocation inaccuracies, force majeure events, or user misuse of the platform.</p>
       <h3>8.2 Service Availability Disclaimer</h3>
-      <p>MaiRide is provided on an as-available and as-operationally-feasible basis. While Syncra Systems LLP applies substantial care to verification, routing intelligence, identity controls, and payment orchestration, it does not warrant uninterrupted service, universal availability, or error-free operation across every device, browser, vehicle, partner, region, or network state.</p>
+      <p>mAIRide is provided on an as-available and as-operationally-feasible basis. While Syncra Systems LLP applies substantial care to verification, routing intelligence, identity controls, and payment orchestration, it does not warrant uninterrupted service, universal availability, or error-free operation across every device, browser, vehicle, partner, region, or network state.</p>
       <ul>
         <li><strong>No transport guarantee:</strong> Syncra Systems LLP does not guarantee uninterrupted ride availability or universal route fulfillment.</li>
         <li><strong>Operational limitation:</strong> third-party conduct, network failure, and force majeure events remain outside complete platform control.</li>
       </ul>
       <h2>9. Governing Law &amp; Jurisdiction</h2>
       <h3>9.1 Applicable Law</h3>
-      <p>Any dispute or claim arising from the use of MaiRide or its associated digital properties shall be subject to the exclusive jurisdiction of the courts of West Bengal, India. These Terms and Conditions shall be governed by and interpreted in accordance with the laws of India, without prejudice to any mandatory local consumer rights that may apply where they cannot lawfully be excluded.</p>
+      <p>Any dispute or claim arising from the use of mAIRide or its associated digital properties shall be subject to the exclusive jurisdiction of the courts of West Bengal, India. These Terms and Conditions shall be governed by and interpreted in accordance with the laws of India, without prejudice to any mandatory local consumer rights that may apply where they cannot lawfully be excluded.</p>
     `,
   },
   privacy: {
@@ -4834,14 +4816,14 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
     eyebrow: 'Privacy Policy',
     title: 'Privacy Policy',
     effectiveLine: 'Effective Date: July 2026 · Data Controller: Syncra Systems LLP',
-    intro: 'This Privacy Policy explains how Syncra Systems LLP collects, secures, processes, stores, maps, and operationally uses information across MaiRide, including mairide.in and rides.mairide.in. It applies to travelers, drivers, fleet operators, hotels, resorts, administrators, support users, and every person interacting with our web or handheld platform surfaces.',
+    intro: 'This Privacy Policy explains how Syncra Systems LLP collects, secures, processes, stores, maps, and operationally uses information across mAIRide, including mairide.in and rides.mairide.in. It applies to travelers, drivers, fleet operators, hotels, resorts, administrators, support users, and every person interacting with our web or handheld platform surfaces.',
     sections: [],
     bodyHtml: `
       <h2>1. Data Controller &amp; Corporate Framework</h2>
       <h3>1.1 Data Control Position</h3>
-      <p><strong>Syncra Systems LLP</strong> is the legal data controller for MaiRide. All personal data, ride intelligence, support records, geo-tagged onboarding records, session continuity artifacts, business verification files, and payment-adjacent operational metadata captured through the platform are processed under the operational control architecture of Syncra Systems LLP.</p>
+      <p><strong>Syncra Systems LLP</strong> is the legal data controller for mAIRide. All personal data, ride intelligence, support records, geo-tagged onboarding records, session continuity artifacts, business verification files, and payment-adjacent operational metadata captured through the platform are processed under the operational control architecture of Syncra Systems LLP.</p>
       <h3>1.2 Processing Purpose</h3>
-      <p>MaiRide uses this information to deliver matching services, maintain identity continuity, protect users, support dispute resolution, manage partner onboarding, monitor system integrity, and comply with applicable legal, regulatory, tax, banking, or law-enforcement obligations where required.</p>
+      <p>mAIRide uses this information to deliver matching services, maintain identity continuity, protect users, support dispute resolution, manage partner onboarding, monitor system integrity, and comply with applicable legal, regulatory, tax, banking, or law-enforcement obligations where required.</p>
       <h2>2. Categories of Data We Collect</h2>
       <h3>2.1 Core Data Types</h3>
       <ul>
@@ -4853,7 +4835,7 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
       </ul>
       <h2>3. Location Telemetry &amp; Geo-Tagging Protocols</h2>
       <h3>3.1 Location-Based Functionality</h3>
-      <p>MaiRide may request and process precise device or browser location in order to suggest regional language experiences, verify partner onboarding points, determine nearby ride relevance, improve route intelligence, help validate service fulfillment, and support user safety. This may include point-in-time coordinates, timestamps, inferred city or region context, and geospatial linkage to bookings or partner records.</p>
+      <p>mAIRide may request and process precise device or browser location in order to suggest regional language experiences, verify partner onboarding points, determine nearby ride relevance, improve route intelligence, help validate service fulfillment, and support user safety. This may include point-in-time coordinates, timestamps, inferred city or region context, and geospatial linkage to bookings or partner records.</p>
       <h3>3.2 Compliance Use of Geo-Tagged Records</h3>
       <p>Where geo-tagging is captured during verification, partner registration, or operational ride events, that data becomes part of the platform’s secure compliance record. Syncra Systems LLP uses these records to reduce fraud, validate entity presence, monitor abuse, and resolve disputes involving business onboarding, active ride handling, or route delivery.</p>
       <ul>
@@ -4863,7 +4845,7 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
       </ul>
       <h2>4. Cookies, Sessions &amp; Device Continuity</h2>
       <h3>4.1 Session Persistence</h3>
-      <p>MaiRide uses secure session objects, cookie-linked continuity controls, and local device preferences to maintain authentication state, language preferences, booking continuity, and platform stability. Accepting these baseline storage mechanisms is necessary for the application to remember account state, preserve navigation continuity, and prevent avoidable session loss during ordinary use.</p>
+      <p>mAIRide uses secure session objects, cookie-linked continuity controls, and local device preferences to maintain authentication state, language preferences, booking continuity, and platform stability. Accepting these baseline storage mechanisms is necessary for the application to remember account state, preserve navigation continuity, and prevent avoidable session loss during ordinary use.</p>
       <h3>4.2 Abuse Detection Signals</h3>
       <p>These technologies may also help Syncra Systems LLP detect repeated failures, suspicious access patterns, abrupt device switching, or irregular sign-in behavior. We do not use these controls to sell personal browsing activity to external advertising brokers.</p>
       <h2>5. Retention, Storage &amp; Security</h2>
@@ -4888,8 +4870,8 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
     path: '/refund',
     eyebrow: 'Cancellation & Refund Policy',
     title: 'Cancellation & Refund Policy',
-    effectiveLine: 'Operator: Syncra Systems LLP · Payments handled through MaiRide Secure Pay',
-    intro: 'All financial clearing, payment orchestration, cancellation handling, settlement logging, and authorized refunds within MaiRide are governed by the digital transaction framework of Syncra Systems LLP. This policy applies to direct bookings, negotiated rides, approved partner-led bookings, and other platform-mediated fare collection events processed through our authorized payment rails.',
+    effectiveLine: 'Operator: Syncra Systems LLP · Payments handled through mAIRide Secure Pay',
+    intro: 'All financial clearing, payment orchestration, cancellation handling, settlement logging, and authorized refunds within mAIRide are governed by the digital transaction framework of Syncra Systems LLP. This policy applies to direct bookings, negotiated rides, approved partner-led bookings, and other platform-mediated fare collection events processed through our authorized payment rails.',
     sections: [],
     bodyHtml: `
       <h2>1. Cancellation Window</h2>
@@ -4925,7 +4907,7 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
       <h3>5.1 Managed Payment Infrastructure</h3>
       <p>All fare collection, reconciliation records, payment gateway callbacks, Razorpay-linked processing events, internal ledger states, partner settlement records, and financial clearings processed via the platform are administered within the legal and corporate framework of <strong>Syncra Systems LLP</strong>. Refunds are returned to the original payment source in accordance with gateway, banking, and compliance rules then in force.</p>
       <h3>5.2 Off-Platform Exclusion</h3>
-      <p>Nothing in this policy obligates Syncra Systems LLP to settle or reimburse claims arising from offline conduct, direct private arrangements, unauthorized payment diversions, or service terms that were independently negotiated outside the controlled MaiRide flow.</p>
+      <p>Nothing in this policy obligates Syncra Systems LLP to settle or reimburse claims arising from offline conduct, direct private arrangements, unauthorized payment diversions, or service terms that were independently negotiated outside the controlled mAIRide flow.</p>
     `,
   },
   'terms-of-use': {
@@ -4934,12 +4916,12 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
     eyebrow: 'Terms of Use',
     title: 'Terms of Use',
     effectiveLine: 'Compliance contract with Syncra Systems LLP',
-    intro: 'By accessing rides.mairide.in or any MaiRide web property, you enter into a direct platform-use and compliance relationship with Syncra Systems LLP. These Terms of Use define the acceptable use boundaries, account expectations, technical restrictions, and operational limitations that apply to every user and partner within the MaiRide ecosystem.',
+    intro: 'By accessing rides.mairide.in or any mAIRide web property, you enter into a direct platform-use and compliance relationship with Syncra Systems LLP. These Terms of Use define the acceptable use boundaries, account expectations, technical restrictions, and operational limitations that apply to every user and partner within the mAIRide ecosystem.',
     sections: [],
     bodyHtml: `
       <h2>1. Use of the Platform</h2>
       <h3>1.1 Permitted Access</h3>
-      <p>Users may access MaiRide solely for legitimate ride discovery, booking, partner administration, guest travel coordination, approved commercial workflows, and support interactions permitted by the platform. Any misuse of the booking stack, pricing engine, negotiation flow, verification system, payment modules, or reporting panels may result in immediate restriction or suspension.</p>
+      <p>Users may access mAIRide solely for legitimate ride discovery, booking, partner administration, guest travel coordination, approved commercial workflows, and support interactions permitted by the platform. Any misuse of the booking stack, pricing engine, negotiation flow, verification system, payment modules, or reporting panels may result in immediate restriction or suspension.</p>
       <h3>1.2 Good-Faith Use</h3>
       <p>You agree to use the platform in good faith, provide truthful information, and interact only through approved interfaces. You must not create false demand, submit fake bookings, simulate driver activity, abuse dispute systems, interfere with another user’s transaction, or overload the platform with automated traffic, scraping activity, or reverse-engineering attempts.</p>
       <ul>
@@ -4959,7 +4941,7 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
       <p>Any session that appears compromised, duplicated, manipulated, or inconsistent with expected device behavior may be interrupted, revalidated, or terminated by Syncra Systems LLP. The platform may log security-sensitive state changes to preserve evidence and maintain auditability.</p>
       <h2>4. B2B Partner Compliance</h2>
       <h3>4.1 Commercial Operator Duties</h3>
-      <p>Fleet operators, travel agents, hotels, and resorts using MaiRide must comply with all onboarding, documentation, geolocation, commission, reporting, and payout-related requirements set by Syncra Systems LLP. These entities must maintain lawful authority to book, dispatch, or administratively manage rides on behalf of customers or associated drivers.</p>
+      <p>Fleet operators, travel agents, hotels, and resorts using mAIRide must comply with all onboarding, documentation, geolocation, commission, reporting, and payout-related requirements set by Syncra Systems LLP. These entities must maintain lawful authority to book, dispatch, or administratively manage rides on behalf of customers or associated drivers.</p>
       <h3>4.2 Disclosure and Conduct Standards</h3>
       <p>Partners must not create misleading pricing overlays, conceal service conditions, misstate traveler consent, process disallowed offline settlements, or misuse access to traveler or driver information. Failure to comply may trigger suspension, rejection, reversal of dashboard access, or retention of records for investigative review.</p>
       <ul>
@@ -4982,20 +4964,20 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
       <p>Users may not attempt to reverse engineer, misrepresent identity, bypass approved payment channels, manipulate pricing signals, interfere with live ride state, exploit protected operational information, or use the platform in a manner that threatens drivers, travelers, partners, or the commercial reputation of Syncra Systems LLP.</p>
       <h2>8. Limitation of Use Liability</h2>
       <h3>8.1 User Responsibility</h3>
-      <p>Syncra Systems LLP is not responsible for losses arising from a user’s failure to secure their account, disclose accurate information, maintain device hygiene, or follow the approved booking and payment flow. Use of the service is at your own informed discretion, subject to the legal boundaries stated throughout the MaiRide policy framework.</p>
+      <p>Syncra Systems LLP is not responsible for losses arising from a user’s failure to secure their account, disclose accurate information, maintain device hygiene, or follow the approved booking and payment flow. Use of the service is at your own informed discretion, subject to the legal boundaries stated throughout the mAIRide policy framework.</p>
     `,
   },
   'business-model': {
     key: 'business-model',
     path: '/business-model',
     eyebrow: 'Business Model',
-    title: 'How MaiRide Works',
+    title: 'How mAIRide Works',
     effectiveLine: 'Empty-leg mobility network by Syncra Systems LLP',
-    intro: 'MaiRide is structured as a transparent empty-leg aggregation network that helps travelers access return-route cabs while allowing drivers, fleets, and hospitality partners to improve occupancy and reduce idle mileage.',
+    intro: 'mAIRide is structured as a transparent empty-leg aggregation network that helps travelers access return-route cabs while allowing drivers, fleets, and hospitality partners to improve occupancy and reduce idle mileage.',
     sections: [
       {
         title: 'Traveler Layer',
-        body: 'Travelers can request a route, receive matching offers, negotiate transparently when required, and confirm rides through the MaiRide experience without falling into fragmented offline bargaining workflows.',
+        body: 'Travelers can request a route, receive matching offers, negotiate transparently when required, and confirm rides through the mAIRide experience without falling into fragmented offline bargaining workflows.',
       },
       {
         title: 'Driver and Fleet Layer',
@@ -5011,9 +4993,9 @@ const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefin
     key: 'tutorials',
     path: '/tutorials',
     eyebrow: 'Tutorials',
-    title: 'MaiRide Quick Guides',
+    title: 'mAIRide Quick Guides',
     effectiveLine: 'Guided help for riders, drivers, and partners',
-    intro: 'These tutorials are a fast orientation layer for the MaiRide ecosystem. They explain how each participant uses the platform while keeping the live booking flow, negotiation flow, and partner workflows easy to understand.',
+    intro: 'These tutorials are a fast orientation layer for the mAIRide ecosystem. They explain how each participant uses the platform while keeping the live booking flow, negotiation flow, and partner workflows easy to understand.',
     sections: [
       {
         title: 'For Travelers',
@@ -5069,8 +5051,9 @@ const getAuthHomeHref = () => '/';
 const getLegalHomeHref = () => {
   if (typeof window === 'undefined') return '/';
   const host = String(window.location.hostname || '').toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1') return '/landing.html';
   if (host === 'mairide.in' || host === 'www.mairide.in') return 'https://mairide.in/';
-  return '/';
+  return 'https://mairide.in/';
 };
 
 const isExternalLegalHomeHref = (href: string) => /^https?:\/\//i.test(href);
@@ -5090,121 +5073,110 @@ const DomainAwareHomeLink = ({
   ariaLabel?: string;
 }) => {
   const href = getLegalHomeHref();
-  if (isExternalLegalHomeHref(href)) {
-    return (
-      <a href={href} className={className} aria-label={ariaLabel}>
-        {children}
-      </a>
-    );
-  }
-
   return (
-    <Link to={href} className={className} aria-label={ariaLabel}>
+    <a href={href} className={className} aria-label={ariaLabel}>
       {children}
-    </Link>
+    </a>
   );
 };
 
 const LegalRichText = ({ html }: { html: string }) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    container.querySelectorAll('h2').forEach((heading, index) => {
-      const element = heading as HTMLElement;
-      element.style.display = 'block';
-      element.style.marginTop = index === 0 ? '2rem' : '2.85rem';
-      element.style.marginBottom = '1rem';
-      element.style.lineHeight = '1.25';
-      element.style.fontWeight = '800';
-      element.style.fontSize = '1.25rem';
-      element.style.color = '#E65F2B';
-    });
-
-    container.querySelectorAll('h3').forEach((heading) => {
-      const element = heading as HTMLElement;
-      element.style.display = 'block';
-      element.style.marginTop = '1.2rem';
-      element.style.marginBottom = '0.8rem';
-      element.style.lineHeight = '1.35';
-      element.style.fontWeight = '600';
-      element.style.fontSize = '1rem';
-      element.style.color = '#25343F';
-    });
-
-    container.querySelectorAll('p').forEach((paragraph) => {
-      const element = paragraph as HTMLElement;
-      element.style.display = 'block';
-      element.style.marginTop = '0';
-      element.style.marginBottom = '1.25rem';
-    });
-
-    container.querySelectorAll('ul').forEach((list) => {
-      const element = list as HTMLElement;
-      element.style.display = 'block';
-      element.style.marginTop = '0.85rem';
-      element.style.marginBottom = '1.5rem';
-      element.style.paddingLeft = '1.35rem';
-    });
-
-    container.querySelectorAll('li').forEach((item) => {
-      const element = item as HTMLElement;
-      element.style.marginBottom = '0.7rem';
-    });
-  }, [html]);
-
-  return <div ref={containerRef} className={legalRichTextClassName} dangerouslySetInnerHTML={{ __html: html }} />;
+  return (
+    <>
+      <style>{`
+        .mairide-legal-richtext h2 {
+          display: block !important;
+          margin-top: 2.85rem !important;
+          margin-bottom: 1rem !important;
+          line-height: 1.25 !important;
+          font-weight: 800 !important;
+          font-size: 1.32rem !important;
+          color: #E97A2E !important;
+        }
+        .mairide-legal-richtext h2:first-of-type {
+          margin-top: 2rem !important;
+        }
+        .mairide-legal-richtext h3 {
+          display: block !important;
+          margin-top: 1.25rem !important;
+          margin-bottom: 0.9rem !important;
+          line-height: 1.4 !important;
+          font-weight: 600 !important;
+          font-size: 1rem !important;
+          color: #25343F !important;
+        }
+        .mairide-legal-richtext p {
+          display: block !important;
+          margin-top: 0 !important;
+          margin-bottom: 1.35rem !important;
+          line-height: 1.85 !important;
+        }
+        .mairide-legal-richtext ul {
+          display: block !important;
+          margin-top: 1rem !important;
+          margin-bottom: 1.65rem !important;
+          padding-left: 1.45rem !important;
+        }
+        .mairide-legal-richtext li {
+          margin-bottom: 0.8rem !important;
+          line-height: 1.8 !important;
+        }
+      `}</style>
+      <div className="mairide-legal-richtext" dangerouslySetInnerHTML={{ __html: html }} />
+    </>
+  );
 };
 
-const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections, bodyHtml }: LegalPageProps) => (
-  <div className="px-4 py-8 md:px-8 md:py-10">
-    <div className="mx-auto max-w-4xl">
-      <div className="rounded-[40px] border border-mairide-secondary/20 bg-white p-8 shadow-sm sm:p-10">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-mairide-secondary/20 pb-6">
-          <DomainAwareHomeLink
-            className="inline-flex items-center gap-3 rounded-2xl text-mairide-primary transition hover:opacity-90"
-            ariaLabel="Return to MaiRide home"
-          >
-            <img src={LOGO_URL} alt="MaiRide Logo" className="h-11 w-11 rounded-2xl object-contain" />
-            <span className="text-xl font-black tracking-tight">MaiRide</span>
-          </DomainAwareHomeLink>
-          <button
-            type="button"
-            onClick={() => navigateWithReload(getAuthHomeHref())}
-            className="inline-flex items-center rounded-2xl border border-mairide-secondary px-4 py-2.5 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg"
-          >
-            ← Back to Login
-          </button>
-        </div>
-        <h1 className="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl">{title}</h1>
-        <p className="mt-5 text-base leading-8 text-mairide-secondary">{intro}</p>
-        {bodyHtml ? (
-          <LegalRichText html={bodyHtml} />
-        ) : (
-          <div className="mt-8 space-y-5">
-            {sections.map((section) => (
-              <section key={section.title}>
-                <h2 className="text-xl font-black text-mairide-accent">{section.title}</h2>
-                {section.body ? (
-                  <p className="mt-3 text-sm leading-7 text-mairide-secondary md:text-[15px]">{section.body}</p>
-                ) : null}
-                {section.bullets?.length ? (
-                  <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-7 text-mairide-secondary md:text-[15px]">
-                    {section.bullets.map((bullet) => (
-                      <li key={bullet}>{bullet}</li>
-                    ))}
-                  </ul>
-                ) : null}
-              </section>
-            ))}
+const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections, bodyHtml }: LegalPageProps) => {
+  const authHomeHref = getAuthHomeHref();
+
+  return (
+    <div className="px-4 py-8 md:px-8 md:py-10">
+      <div className="mx-auto max-w-4xl">
+        <div className="rounded-[40px] border border-mairide-secondary/20 bg-white p-8 shadow-sm sm:p-10">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-mairide-secondary/20 pb-6">
+            <DomainAwareHomeLink
+              className="inline-flex items-center gap-3 rounded-2xl text-mairide-primary transition hover:opacity-90"
+              ariaLabel="Return to mAIRide home"
+            >
+              <img src={LOGO_URL} alt="mAIRide Logo" className="h-11 w-11 rounded-2xl object-contain" />
+              <span className="text-xl font-black tracking-tight">mAIRide</span>
+            </DomainAwareHomeLink>
+            <a
+              href={authHomeHref}
+              className="inline-flex items-center rounded-2xl border border-mairide-secondary px-4 py-2.5 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg"
+            >
+              ← Back to Login
+            </a>
           </div>
-        )}
+          <h1 className="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl">{title}</h1>
+          <p className="mt-5 text-base leading-8 text-mairide-secondary">{intro}</p>
+          {bodyHtml ? (
+            <LegalRichText html={bodyHtml} />
+          ) : (
+            <div className="mt-8 space-y-5">
+              {sections.map((section) => (
+                <section key={section.title}>
+                  <h2 className="text-xl font-black text-mairide-accent">{section.title}</h2>
+                  {section.body ? (
+                    <p className="mt-3 text-sm leading-7 text-mairide-secondary md:text-[15px]">{section.body}</p>
+                  ) : null}
+                  {section.bullets?.length ? (
+                    <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-7 text-mairide-secondary md:text-[15px]">
+                      {section.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const FooterResourcePage = ({ resourceKey }: { resourceKey: FooterResourceKey }) => {
   const definition = FOOTER_RESOURCE_DEFINITIONS[resourceKey];
@@ -5360,7 +5332,7 @@ const CookieConsentManager = ({
                 Manage cookie preferences
               </h2>
               <p className="mt-2 text-sm leading-6 text-mairide-secondary">
-                MaiRide uses necessary cookies and local storage for secure login, ride posting, payments, and app stability.
+                mAIRide uses necessary cookies and local storage for secure login, ride posting, payments, and app stability.
                 Optional choices control saved preferences, analytics, and marketing measurement across web, mobile web, and Android.
               </p>
             </div>
@@ -5487,7 +5459,7 @@ const AppDialogHost = () => {
   const tone = dialog.tone || 'info';
   const styles = toneStyles[tone];
   const safeDialogMessage = normalizeDialogMessage((dialog as any)?.message);
-  const safeDialogTitle = normalizeDialogMessage((dialog as any)?.title, 'MaiRide Update');
+  const safeDialogTitle = normalizeDialogMessage((dialog as any)?.title, 'mAIRide Update');
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-mairide-primary/30 px-4 backdrop-blur-sm">
@@ -5706,11 +5678,11 @@ const Navbar = ({
         <img
           src={LOGO_URL}
           className={cn("mr-2.5 shrink-0 object-contain", logoSize)}
-          alt="MaiRide Logo"
+          alt="mAIRide Logo"
         />
         <div className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden leading-none">
           <span className={cn("block overflow-hidden text-ellipsis whitespace-nowrap font-black tracking-tighter text-mairide-primary", brandClassName)}>
-            MaiRide
+            mAIRide
           </span>
           <span className={cn("mt-1 block overflow-hidden text-ellipsis whitespace-nowrap font-black text-mairide-primary", subBrandClassName)}>
             my way
@@ -5767,9 +5739,9 @@ const Navbar = ({
                   onClick={handleHomeNavigation}
                   className="flex min-w-0 cursor-pointer items-center justify-start"
                 >
-                  <img src={LOGO_URL} className="mr-4 h-[84px] w-[84px] shrink-0 rounded-[22%] object-contain" alt="MaiRide Logo" />
+                  <img src={LOGO_URL} className="mr-4 h-[84px] w-[84px] shrink-0 rounded-[22%] object-contain" alt="mAIRide Logo" />
                   <div className="flex min-w-0 flex-col justify-center overflow-visible py-2.5 leading-[1.04]">
-                    <span className="truncate text-[2.55rem] font-black leading-[1.02] tracking-tighter text-mairide-primary">MaiRide</span>
+                    <span className="truncate text-[2.55rem] font-black leading-[1.02] tracking-tighter text-mairide-primary">mAIRide</span>
                     <span className="mt-1.5 truncate text-[1.2rem] font-black leading-[1.04] tracking-[0.1em] text-mairide-primary">my way</span>
                   </div>
                 </button>
@@ -7097,8 +7069,8 @@ const findUserProfileByPhone = async (value: string) => {
         className="w-full max-w-md bg-white rounded-[32px] p-8 shadow-xl border border-mairide-secondary my-2 md:my-0"
       >
         <div className="flex flex-col items-center mb-6">
-          <img src={LOGO_URL} className="w-32 h-32 object-contain rounded-[22%] mb-2" alt="MaiRide Logo" />
-          <h1 className="text-2xl font-black tracking-tighter text-mairide-primary uppercase">
+          <img src={LOGO_URL} className="w-32 h-32 object-contain rounded-[22%] mb-2" alt="mAIRide Logo" />
+          <h1 className="text-2xl font-black tracking-tighter text-mairide-primary">
             {BRAND_NAME}
           </h1>
         </div>
@@ -7171,7 +7143,7 @@ const findUserProfileByPhone = async (value: string) => {
                 </div>
                 <h2 className="text-xl font-black text-mairide-primary mb-2 uppercase tracking-tight">Not Registered</h2>
                 <p className="text-gray-600 mb-6">
-                  We could not find a completed MaiRide account linked to this login yet. Please sign up to continue.
+                  We could not find a completed mAIRide account linked to this login yet. Please sign up to continue.
                 </p>
                 <div className="space-y-3">
                   <button 
@@ -7265,7 +7237,7 @@ const findUserProfileByPhone = async (value: string) => {
                     onChange={(e) => setTermsAccepted(e.target.checked)}
                   />
                   <span className="text-[11px] leading-relaxed text-mairide-primary">
-                    I agree to MaiRide&apos;s Terms and Conditions, Privacy Policy, safety verification process, and platform usage rules.
+                    I agree to mAIRide&apos;s Terms and Conditions, Privacy Policy, safety verification process, and platform usage rules.
                   </span>
                 </label>
                 <label className="flex items-start gap-3 rounded-2xl border border-mairide-secondary bg-mairide-bg/60 px-4 py-4 text-left">
@@ -7479,7 +7451,7 @@ const findUserProfileByPhone = async (value: string) => {
           </button>
 
           <p className="text-center text-[10px] text-mairide-secondary px-4 leading-relaxed">
-            By continuing, you agree to MaiRide&apos;s{' '}
+            By continuing, you agree to mAIRide&apos;s{' '}
             <a href="/terms" className="font-bold text-mairide-primary hover:text-mairide-accent">
               Terms &amp; Conditions
             </a>
@@ -7503,7 +7475,7 @@ const findUserProfileByPhone = async (value: string) => {
             onClick={(event) => handleFooterResourceNavigation(event, 'business-model')}
             className="mt-1 block w-full rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-center text-sm font-bold text-mairide-primary transition-all hover:bg-mairide-bg"
           >
-            Learn How MaiRide Works
+            Learn How mAIRide Works
           </a>
         </div>
       </motion.div>
@@ -8149,7 +8121,7 @@ const DriverOnboarding = ({
         const message = String(error?.message || error || '');
         if (/permission|denied|not authorized|forbidden/i.test(message)) {
           showAppDialog(
-            'Camera permission is still blocked. Please enable camera and location permissions for MaiRide in your device settings, then try again.',
+            'Camera permission is still blocked. Please enable camera and location permissions for mAIRide in your device settings, then try again.',
             'warning',
             'Permissions required'
           );
@@ -8316,7 +8288,7 @@ const DriverOnboarding = ({
       >
         <div className="flex flex-col items-center mb-8">
           <div className="flex items-center mb-4">
-            <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="MaiRide Logo" />
+            <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="mAIRide Logo" />
             <span className="text-xl font-black tracking-tighter text-mairide-primary">
               {BRAND_NAME}
             </span>
@@ -8771,7 +8743,7 @@ const PaymentProofModal = ({
           <div>
             <h3 className="text-2xl font-bold text-mairide-primary">Complete Platform Fee Payment</h3>
             <p className="text-sm text-mairide-secondary">
-              {payer === 'consumer' ? 'Traveler' : 'Driver'} must pay only the MaiRide maintenance fee to keep contact details locked until both sides comply.
+              {payer === 'consumer' ? 'Traveler' : 'Driver'} must pay only the mAIRide maintenance fee to keep contact details locked until both sides comply.
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-mairide-bg rounded-full">
@@ -9716,7 +9688,7 @@ const ViewOnlyDocumentCard = ({
       )}
     </div>
     <p className="text-[11px] text-mairide-secondary text-center">
-      This document is view-only. Contact MaiRide support if any corrections are required.
+      This document is view-only. Contact mAIRide support if any corrections are required.
     </p>
   </div>
 );
@@ -10751,7 +10723,7 @@ const MyRides = ({
 
       if (hasLockedTrip) {
         showAppDialog(
-          'This trip is already confirmed and locked for travel. Drivers cannot cancel it now. Please contact MaiRide customer support for an override if cancellation is unavoidable.',
+          'This trip is already confirmed and locked for travel. Drivers cannot cancel it now. Please contact mAIRide customer support for an override if cancellation is unavoidable.',
           'warning'
         );
         return;
@@ -11101,7 +11073,7 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
           );
         },
       });
-      showAppDialog('Ride fare collected through MaiRide Secure Pay.', 'success');
+      showAppDialog('Ride fare collected through mAIRide Secure Pay.', 'success');
     } catch (error: any) {
       showAppDialog(error?.message || 'We could not start secure fare collection right now.', 'error', 'Secure Pay unavailable');
     } finally {
@@ -11195,7 +11167,7 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Ride-end collection</p>
-                    <h3 className="mt-2 text-lg font-bold text-mairide-primary">Collect Online via MaiRide Secure Pay (Recommended)</h3>
+                    <h3 className="mt-2 text-lg font-bold text-mairide-primary">Collect Online via mAIRide Secure Pay (Recommended)</h3>
                     <p className="mt-2 text-sm text-mairide-secondary">
                       Settle the ride fare digitally first. Manual cash collection remains your fallback only after secure collection is skipped.
                     </p>
@@ -11211,12 +11183,12 @@ const DriverHistory = ({ profile }: { profile: UserProfile }) => {
                       disabled={collectingBookingId === booking.id}
                       className="rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-mairide-accent disabled:opacity-60"
                     >
-                      {collectingBookingId === booking.id ? 'Opening secure pay...' : 'Collect Online via MaiRide Secure Pay'}
+                      {collectingBookingId === booking.id ? 'Opening secure pay...' : 'Collect Online via mAIRide Secure Pay'}
                     </button>
                   )}
                 </div>
                 <p className="mt-4 text-xs font-medium text-mairide-secondary">
-                  Manual cash collection fallback stays available offline, but MaiRide Secure Pay should be offered first for cleaner settlement tracking.
+                  Manual cash collection fallback stays available offline, but mAIRide Secure Pay should be offered first for cleaner settlement tracking.
                 </p>
               </div>
               {booking.driverReview?.comment && (
@@ -12636,7 +12608,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       const previousKey = seenDriverCounterNotificationsRef.current[booking.id];
       if (nextKey && nextKey !== previousKey) {
         void sendBrowserNotification(
-          'MaiRide Counter Offer',
+          'mAIRide Counter Offer',
           `${booking.driverName} proposed ${formatCurrency(getNegotiationDisplayFare(booking))} for ${booking.origin} to ${booking.destination}.`,
           { tag: `traveler-counter-${booking.id}` }
         );
@@ -13499,7 +13471,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       }
       if (requestedFare && requestedFare > 0 && requestedFare !== ride.price) {
         void sendBrowserNotification(
-          'MaiRide Counter Offer',
+          'mAIRide Counter Offer',
           `You offered ${formatCurrency(proposedFare)} for ${ride.origin} to ${ride.destination}.`,
           { tag: `traveler-sent-counter-${ride.id}`, requirePermissionPrompt: true }
         );
@@ -13702,7 +13674,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       setDashboardBookings((prev) => mergeNegotiationThread(prev, updatedThread));
       setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
       void sendBrowserNotification(
-        'MaiRide Counter Offer',
+        'mAIRide Counter Offer',
         `You countered with ${formatCurrency(fare)} for ${booking.origin} to ${booking.destination}.`,
         { tag: `traveler-dashboard-counter-${booking.id}`, requirePermissionPrompt: true }
       );
@@ -13968,14 +13940,14 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                 <Wallet className="w-10 h-10 text-mairide-accent" />
               </div>
               <p className="mt-3 text-sm text-mairide-secondary">
-                Use Maicoins to reduce platform fees and stay rewarded for bringing repeat demand onto MaiRide.
+                Use Maicoins to reduce platform fees and stay rewarded for bringing repeat demand onto mAIRide.
               </p>
             </div>
             <div className="bg-mairide-primary rounded-[32px] border border-mairide-primary p-6 shadow-lg shadow-mairide-primary/20 text-white">
               <p className="text-[10px] font-bold uppercase tracking-widest text-white/70">Why It Matters</p>
               <p className="mt-3 text-2xl font-black tracking-tight">Earn. Refer. Save on every booking.</p>
               <p className="mt-3 text-sm text-white/80">
-                Your wallet is your fastest growth engine on MaiRide. Keep it growing through referrals, bookings, and repeat usage.
+                Your wallet is your fastest growth engine on mAIRide. Keep it growing through referrals, bookings, and repeat usage.
               </p>
             </div>
           </div>
@@ -14621,7 +14593,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                         <span className="text-2xl font-black text-mairide-accent">{formatCurrency(calculateServiceFee(selectedRide.price, config || undefined).totalFee)}</span>
                       </div>
                       <p className="mt-3 text-xs text-mairide-secondary">
-                        You are only committing to the MaiRide maintenance fee plus GST here. The ride fare itself is not collected by the platform in this step.
+                        You are only committing to the mAIRide maintenance fee plus GST here. The ride fare itself is not collected by the platform in this step.
                       </p>
                     </div>
 
@@ -14677,7 +14649,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                     </button>
                   </div>
                   <p className="text-[10px] text-center text-mairide-secondary mt-4 px-4">
-                    Once the driver accepts, both sides must submit the MaiRide platform fee payment proof before contact details are unlocked.
+                    Once the driver accepts, both sides must submit the mAIRide platform fee payment proof before contact details are unlocked.
                   </p>
                 </motion.div>
               </div>
@@ -15396,7 +15368,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       const previousKey = seenTravelerCounterNotificationsRef.current[booking.id];
       if (nextKey && nextKey !== previousKey) {
         void sendBrowserNotification(
-          'MaiRide Counter Offer',
+          'mAIRide Counter Offer',
           `${booking.consumerName} offered ${formatCurrency(getNegotiationDisplayFare(booking))} for ${booking.origin} to ${booking.destination}.`,
           { tag: `driver-counter-${booking.id}` }
         );
@@ -17870,20 +17842,20 @@ const ChatbotCore = ({
 
     if (!message) {
       return hindi
-        ? "नमस्ते, मैं Kiara हूँ। मैं MaiRide पर ride search, booking, fare negotiation, payment, support और booking status में आपकी मदद कर सकती हूँ।"
-        : "Hi, I’m Kiara. I can help with ride search, bookings, fares, negotiation, payment, support, and booking status on MaiRide.";
+        ? "नमस्ते, मैं Kiara हूँ। मैं mAIRide पर ride search, booking, fare negotiation, payment, support और booking status में आपकी मदद कर सकती हूँ।"
+        : "Hi, I’m Kiara. I can help with ride search, bookings, fares, negotiation, payment, support, and booking status on mAIRide.";
     }
 
     if (/(^|\\b)(hi|hello|hey|namaste)(\\b|$)/.test(message)) {
       return hindi
         ? "नमस्ते, मैं Kiara हूँ। आप ride search, booking, pricing, negotiation, payment या support में जो भी मदद चाहें, मैं साथ हूँ।"
-        : "Hi, I’m Kiara. I can help you search rides, compare fares, negotiate, complete payments, and track bookings on MaiRide.";
+        : "Hi, I’m Kiara. I can help you search rides, compare fares, negotiate, complete payments, and track bookings on mAIRide.";
     }
 
     if (identityIntent) {
       return hindi
-        ? "मैं Kiara हूँ, MaiRide की virtual in-app assistant, इंसान agent नहीं. मैं ride search, booking, fares, payment और support में तुरंत practical मदद देने के लिए यहाँ हूँ."
-        : "I’m Kiara, MaiRide’s virtual in-app assistant, not a human agent. I’m here to help with rides, bookings, fares, payments, and support in a practical way.";
+        ? "मैं Kiara हूँ, mAIRide की virtual in-app assistant, इंसान agent नहीं. मैं ride search, booking, fares, payment और support में तुरंत practical मदद देने के लिए यहाँ हूँ."
+        : "I’m Kiara, mAIRide’s virtual in-app assistant, not a human agent. I’m here to help with rides, bookings, fares, payments, and support in a practical way.";
     }
 
     if (capabilityIntent) {
@@ -17912,8 +17884,8 @@ const ChatbotCore = ({
 
     if (negotiationIntent) {
       return hindi
-        ? "MaiRide में traveler और driver दोनों counter offer भेज सकते हैं। Negotiation तभी तक खुला रहता है जब तक एक side accept, reject या cancel न कर दे। Accept होते ही payment flow शुरू हो जाता है।"
-        : "On MaiRide, both traveler and driver can send counter offers. Negotiation stays open until one side accepts, rejects, or cancels. Once accepted, the payment flow starts automatically.";
+        ? "mAIRide में traveler और driver दोनों counter offer भेज सकते हैं। Negotiation तभी तक खुला रहता है जब तक एक side accept, reject या cancel न कर दे। Accept होते ही payment flow शुरू हो जाता है।"
+        : "On mAIRide, both traveler and driver can send counter offers. Negotiation stays open until one side accepts, rejects, or cancels. Once accepted, the payment flow starts automatically.";
     }
 
     if (paymentIntent) {
@@ -17954,8 +17926,8 @@ const ChatbotCore = ({
 
     if (message.includes('region') || message.includes('service area')) {
       return hindi
-        ? "MaiRide route और timing match के आधार पर active approved driver offers दिखाता है।"
-        : "MaiRide shows route-based offers when there is an active approved driver matching your route and timing window.";
+        ? "mAIRide route और timing match के आधार पर active approved driver offers दिखाता है।"
+        : "mAIRide shows route-based offers when there is an active approved driver matching your route and timing window.";
     }
 
     if (message.includes('admin')) {
@@ -18452,7 +18424,7 @@ const AdminSupportView = () => {
     try {
       const newResponse = {
         senderId: auth.currentUser?.uid || 'admin',
-        senderName: 'MaiRide Support',
+        senderName: 'mAIRide Support',
         message: response,
         createdAt: new Date().toISOString()
       };
@@ -18952,9 +18924,9 @@ const AdminRevenueAnalysis = ({
 };
 
 const AdminConfigView = () => {
-  const defaultChatbotPrompt = `You are MaiRide's official in-app assistant, Mai Kiara. When referring to yourself in conversation, use only the name Kiara. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Use friendly wording, acknowledge user concerns briefly, and give practical next steps. Keep replies short, clear, and supportive.
+  const defaultChatbotPrompt = `You are mAIRide's official in-app assistant, Mai Kiara. When referring to yourself in conversation, use only the name Kiara. Speak like a warm, polite, emotionally intelligent Indian customer support specialist. Sound human, not robotic. Use friendly wording, acknowledge user concerns briefly, and give practical next steps. Keep replies short, clear, and supportive.
 
-Answer only about MaiRide topics:
+Answer only about mAIRide topics:
 - rides
 - pricing
 - booking flow
@@ -18964,7 +18936,7 @@ Answer only about MaiRide topics:
 - support tickets
 - admin actions
 
-Do not answer unrelated general knowledge questions. For non-admin users, do not provide admin operational actions or admin panel guidance. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant MaiRide screen or support workflow instead of guessing.`;
+Do not answer unrelated general knowledge questions. For non-admin users, do not provide admin operational actions or admin panel guidance. If the user asks for account-specific or live operational details you cannot securely verify, politely direct them to the relevant mAIRide screen or support workflow instead of guessing.`;
   const providerModelOptions: Record<NonNullable<AppConfig['llmProvider']>, string[]> = {
     gemini: ['gemini-1.5-pro', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
     openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-nano'],
@@ -18985,16 +18957,16 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     emailOtpEnabled: true,
     emailOtpProvider: 'resend',
     resendApiBaseUrl: 'https://api.resend.com/emails',
-    resendFromName: 'MaiRide',
+    resendFromName: 'mAIRide',
     emailOtpExpiryMinutes: 10,
-    emailOtpSubject: 'Your MaiRide verification code',
+    emailOtpSubject: 'Your mAIRide verification code',
     chatbotEnabled: true,
     llmProvider: 'gemini',
     llmModel: 'gemini-1.5-pro',
     chatbotSystemPrompt: defaultChatbotPrompt,
     chatbotTemperature: 0.3,
     chatbotMaxTokens: 400,
-    chatbotFallbackMessage: "MaiRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
+    chatbotFallbackMessage: "mAIRide Assistant is temporarily unavailable. Please use the Support section if you need urgent help.",
     chatbotDefaultLanguage: 'en-IN',
     chatbotVoiceOutputEnabled: false,
     chatbotVoiceInputEnabled: true,
@@ -19657,7 +19629,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
             </div>
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Strict MaiRide System Prompt</label>
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Strict mAIRide System Prompt</label>
                 <textarea
                   rows={6}
                   value={formData.chatbotSystemPrompt || defaultChatbotPrompt}
@@ -20723,7 +20695,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       const response = await axios.post(adminApiPath('force-cancel-ride'), {
         rideId,
         bookingId: booking.id,
-        reason: 'Cancelled by MaiRide customer support',
+        reason: 'Cancelled by mAIRide customer support',
       }, { headers });
       const payload = response.data || {};
       const cancelledAt = payload.updatedAt || new Date().toISOString();
@@ -20778,7 +20750,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       );
       setAdminNotice({
         title: 'Ride cancelled',
-        message: 'MaiRide support override has cancelled this ride and retired its linked bookings.',
+        message: 'mAIRide support override has cancelled this ride and retired its linked bookings.',
         tone: 'success',
       });
     } catch (error: any) {
@@ -21319,10 +21291,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       )}>
         <div className="p-6 flex items-center justify-between border-b border-mairide-bg">
           <div className={cn("flex min-w-0 items-center overflow-hidden transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
-            <img src={LOGO_URL} className="mr-3 h-12 w-12 shrink-0 rounded-[18px] object-contain" alt="MaiRide Logo" />
+            <img src={LOGO_URL} className="mr-3 h-12 w-12 shrink-0 rounded-[18px] object-contain" alt="mAIRide Logo" />
             <div className="flex min-w-0 flex-col justify-center leading-none">
               <span className="block truncate text-[1.45rem] font-black leading-[0.95] tracking-tighter text-mairide-primary">
-                MaiRide
+                mAIRide
               </span>
               <span className="mt-1 block truncate text-[0.78rem] font-black leading-none tracking-[0.14em] text-mairide-primary">
                 my way
@@ -21464,10 +21436,10 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         {/* Mobile Header */}
         <header className="lg:hidden bg-white border-b border-mairide-secondary p-4 flex justify-between items-center">
           <div className="flex min-w-0 items-center">
-            <img src={LOGO_URL} className="mr-2.5 h-11 w-11 shrink-0 rounded-[16px] object-contain" alt="MaiRide Logo" />
+            <img src={LOGO_URL} className="mr-2.5 h-11 w-11 shrink-0 rounded-[16px] object-contain" alt="mAIRide Logo" />
             <div className="flex min-w-0 flex-col justify-center leading-none">
               <span className="block truncate text-[1.28rem] font-black leading-[0.95] tracking-tighter text-mairide-primary">
-                MaiRide
+                mAIRide
               </span>
               <span className="mt-1 block truncate text-[0.68rem] font-black leading-none tracking-[0.12em] text-mairide-primary">
                 my way
@@ -24072,7 +24044,7 @@ const App = () => {
     document.documentElement.lang = lang;
 
     if (!canUseCookieCategory(cookieConsent, 'preferences')) {
-      safeStorageRemove('local', UI_LANGUAGE_STORAGE_KEY);
+      removeSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY);
       clearGoogleTranslateArtifacts();
       if (lang !== 'en') {
         void ensureGoogleTranslateScriptLoaded(true).then(() => {
@@ -24084,7 +24056,7 @@ const App = () => {
       return;
     }
 
-    safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, lang);
+    setSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY, lang);
     if (lang === 'en') {
       clearGoogleTranslateArtifacts();
     } else {
@@ -24105,10 +24077,10 @@ const App = () => {
       setShowLanguagePrompt(false);
       return;
     }
-    const languageSaved = Boolean(safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY));
-    const promptSeen = safeStorageGet('local', UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
-    const appPromptSeen = safeStorageGet('local', UI_LANGUAGE_PROMPT_APP_SEEN_KEY) === '1';
-    const shouldForcePromptForApp = isAppWebViewRuntime() && !appPromptSeen;
+    const languageSaved = Boolean(getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY));
+    const promptSeen = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
+    const appPromptSeen = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_APP_SEEN_KEY) === '1';
+    const shouldForcePromptForApp = isAppWebViewRuntime() && !appPromptSeen && !languageSaved && !promptSeen;
     if (languageSaved && promptSeen && !shouldForcePromptForApp) {
       setShowLanguagePrompt(false);
       return;
@@ -24121,8 +24093,8 @@ const App = () => {
 
     const runDetection = async () => {
       const browserPreferred = detectBrowserPreferredLanguage();
-      let detected = safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || browserPreferred;
-      let promptOptions = buildLanguagePromptOptions('en', 'hi', detected);
+      let detected = getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) || browserPreferred;
+      let promptOptions = buildLanguagePromptOptions('en', 'hi', detected, 'bn', 'as', 'ne');
       try {
         const geoDetected = await detectLanguagePromptFromGeolocation();
         if (geoDetected) {
@@ -24219,8 +24191,8 @@ const App = () => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
     if (!canUseCookieCategory(cookieConsent, 'preferences')) {
       setUiLanguage(normalized);
-      safeStorageRemove('local', UI_LANGUAGE_STORAGE_KEY);
-      safeStorageRemove('local', UI_LANGUAGE_PROMPT_SEEN_KEY);
+      removeSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY);
+      removeSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY);
       if (normalized === 'en') {
         clearGoogleTranslateArtifacts();
       } else {
@@ -24231,17 +24203,17 @@ const App = () => {
         });
       }
       showAppDialog(
-        'Language changed for this session. Enable Preferences in Cookie Preferences if you want MaiRide to remember it next time.',
+        'Language changed for this session. Enable Preferences in Cookie Preferences if you want mAIRide to remember it next time.',
         'info',
         'Language updated'
       );
       return;
     }
     setUiLanguage(normalized);
-    safeStorageSet('local', UI_LANGUAGE_STORAGE_KEY, normalized);
-    safeStorageSet('local', UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
+    setSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY, normalized);
+    setSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
     if (isAppWebViewRuntime()) {
-      safeStorageSet('local', UI_LANGUAGE_PROMPT_APP_SEEN_KEY, '1');
+      setSharedPreferenceValue(UI_LANGUAGE_PROMPT_APP_SEEN_KEY, '1');
     }
     setShowLanguagePrompt(false);
     void ensureGoogleTranslateScriptLoaded().then(() => {
@@ -24302,7 +24274,7 @@ const App = () => {
     void openMobileUpdateLink(updateUrl).then((opened) => {
       if (opened) return;
       showAppDialog(
-        'We could not open the update link automatically. Please install the latest MaiRide build and reopen the app.',
+        'We could not open the update link automatically. Please install the latest mAIRide build and reopen the app.',
         'error',
         'Update required'
       );
@@ -24318,12 +24290,12 @@ const App = () => {
           </div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Major update required</p>
-            <h2 className="text-2xl font-black text-mairide-primary">Update MaiRide to continue</h2>
+            <h2 className="text-2xl font-black text-mairide-primary">Update mAIRide to continue</h2>
           </div>
         </div>
         <p className="text-sm leading-relaxed text-mairide-secondary">
           {mobileReleasePolicy?.forceUpdateMessage ||
-            'A major new version of MaiRide is available. Please update your app from the Store to continue.'}
+            'A major new version of mAIRide is available. Please update your app from the Store to continue.'}
         </p>
         <div className="mt-6 rounded-2xl bg-mairide-bg p-4 text-sm text-mairide-primary">
           <div className="flex items-center justify-between gap-3">
@@ -24559,7 +24531,7 @@ const App = () => {
             <div className="border-b border-mairide-secondary bg-white">
               <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-8">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">MaiRide Partner Workspace</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">mAIRide Partner Workspace</p>
                   <p className="mt-1 text-lg font-black tracking-tight text-mairide-primary">{partnerProfile.businessName}</p>
                 </div>
                 <button
@@ -24788,7 +24760,7 @@ const App = () => {
                     <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Camera Access</p>
                     <h3 className="mt-2 text-2xl font-black text-mairide-primary">Enable camera permission</h3>
                     <p className="mt-2 text-sm leading-6 text-mairide-secondary">
-                      MaiRide needs camera access to capture your traveler profile photo. Open app settings, allow camera permission, then come back here and try again.
+                      mAIRide needs camera access to capture your traveler profile photo. Open app settings, allow camera permission, then come back here and try again.
                     </p>
                     <div className="mt-6 space-y-3">
                       <button
@@ -24796,7 +24768,7 @@ const App = () => {
                         onClick={async () => {
                           const opened = await openAndroidAppSettings();
                           if (!opened) {
-                            showAppDialog('Please enable camera access for MaiRide from your phone settings and try again.', 'warning', 'Camera permission needed');
+                            showAppDialog('Please enable camera access for mAIRide from your phone settings and try again.', 'warning', 'Camera permission needed');
                           }
                         }}
                         className="flex w-full items-center justify-center gap-2 rounded-2xl bg-mairide-primary px-4 py-4 font-bold text-white"

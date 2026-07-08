@@ -11,6 +11,7 @@ import userHandler from "./api/user.ts";
 import chatHandler from "./api/chat.ts";
 import analyticsHandler from "./api/analytics.ts";
 import notificationsHandler from "./api/notifications.ts";
+import locationHandler from "./api/location.ts";
 import { handleCompleteSignup } from "./api/_lib/signup.ts";
 import { handleSubmitReview } from "./api/_lib/reviews.ts";
 import {
@@ -48,6 +49,7 @@ async function startServer() {
   app.post("/api/chat", chatHandler);
   app.all("/api/analytics", analyticsHandler);
   app.all("/api/notifications", notificationsHandler);
+  app.all("/api/location", locationHandler);
   app.all("/api/admin-api", adminHandler);
   app.post("/api/user/change-password", handleUserChangePassword);
   app.post("/api/user/create-ride", handleUserCreateRide);
