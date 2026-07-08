@@ -4896,35 +4896,6 @@ const RefundPage = () => (
   />
 );
 
-const PublicHeader = ({
-  uiLanguage,
-  onChangeLanguage,
-}: {
-  uiLanguage: string;
-  onChangeLanguage: (next: string) => void;
-}) => (
-  <header className="sticky top-0 z-40 border-b border-mairide-secondary bg-white/95 backdrop-blur-sm">
-    <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-8">
-      <Link to="/" className="flex min-w-0 items-center gap-3">
-        <img src={LOGO_URL} className="h-14 w-14 shrink-0 rounded-[20px] object-contain" alt="MaiRide Logo" />
-        <div className="min-w-0 leading-none">
-          <p className="truncate text-[1.8rem] font-black tracking-tighter text-mairide-primary">MaiRide</p>
-          <p className="mt-1 truncate text-[0.92rem] font-black tracking-[0.08em] text-mairide-primary">my way</p>
-        </div>
-      </Link>
-      <div className="flex items-center gap-3">
-        <div className="hidden md:block">
-          <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact variant="auth" />
-        </div>
-        <div className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-3 py-2 text-right">
-          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Owned by</p>
-          <p className="text-sm font-black text-mairide-primary">Syncra Systems LLP</p>
-        </div>
-      </div>
-    </div>
-  </header>
-);
-
 const TermsOfUsePage = () => (
   <LegalPage
     eyebrow="Terms of Use"
@@ -24045,20 +24016,17 @@ const App = () => {
   };
 
   if (isLegalRoute) {
-    const shellHeader =
-      user && profile ? (
-        <Navbar
-          user={user}
-          profile={profile}
-          onLogout={handleLogout}
-          uiLanguage={uiLanguage}
-          onChangeLanguage={commitUiLanguage}
-          onTravelerAvatarTrigger={openTravelerAvatarOptions}
-          isUploadingTravelerAvatar={isUploadingTravelerAvatar}
-        />
-      ) : (
-        <PublicHeader uiLanguage={uiLanguage} onChangeLanguage={commitUiLanguage} />
-      );
+    const shellHeader = user && profile ? (
+      <Navbar
+        user={user}
+        profile={profile}
+        onLogout={handleLogout}
+        uiLanguage={uiLanguage}
+        onChangeLanguage={commitUiLanguage}
+        onTravelerAvatarTrigger={openTravelerAvatarOptions}
+        isUploadingTravelerAvatar={isUploadingTravelerAvatar}
+      />
+    ) : null;
 
     return withAppConfigProvider(
       <ErrorBoundary>
@@ -24070,6 +24038,11 @@ const App = () => {
               {renderLegalRouteElement()}
             </main>
             <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
+            {!user || !profile ? (
+              <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
+                <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
+              </div>
+            ) : null}
             <AppDialogHost />
             {androidUpdatePrompt}
             {cookieConsentManager}
@@ -24089,7 +24062,6 @@ const App = () => {
     <ErrorBoundary>
       <Router>
         <div className="min-h-screen flex flex-col bg-mairide-bg">
-          <PublicHeader uiLanguage={uiLanguage} onChangeLanguage={commitUiLanguage} />
           <div className="flex-1">
             <Routes>
               <Route path="/terms" element={<TermsPage />} />
@@ -24115,6 +24087,9 @@ const App = () => {
             </Routes>
           </div>
           <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
+          <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
+            <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
+          </div>
           <div id="google_translate_element" className="hidden" />
           <AppDialogHost />
           {androidUpdatePrompt}
@@ -24171,7 +24146,6 @@ const App = () => {
       <ErrorBoundary>
         <Router>
           <div className="min-h-screen bg-mairide-bg">
-            <PublicHeader uiLanguage={uiLanguage} onChangeLanguage={commitUiLanguage} />
             <div className="border-b border-mairide-secondary bg-white">
               <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-8">
                 <div>
@@ -24211,7 +24185,6 @@ const App = () => {
       <ErrorBoundary>
         <Router>
           <div className="min-h-screen bg-mairide-bg">
-            <PublicHeader uiLanguage={uiLanguage} onChangeLanguage={commitUiLanguage} />
             <Routes>
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />

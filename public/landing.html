@@ -468,9 +468,6 @@
         const value = current.searchParams.get(key);
         if (value) target.searchParams.set(key, value);
       });
-      const selectedLanguage = localStorage.getItem(langStorageKey);
-      if (selectedLanguage) target.searchParams.set('lang', selectedLanguage);
-      target.searchParams.set('landing_host', window.location.hostname || 'localhost');
       return target.toString();
     };
 

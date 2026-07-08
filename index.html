@@ -18,6 +18,12 @@
     <script type="module">
       const host = String(window.location.hostname || '').toLowerCase();
       const isLandingHost = host === 'mairide.in' || host === 'www.mairide.in';
+      const marketingPolicyRedirects = {
+        '/terms': '/terms-and-conditions.html',
+        '/privacy': '/privacy-policy.html',
+        '/refund': '/terms-and-conditions.html#refund-policy',
+        '/terms-of-use': '/terms-and-conditions.html#terms-of-use',
+      };
       const isAppLikeRuntime = (() => {
         const protocol = String(window.location.protocol || '').toLowerCase();
         const ua = String(window.navigator?.userAgent || '').toLowerCase();
@@ -53,6 +59,9 @@
       if (isLandingHost) {
         if (isAppLikeRuntime) {
           import('/src/main.tsx');
+        } else if (marketingPolicyRedirects[window.location.pathname]) {
+          const target = `${marketingPolicyRedirects[window.location.pathname]}${window.location.search}${window.location.hash}`;
+          window.location.replace(target);
         } else if (hasAuthCallbackMarkers) {
           const target = `https://rides.mairide.in${window.location.pathname}${window.location.search}${window.location.hash}`;
           window.location.replace(target);
