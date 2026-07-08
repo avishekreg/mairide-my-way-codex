@@ -896,8 +896,23 @@
     applyLanguageOrdering([savedLanguage || detectLanguageFromBrowser()]);
     setLanguage(savedLanguage || detectLanguageFromBrowser());
 
-    const policyViewParam = new URLSearchParams(window.location.search).get('view');
-    renderPolicyView(policyViewParam);
+    const resolvePolicyView = () => {
+      const queryView = new URLSearchParams(window.location.search).get('view');
+      if (queryView && policyContentMap[queryView]) return queryView;
+
+      const pathname = String(window.location.pathname || '').toLowerCase();
+      const pathnameMap = {
+        '/terms': 'terms',
+        '/privacy': 'privacy',
+        '/refund': 'refund',
+        '/terms-of-use': 'terms-of-use',
+        '/landing.html': queryView && policyContentMap[queryView] ? queryView : null,
+      };
+
+      return pathnameMap[pathname] || null;
+    };
+
+    renderPolicyView(resolvePolicyView());
 
     const initLanguagePrompt = async () => {
       if (savedLanguage) return;
