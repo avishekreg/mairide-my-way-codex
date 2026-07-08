@@ -4764,7 +4764,7 @@ const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections }: LegalPage
         <div className="mt-8 space-y-5">
           {sections.map((section) => (
             <section key={section.title} className="rounded-[28px] border border-mairide-secondary bg-white p-5 md:p-6">
-              <h2 className="text-lg font-black text-mairide-primary md:text-xl">{section.title}</h2>
+              <h2 className="text-lg font-black text-mairide-accent md:text-xl">{section.title}</h2>
               {section.body ? (
                 <p className="mt-3 text-sm leading-7 text-mairide-secondary md:text-[15px]">{section.body}</p>
               ) : null}
