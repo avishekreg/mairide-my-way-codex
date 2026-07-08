@@ -331,7 +331,7 @@
       );
     })();
     if ((currentHost === 'mairide.in' || currentHost === 'www.mairide.in') && isAppLikeRuntime) {
-      window.location.replace(`https://rides.mairide.in/${window.location.search}${window.location.hash}`);
+      window.location.replace(`/${window.location.search}${window.location.hash}`);
     } else if ((currentHost === 'mairide.in' || currentHost === 'www.mairide.in') && window.location.pathname === '/landing.html') {
       window.history.replaceState({}, '', `/${window.location.search}${window.location.hash}`);
     }

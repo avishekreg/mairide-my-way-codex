@@ -51,7 +51,9 @@
       ].some((key) => searchParams.has(key) || hashParams.has(key));
 
       if (isLandingHost) {
-        if (hasAuthCallbackMarkers || isAppLikeRuntime) {
+        if (isAppLikeRuntime) {
+          import('/src/main.tsx');
+        } else if (hasAuthCallbackMarkers) {
           const target = `https://rides.mairide.in${window.location.pathname}${window.location.search}${window.location.hash}`;
           window.location.replace(target);
         } else {

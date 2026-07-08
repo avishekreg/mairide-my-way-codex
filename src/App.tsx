@@ -4702,6 +4702,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
           <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-mairide-secondary">
             <a href="/terms" className="hover:text-mairide-primary transition">Terms &amp; Conditions</a>
             <a href="/privacy" className="hover:text-mairide-primary transition">Privacy Policy</a>
+            <a href="/terms-of-use" className="hover:text-mairide-primary transition">Terms of Use</a>
             <a href="/refund" className="hover:text-mairide-primary transition">Refund Policy</a>
             <a href="/business-model.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Business Model</a>
             <a href="/tutorials/index.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Tutorials</a>
@@ -4740,8 +4741,8 @@ type LegalPageProps = {
 };
 
 const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections }: LegalPageProps) => (
-  <div className="min-h-screen bg-mairide-bg px-4 py-10 md:px-8">
-    <div className="mx-auto max-w-4xl">
+  <div className="px-4 py-8 md:px-8 md:py-10">
+    <div className="mx-auto max-w-5xl">
       <div className="rounded-[36px] border border-mairide-secondary bg-white p-6 shadow-sm md:p-10">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-mairide-secondary pb-6">
           <div>
@@ -4788,6 +4789,9 @@ const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections }: LegalPage
           <Link to="/terms" className="rounded-2xl border border-mairide-secondary px-5 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg">
             Terms
           </Link>
+          <Link to="/terms-of-use" className="rounded-2xl border border-mairide-secondary px-5 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg">
+            Terms of Use
+          </Link>
           <Link to="/privacy" className="rounded-2xl border border-mairide-secondary px-5 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg">
             Privacy
           </Link>
@@ -4805,11 +4809,19 @@ const TermsPage = () => (
     eyebrow="Terms & Conditions"
     title="MaiRide Terms and Conditions"
     effectiveLine="Entity: Syncra Systems LLP · Platform: MaiRide · Effective July 2026"
-    intro="Welcome to MaiRide. By accessing or using our mobile application, website, or subdomain services hosted at rides.mairide.in, you agree to be bound by these Terms and Conditions. This platform is fully owned and operated by Syncra Systems LLP."
+    intro="MaiRide is a dynamic empty-leg mobility network and digital aggregator platform wholly owned, controlled, copyrighted, and operated by Syncra Systems LLP. By accessing or using MaiRide, including rides.mairide.in, you enter into a direct compliance relationship with Syncra Systems LLP."
     sections={[
       {
+        title: 'Platform Identity',
+        body: 'All MaiRide codebase rights, trademarks, service workflows, transaction infrastructure, and operating surfaces are properties of Syncra Systems LLP. The MaiRide experience is offered as a branded digital mobility ecosystem under that ownership structure.',
+      },
+      {
         title: 'Nature of Service',
-        body: 'MaiRide operates as an empty-leg cab aggregator ecosystem connecting travelers and independent drivers or fleet owners. Syncra Systems LLP provides the technological platform, workflow orchestration, and communication surfaces used to discover, negotiate, confirm, and support rides, but it is not itself the direct transport provider.',
+        body: 'MaiRide provides technological matching, routing logic, onboarding, negotiation workflows, and platform support for consumers, independent drivers, fleet operators, and approved B2B partners. Syncra Systems LLP provides the platform layer and is not itself the direct transport operator.',
+      },
+      {
+        title: 'Terms of Use & Service',
+        body: 'All access via rides.mairide.in, associated mobile containers, and connected login surfaces constitutes use of a Syncra Systems LLP operated service. Users agree to comply with all verification, security, pricing, booking, and conduct rules enforced through the platform.',
       },
       {
         title: 'User Account & Security',
@@ -4832,7 +4844,7 @@ const PrivacyPage = () => (
     eyebrow="Privacy Policy"
     title="MaiRide Privacy Policy"
     effectiveLine="Effective Date: July 2026 · Data Controller: Syncra Systems LLP"
-    intro="At MaiRide, hosted at rides.mairide.in, protecting your privacy is a core operating principle. This Privacy Policy explains how Syncra Systems LLP collects, stores, processes, and safeguards your personal information while delivering the MaiRide platform."
+    intro="At MaiRide, protecting your privacy is a core operating principle. All identity, telemetry, device preference, and onboarding data processed through MaiRide is managed under the privacy and security architecture of Syncra Systems LLP."
     sections={[
       {
         title: 'Data We Collect',
@@ -4843,8 +4855,12 @@ const PrivacyPage = () => (
         ],
       },
       {
+        title: 'Privacy Framework',
+        body: 'All captured HTML5 user telemetry, high-precision geo-tagging logs, uploaded verification documents, and hardware device preferences are securely managed and processed under the data control architecture of Syncra Systems LLP via encrypted database instances and associated protected service infrastructure.',
+      },
+      {
         title: 'Data Retention & Safety',
-        body: 'All sensitive data, sessions, and hardware-backed tokens are managed within our encrypted Supabase infrastructure and related secured systems operated for MaiRide. We do not sell or lease user data to third-party marketing brokers.',
+        body: 'Sensitive data, sessions, and hardware-backed tokens are managed within encrypted Supabase-backed infrastructure and related secured systems operated for MaiRide. Syncra Systems LLP does not sell or lease user data to third-party marketing brokers.',
       },
       {
         title: 'Cookie Usage & Session State',
@@ -4859,7 +4875,7 @@ const RefundPage = () => (
     eyebrow="Cancellation & Refund Policy"
     title="MaiRide Cancellation and Refund Policy"
     effectiveLine="Operator: Syncra Systems LLP · Payments handled through MaiRide Secure Pay"
-    intro="Syncra Systems LLP aims to provide a transparent, fixed-fee empty-leg aggregation experience. These guidelines govern ride cancellations, service reversals, and refund processing for transactions managed through our Razorpay secure API pipeline."
+    intro="Syncra Systems LLP aims to provide a transparent, fixed-fee empty-leg aggregation experience. All financial clearing, processing, and transaction management on MaiRide are powered through authorized secure digital gateways controlled by Syncra Systems LLP."
     sections={[
       {
         title: 'Cancellation Window',
@@ -4873,8 +4889,60 @@ const RefundPage = () => (
         bullets: [
           'In the event of network routing failures or non-arrival of the assigned vehicle, a 100% refund of the pre-collected aggregate turnover fare will be initiated immediately.',
           'All authorized refunds are automatically routed through our central payment gateway directly back to the original funding source, including Card, UPI, or Net Banking, within T+2 to T+5 business days.',
-          'Manual cash handovers are not eligible for digital platform refunds.',
+          'Manual cash handovers are not eligible for digital platform refunds, and Syncra Systems LLP does not assume physical cash alternative liability outside the recorded digital settlement path.',
         ],
+      },
+    ]}
+  />
+);
+
+const PublicHeader = ({
+  uiLanguage,
+  onChangeLanguage,
+}: {
+  uiLanguage: string;
+  onChangeLanguage: (next: string) => void;
+}) => (
+  <header className="sticky top-0 z-40 border-b border-mairide-secondary bg-white/95 backdrop-blur-sm">
+    <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-8">
+      <Link to="/" className="flex min-w-0 items-center gap-3">
+        <img src={LOGO_URL} className="h-14 w-14 shrink-0 rounded-[20px] object-contain" alt="MaiRide Logo" />
+        <div className="min-w-0 leading-none">
+          <p className="truncate text-[1.8rem] font-black tracking-tighter text-mairide-primary">MaiRide</p>
+          <p className="mt-1 truncate text-[0.92rem] font-black tracking-[0.08em] text-mairide-primary">my way</p>
+        </div>
+      </Link>
+      <div className="flex items-center gap-3">
+        <div className="hidden md:block">
+          <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact variant="auth" />
+        </div>
+        <div className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-3 py-2 text-right">
+          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Owned by</p>
+          <p className="text-sm font-black text-mairide-primary">Syncra Systems LLP</p>
+        </div>
+      </div>
+    </div>
+  </header>
+);
+
+const TermsOfUsePage = () => (
+  <LegalPage
+    eyebrow="Terms of Use"
+    title="MaiRide Terms of Use and Service"
+    effectiveLine="Compliance contract with Syncra Systems LLP"
+    intro="MaiRide is a service interface of Syncra Systems LLP. Every user, partner, fleet operator, and booking participant accessing rides.mairide.in or any related app shell uses the platform subject to the operational and compliance standards of Syncra Systems LLP."
+    sections={[
+      {
+        title: 'Service Relationship',
+        body: 'Syncra Systems LLP provides the underlying digital marketplace, data workflows, identity orchestration, and settlement-linked service interfaces that power the MaiRide platform.',
+      },
+      {
+        title: 'Operational Expectations',
+        body: 'Users must provide accurate booking, location, pricing, and identity information and must not misuse the platform, interfere with negotiation flows, or attempt to bypass approved booking, payment, and verification systems.',
+      },
+      {
+        title: 'Partner and Driver Compliance',
+        body: 'Independent drivers, fleet owners, hotels, resorts, and all approved B2B partners remain responsible for complying with their applicable transport, tax, and business obligations while using the Syncra Systems LLP managed MaiRide ecosystem.',
       },
     ]}
   />
@@ -5549,39 +5617,6 @@ const sanitizeDisplayName = (value: string) =>
     .slice(0, 80);
 
 const normalizeEmailValue = (value: string) => String(value || '').trim().toLowerCase();
-const MOBILE_APP_HOSTNAME = 'rides.mairide.in';
-const isLandingWebHost = () => {
-  if (typeof window === 'undefined') return false;
-  const hostname = String(window.location.hostname || '').toLowerCase();
-  return hostname === 'mairide.in' || hostname === 'www.mairide.in';
-};
-const shouldForceNativeAppRideDomain = () => {
-  if (typeof window === 'undefined') return false;
-  if (!isMobileAppRuntime()) return false;
-
-  const protocol = String(window.location.protocol || '').toLowerCase();
-  const hostname = String(window.location.hostname || '').toLowerCase();
-
-  if ((protocol === 'http:' || protocol === 'https:') && hostname === MOBILE_APP_HOSTNAME) {
-    return false;
-  }
-
-  return true;
-};
-const buildNativeRideDomainUrl = () => {
-  if (typeof window === 'undefined') return `https://${MOBILE_APP_HOSTNAME}/`;
-
-  const target = new URL(window.location.href);
-  target.protocol = 'https:';
-  target.hostname = MOBILE_APP_HOSTNAME;
-  target.port = '';
-
-  if (!target.pathname || target.pathname === '/landing.html') {
-    target.pathname = '/';
-  }
-
-  return target.toString();
-};
 const getOAuthUrlParam = (key: string) => {
   if (typeof window === 'undefined') return null;
   return new URLSearchParams(window.location.search).get(key);
@@ -7102,6 +7137,10 @@ const findUserProfileByPhone = async (value: string) => {
             ,{' '}
             <a href="/privacy" className="font-bold text-mairide-primary hover:text-mairide-accent">
               Privacy Policy
+            </a>
+            ,{' '}
+            <a href="/terms-of-use" className="font-bold text-mairide-primary hover:text-mairide-accent">
+              Terms of Use
             </a>
             , and{' '}
             <a href="/refund" className="font-bold text-mairide-primary hover:text-mairide-accent">
@@ -23224,12 +23263,6 @@ const App = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!shouldForceNativeAppRideDomain()) return;
-    window.location.replace(buildNativeRideDomainUrl());
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('mode') !== 'signup') return;
     params.delete('mode');
@@ -23237,17 +23270,6 @@ const App = () => {
     const target = `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash || ''}`;
     window.history.replaceState({}, '', target);
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!isLandingWebHost()) return;
-    if (!user) return;
-    const target = new URL(window.location.href);
-    target.protocol = 'https:';
-    target.hostname = 'rides.mairide.in';
-    if (target.port) target.port = '';
-    window.location.replace(target.toString());
-  }, [user]);
 
   useEffect(() => {
     if (!isLocalRazorpayEnabled()) return;
@@ -24006,6 +24028,56 @@ const App = () => {
   );
   const currentPathname = typeof window === 'undefined' ? '/' : window.location.pathname || '/';
   const isPartnerRoute = isPartnerRoutePath(currentPathname);
+  const isLegalRoute = ['/terms', '/privacy', '/refund', '/terms-of-use'].includes(currentPathname);
+
+  const renderLegalRouteElement = () => {
+    switch (currentPathname) {
+      case '/privacy':
+        return <PrivacyPage />;
+      case '/refund':
+        return <RefundPage />;
+      case '/terms-of-use':
+        return <TermsOfUsePage />;
+      case '/terms':
+      default:
+        return <TermsPage />;
+    }
+  };
+
+  if (isLegalRoute) {
+    const shellHeader =
+      user && profile ? (
+        <Navbar
+          user={user}
+          profile={profile}
+          onLogout={handleLogout}
+          uiLanguage={uiLanguage}
+          onChangeLanguage={commitUiLanguage}
+          onTravelerAvatarTrigger={openTravelerAvatarOptions}
+          isUploadingTravelerAvatar={isUploadingTravelerAvatar}
+        />
+      ) : (
+        <PublicHeader uiLanguage={uiLanguage} onChangeLanguage={commitUiLanguage} />
+      );
+
+    return withAppConfigProvider(
+      <ErrorBoundary>
+        <Router>
+          <div className="min-h-screen bg-mairide-bg">
+            {shellHeader}
+            <div id="google_translate_element" className="hidden" />
+            <main className="pb-20">
+              {renderLegalRouteElement()}
+            </main>
+            <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
+            <AppDialogHost />
+            {androidUpdatePrompt}
+            {cookieConsentManager}
+          </div>
+        </Router>
+      </ErrorBoundary>
+    );
+  }
 
   if (loading) return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
 
@@ -24017,11 +24089,13 @@ const App = () => {
     <ErrorBoundary>
       <Router>
         <div className="min-h-screen flex flex-col bg-mairide-bg">
+          <PublicHeader uiLanguage={uiLanguage} onChangeLanguage={commitUiLanguage} />
           <div className="flex-1">
             <Routes>
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/refund" element={<RefundPage />} />
+              <Route path="/terms-of-use" element={<TermsOfUsePage />} />
               <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={null} />} />
               <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={null} />} />
               <Route path="*" element={
@@ -24041,9 +24115,6 @@ const App = () => {
             </Routes>
           </div>
           <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
-          <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
-            <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
-          </div>
           <div id="google_translate_element" className="hidden" />
           <AppDialogHost />
           {androidUpdatePrompt}
@@ -24100,6 +24171,7 @@ const App = () => {
       <ErrorBoundary>
         <Router>
           <div className="min-h-screen bg-mairide-bg">
+            <PublicHeader uiLanguage={uiLanguage} onChangeLanguage={commitUiLanguage} />
             <div className="border-b border-mairide-secondary bg-white">
               <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-8">
                 <div>
@@ -24118,6 +24190,7 @@ const App = () => {
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/refund" element={<RefundPage />} />
+              <Route path="/terms-of-use" element={<TermsOfUsePage />} />
               <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={user} />} />
               <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={user} />} />
               <Route path="/partners/portal" element={<PartnerPortal partner={partnerProfile} currentUser={user} onPartnerUpdated={setPartnerProfile} />} />
@@ -24138,10 +24211,12 @@ const App = () => {
       <ErrorBoundary>
         <Router>
           <div className="min-h-screen bg-mairide-bg">
+            <PublicHeader uiLanguage={uiLanguage} onChangeLanguage={commitUiLanguage} />
             <Routes>
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/refund" element={<RefundPage />} />
+              <Route path="/terms-of-use" element={<TermsOfUsePage />} />
               <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={user} />} />
               <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={user} />} />
               <Route path="*" element={<Navigate to="/partners/fleet/apply" replace />} />
@@ -24208,6 +24283,7 @@ const App = () => {
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/refund" element={<RefundPage />} />
+              <Route path="/terms-of-use" element={<TermsOfUsePage />} />
               <Route path="/" element={
                 profile?.role === 'admin' ? <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> :
                 profile?.role === 'driver' ? <DriverApp profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : 
