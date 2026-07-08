@@ -81,7 +81,7 @@
           "value": "mairide.in"
         }
       ],
-      "destination": "/index.html"
+      "destination": "/landing.html?view=terms"
     },
     {
       "source": "/terms",
@@ -91,7 +91,7 @@
           "value": "www.mairide.in"
         }
       ],
-      "destination": "/index.html"
+      "destination": "/landing.html?view=terms"
     },
     {
       "source": "/privacy",
@@ -101,7 +101,7 @@
           "value": "mairide.in"
         }
       ],
-      "destination": "/index.html"
+      "destination": "/landing.html?view=privacy"
     },
     {
       "source": "/privacy",
@@ -111,7 +111,7 @@
           "value": "www.mairide.in"
         }
       ],
-      "destination": "/index.html"
+      "destination": "/landing.html?view=privacy"
     },
     {
       "source": "/refund",
@@ -121,7 +121,7 @@
           "value": "mairide.in"
         }
       ],
-      "destination": "/index.html"
+      "destination": "/landing.html?view=refund"
     },
     {
       "source": "/refund",
@@ -131,7 +131,7 @@
           "value": "www.mairide.in"
         }
       ],
-      "destination": "/index.html"
+      "destination": "/landing.html?view=refund"
     },
     {
       "source": "/terms-of-use",
@@ -141,7 +141,7 @@
           "value": "mairide.in"
         }
       ],
-      "destination": "/index.html"
+      "destination": "/landing.html?view=terms-of-use"
     },
     {
       "source": "/terms-of-use",
@@ -151,7 +151,7 @@
           "value": "www.mairide.in"
         }
       ],
-      "destination": "/index.html"
+      "destination": "/landing.html?view=terms-of-use"
     },
     {
       "source": "/",
