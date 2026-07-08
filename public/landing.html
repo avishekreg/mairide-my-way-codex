@@ -310,7 +310,29 @@
 
   <script type="module">
     const currentHost = String(window.location.hostname || '').toLowerCase();
-    if ((currentHost === 'mairide.in' || currentHost === 'www.mairide.in') && window.location.pathname === '/landing.html') {
+    const isAppLikeRuntime = (() => {
+      const protocol = String(window.location.protocol || '').toLowerCase();
+      const ua = String(window.navigator?.userAgent || '').toLowerCase();
+      const hasCordova = typeof window.cordova !== 'undefined';
+      const hasReactNative = typeof window.ReactNativeWebView !== 'undefined';
+      const isStandalone = typeof window.matchMedia === 'function'
+        && window.matchMedia('(display-mode: standalone)').matches;
+      const isLocalAppHost = (currentHost === 'localhost' || currentHost === '127.0.0.1')
+        && !String(window.location.port || '').trim();
+
+      return (
+        protocol === 'capacitor:'
+        || protocol === 'ionic:'
+        || hasCordova
+        || hasReactNative
+        || isStandalone
+        || isLocalAppHost
+        || / wv|; wv|version\/\d+\.\d+ mobile/.test(ua)
+      );
+    })();
+    if ((currentHost === 'mairide.in' || currentHost === 'www.mairide.in') && isAppLikeRuntime) {
+      window.location.replace(`https://rides.mairide.in/${window.location.search}${window.location.hash}`);
+    } else if ((currentHost === 'mairide.in' || currentHost === 'www.mairide.in') && window.location.pathname === '/landing.html') {
       window.history.replaceState({}, '', `/${window.location.search}${window.location.hash}`);
     }
 

@@ -18,6 +18,25 @@
     <script type="module">
       const host = String(window.location.hostname || '').toLowerCase();
       const isLandingHost = host === 'mairide.in' || host === 'www.mairide.in';
+      const isAppLikeRuntime = (() => {
+        const protocol = String(window.location.protocol || '').toLowerCase();
+        const ua = String(window.navigator?.userAgent || '').toLowerCase();
+        const hasCordova = typeof window.cordova !== 'undefined';
+        const hasReactNative = typeof window.ReactNativeWebView !== 'undefined';
+        const isStandalone = typeof window.matchMedia === 'function'
+          && window.matchMedia('(display-mode: standalone)').matches;
+        const isLocalAppHost = (host === 'localhost' || host === '127.0.0.1') && !String(window.location.port || '').trim();
+
+        return (
+          protocol === 'capacitor:'
+          || protocol === 'ionic:'
+          || hasCordova
+          || hasReactNative
+          || isStandalone
+          || isLocalAppHost
+          || / wv|; wv|version\/\d+\.\d+ mobile/.test(ua)
+        );
+      })();
       const searchParams = new URLSearchParams(window.location.search || '');
       const hashParams = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
       const hasAuthCallbackMarkers = [
@@ -32,7 +51,7 @@
       ].some((key) => searchParams.has(key) || hashParams.has(key));
 
       if (isLandingHost) {
-        if (hasAuthCallbackMarkers) {
+        if (hasAuthCallbackMarkers || isAppLikeRuntime) {
           const target = `https://rides.mairide.in${window.location.pathname}${window.location.search}${window.location.hash}`;
           window.location.replace(target);
         } else {
