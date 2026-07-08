@@ -105,6 +105,7 @@
   </header>
 
   <main id="top">
+    <div id="landingHome">
     <section class="hero-photo relative flex min-h-[calc(100svh-77px)] items-center overflow-hidden">
       <div class="mx-auto w-full max-w-7xl px-5 py-16 lg:px-8 lg:py-20">
         <div class="max-w-3xl reveal">
@@ -238,6 +239,18 @@
         </div>
       </div>
     </section>
+    </div>
+
+    <section id="policyView" class="hidden px-5 py-16 lg:px-8">
+      <div class="mx-auto max-w-4xl">
+        <div class="rounded-[40px] border border-mairide-secondary/20 bg-white p-8 shadow-sm sm:p-10">
+          <p id="policyEyebrow" class="text-sm font-black uppercase tracking-[0.24em] text-mairide-accent">Policy</p>
+          <h1 id="policyTitle" class="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl">Legal information</h1>
+          <p id="policyIntro" class="mt-5 text-base leading-8 text-mairide-secondary"></p>
+          <div id="policyContent" class="prose prose-lg mt-10 max-w-none text-mairide-secondary prose-headings:text-mairide-primary prose-headings:font-black prose-p:leading-8 prose-li:leading-8 prose-strong:text-mairide-primary"></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="bg-mairide-primary px-5 py-14 text-white lg:px-8">
@@ -282,14 +295,15 @@
       <div>
         <h4 class="text-sm font-black uppercase tracking-[0.2em]" data-i18n="footerCompliance">Compliance</h4>
         <div class="mt-5 grid gap-3 text-sm text-white/62">
-          <a href="./terms-and-conditions.html" class="hover:text-white" data-i18n="terms">Terms & Conditions</a>
-          <a href="./privacy-policy.html" class="hover:text-white" data-i18n="privacy">Privacy Policy</a>
-          <a href="./terms-and-conditions.html#refund-policy" class="hover:text-white" data-i18n="refund">Terms of Use / Refund Policy</a>
+          <a href="/terms" class="hover:text-white" data-i18n="terms">Terms & Conditions</a>
+          <a href="/privacy" class="hover:text-white" data-i18n="privacy">Privacy Policy</a>
+          <a href="/terms-of-use" class="hover:text-white" data-i18n="termsOfUse">Terms of Use</a>
+          <a href="/refund" class="hover:text-white" data-i18n="refund">Cancellation & Refund Policy</a>
         </div>
       </div>
     </div>
     <div class="mx-auto mt-12 flex max-w-7xl flex-col gap-3 border-t border-white/10 pt-6 text-xs text-white/45 sm:flex-row sm:items-center sm:justify-between">
-      <p>© <span id="year"></span> MaiRide. <span data-i18n="rights">All rights reserved.</span></p>
+      <p data-i18n="footerRightsLine">© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.</p>
       <p>mairide.in · rides.mairide.in</p>
     </div>
   </footer>
@@ -360,7 +374,11 @@
     };
 
     const translations = {
-      en: {},
+      en: {
+        termsOfUse: 'Terms of Use',
+        refund: 'Cancellation & Refund Policy',
+        footerRightsLine: '© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.'
+      },
       hi: {
         navEdge: 'फायदे', navSustainability: 'हरित यात्रा', navPartners: 'पार्टनर', bookNow: 'बुक करें',
         heroBadge: 'खाली लौटती गाड़ियों का नेटवर्क',
@@ -387,8 +405,9 @@
         hotelBody: 'गेस्ट्स के लिए स्कैम-फ्री राइड बुक करें और सफल बुकिंग पर 10% रेवेन्यू शेयर कमाएं।',
         hotelCta: 'Hotel Partner बनें',
         footerBody: 'स्मार्ट यात्रियों, निष्पक्ष ड्राइवरों और स्वच्छ हाईवे के लिए पारदर्शी खाली-लेग कैब एग्रीगेटर।',
-        footerCompany: 'कंपनी', footerCompliance: 'कम्प्लायंस', terms: 'Terms & Conditions', privacy: 'Privacy Policy', refund: 'Terms of Use / Refund Policy',
-        rights: 'सर्वाधिकार सुरक्षित।', languagePromptEyebrow: 'भाषा विकल्प', languagePromptTitle: 'अपनी पेज भाषा चुनें'
+        footerCompany: 'कंपनी', footerCompliance: 'कम्प्लायंस', terms: 'Terms & Conditions', privacy: 'Privacy Policy', termsOfUse: 'Terms of Use', refund: 'Cancellation & Refund Policy',
+        footerRightsLine: '© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.',
+        languagePromptEyebrow: 'भाषा विकल्प', languagePromptTitle: 'अपनी पेज भाषा चुनें'
       },
       bn: {
         navEdge: 'সুবিধা', navSustainability: 'সবুজ যাত্রা', navPartners: 'পার্টনার', bookNow: 'বুক করুন',
@@ -414,7 +433,8 @@
         hotelTitle: 'Hotel ও Resort Partners-এর জন্য', hotelBody: 'Guest rides book করুন এবং successful bookings-এ 10% revenue share earn করুন।',
         hotelCta: 'Become a Hotel Partner',
         footerBody: 'Smart travelers, fair drivers এবং cleaner highways-এর জন্য transparent empty-leg cab aggregator।',
-        footerCompany: 'Company', footerCompliance: 'Compliance', rights: 'All rights reserved.',
+        footerCompany: 'Company', footerCompliance: 'Compliance', termsOfUse: 'Terms of Use', refund: 'Cancellation & Refund Policy',
+        footerRightsLine: '© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.',
         languagePromptEyebrow: 'Language Preference', languagePromptTitle: 'আপনার পেজের ভাষা বেছে নিন'
       },
       ne: {
@@ -434,6 +454,9 @@
         b2bTitle: 'Mobility partners का लागि नयाँ revenue layer।',
         fleetTitle: 'Fleet Owners र Travel Agents का लागि',
         hotelTitle: 'Hotel र Resort Partners का लागि',
+        termsOfUse: 'Terms of Use',
+        refund: 'Cancellation & Refund Policy',
+        footerRightsLine: '© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.',
         languagePromptEyebrow: 'Language Preference',
         languagePromptTitle: 'आफ्नो पेज भाषा छान्नुहोस्'
       },
@@ -452,6 +475,9 @@
         impactBody: 'CO2 বায়ুমণ্ডলত যোৱাৰ পৰা ৰোধ হ’ব পাৰে।',
         fleetTitle: 'Fleet Owners আৰু Travel Agents-ৰ বাবে',
         hotelTitle: 'Hotel আৰু Resort Partners-ৰ বাবে',
+        termsOfUse: 'Terms of Use',
+        refund: 'Cancellation & Refund Policy',
+        footerRightsLine: '© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.',
         languagePromptEyebrow: 'Language Preference',
         languagePromptTitle: 'আপোনাৰ পেজ ভাষা বাছনি কৰক'
       }
@@ -460,6 +486,77 @@
     const englishDefaults = Object.fromEntries(
       Array.from(document.querySelectorAll('[data-i18n]')).map((node) => [node.dataset.i18n, node.textContent.trim()])
     );
+
+    const defaultLanguageOrder = ['en', 'hi', 'bn', 'as', 'ne'];
+    const policyContentMap = {
+      terms: {
+        eyebrow: 'Terms & Conditions',
+        title: 'Terms & Conditions',
+        intro: 'MaiRide, including mairide.in and rides.mairide.in, is a digital mobility network platform wholly owned, operated, and controlled by Syncra Systems LLP.',
+        body: `
+          <h2>Platform Identity</h2>
+          <p><strong>MaiRide</strong> is a dynamic empty-leg mobility network and digital aggregator platform wholly owned, controlled, copyrighted, and operated by <strong>Syncra Systems LLP</strong>. All codebase rights, trademarks, platform workflows, and transaction infrastructure are properties of Syncra Systems LLP.</p>
+          <h2>Nature of Service</h2>
+          <p>Syncra Systems LLP provides the technological layer that matches travelers with independent drivers, fleet operators, and approved B2B partners. MaiRide is not a direct transport carrier and does not itself own every vehicle surfaced on the network.</p>
+          <h2>User Accounts & Security</h2>
+          <p>Users are responsible for the confidentiality of their credentials, account sessions, and device access. Authentication and session flows on rides.mairide.in operate under the compliance and security framework of Syncra Systems LLP.</p>
+          <h2>B2B Partner Operations</h2>
+          <p>Fleet operators, hotels, and resort partners are bound by their own ledgers, commission agreements, document verification rules, and platform approval workflows administered by Syncra Systems LLP.</p>
+          <h2>Governing Law</h2>
+          <p>Any dispute or claim arising from the use of MaiRide or its associated digital properties shall be subject to the exclusive jurisdiction of the courts of West Bengal, India.</p>
+        `
+      },
+      privacy: {
+        eyebrow: 'Privacy Policy',
+        title: 'Privacy Policy',
+        intro: 'This Privacy Policy explains how Syncra Systems LLP collects, secures, and processes user information across MaiRide, including mairide.in and rides.mairide.in.',
+        body: `
+          <h2>Data Controller</h2>
+          <p><strong>Syncra Systems LLP</strong> is the legal data controller for MaiRide. All personal data, ride intelligence, support records, and business onboarding details captured through the platform are processed under the operational control architecture of Syncra Systems LLP.</p>
+          <h2>Data We Collect</h2>
+          <ul>
+            <li>Identity and authentication data retrieved through secure login tokens and approved sign-in providers.</li>
+            <li>High-precision HTML5 telemetry, including geo-tagging coordinates captured during signup, onboarding, active ride discovery, and route monitoring.</li>
+            <li>Uploaded business, hotel, fleet, and compliance verification documents stored in managed platform storage.</li>
+            <li>Usage data, device preferences, and session continuity information required to keep the platform stable across web and mobile surfaces.</li>
+          </ul>
+          <h2>Retention & Security</h2>
+          <p>Database records managed via Supabase, session objects, and operational logs are stored within encrypted infrastructure controlled by Syncra Systems LLP. We do not sell or lease user data to third-party marketing brokers.</p>
+          <h2>Cookies & Session State</h2>
+          <p>MaiRide uses secure session storage and cookie-based continuity to maintain user state, language preferences, and device-aware experiences. These controls are necessary to preserve platform reliability.</p>
+        `
+      },
+      'terms-of-use': {
+        eyebrow: 'Terms of Use',
+        title: 'Terms of Use',
+        intro: 'By accessing rides.mairide.in or any MaiRide web property, you enter into a direct platform-use and compliance relationship with Syncra Systems LLP.',
+        body: `
+          <h2>Use of the Platform</h2>
+          <p>Users may access MaiRide solely for legitimate ride discovery, booking, partner administration, or approved operational workflows. Any misuse of the booking stack, pricing engine, negotiation flow, or verification system may result in suspension.</p>
+          <h2>Operational Ownership</h2>
+          <p>All application rights, operational permissions, matching workflows, analytics surfaces, and database records managed via Supabase are part of the proprietary software and service framework of <strong>Syncra Systems LLP</strong>.</p>
+          <h2>Availability & Changes</h2>
+          <p>Syncra Systems LLP may improve, suspend, or discontinue features to maintain performance, safety, compliance, or legal obligations. Continued use after an update constitutes acceptance of the revised platform behavior.</p>
+          <h2>Restricted Conduct</h2>
+          <p>Users may not attempt to reverse engineer, misrepresent identity, bypass approved payment channels, manipulate pricing signals, or exploit access to protected operational information.</p>
+        `
+      },
+      refund: {
+        eyebrow: 'Cancellation & Refund Policy',
+        title: 'Cancellation & Refund Policy',
+        intro: 'All financial clearing, payment orchestration, and authorized refunds within MaiRide are governed by the digital transaction framework of Syncra Systems LLP.',
+        body: `
+          <h2>Cancellation Window</h2>
+          <p>Travelers may cancel an empty-leg booking without penalty until dispatch confirmation. Once a vehicle is dispatched or locked into the route workflow, a nominal dynamic convenience fee may apply.</p>
+          <h2>Refund Processing</h2>
+          <p>If routing fails, a driver does not arrive, or a confirmed assignment cannot be completed, Syncra Systems LLP will initiate a refund back to the original funding source through the authorized payment gateway.</p>
+          <h2>Settlement Timelines</h2>
+          <p>Authorized refunds are generally processed within standard banking windows of T+2 to T+5 business days. Cash handovers or offline collections outside the approved platform payment rails are not eligible for digital refund protection.</p>
+          <h2>Financial Control</h2>
+          <p>All fare collection, reconciliation records, payment gateway callbacks, and financial clearings processed via the platform are administered within the legal and corporate framework of <strong>Syncra Systems LLP</strong>.</p>
+        `
+      }
+    };
 
     const withMarketingParams = (targetUrl) => {
       const target = new URL(targetUrl);
@@ -475,11 +572,45 @@
       const active = translations[lang] ? lang : 'en';
       localStorage.setItem(langStorageKey, active);
       document.documentElement.lang = active;
-      document.getElementById('languageSelect').value = active;
+      const select = document.getElementById('languageSelect');
+      if (select.querySelector(`option[value="${active}"]`)) {
+        select.value = active;
+      }
       document.querySelectorAll('[data-i18n]').forEach((node) => {
         const key = node.dataset.i18n;
         node.textContent = translations[active][key] || englishDefaults[key] || node.textContent;
       });
+    };
+
+    const applyLanguageOrdering = (priorityLanguages = []) => {
+      const select = document.getElementById('languageSelect');
+      const ordered = Array.from(new Set([...priorityLanguages, ...defaultLanguageOrder])).filter((lang) => languages[lang]);
+      select.innerHTML = ordered
+        .map((lang) => `<option value="${lang}">${languages[lang].short}</option>`)
+        .join('');
+      const activeLanguage = localStorage.getItem(langStorageKey) || detectLanguageFromBrowser();
+      if (select.querySelector(`option[value="${activeLanguage}"]`)) {
+        select.value = activeLanguage;
+      }
+    };
+
+    const renderPolicyView = (view) => {
+      const policy = policyContentMap[view];
+      const home = document.getElementById('landingHome');
+      const policyView = document.getElementById('policyView');
+      if (!policy) {
+        home.classList.remove('hidden');
+        policyView.classList.add('hidden');
+        return;
+      }
+
+      document.getElementById('policyEyebrow').textContent = policy.eyebrow;
+      document.getElementById('policyTitle').textContent = policy.title;
+      document.getElementById('policyIntro').textContent = policy.intro;
+      document.getElementById('policyContent').innerHTML = policy.body;
+      home.classList.add('hidden');
+      policyView.classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'instant' });
     };
 
     const supportedLanguages = Object.keys(languages);
@@ -601,6 +732,8 @@
         : [suggestedLang, 'en'].filter((lang, index, items) => lang && items.indexOf(lang) === index);
       const orderedOptions = Array.from(new Set([suggestedLang, ...options].filter((lang) => languages[lang])));
       if (!orderedOptions.length || (orderedOptions.length === 1 && orderedOptions[0] === 'en')) return;
+      applyLanguageOrdering(orderedOptions);
+
       const prompt = document.getElementById('languagePrompt');
       const body = document.getElementById('languagePromptBody');
       const optionsContainer = document.getElementById('languagePromptOptions');
@@ -664,20 +797,24 @@
     }, { threshold: 0.12 });
 
     document.querySelectorAll('.reveal').forEach((node) => observer.observe(node));
-    document.getElementById('year').textContent = new Date().getFullYear();
-
     const savedLanguage = localStorage.getItem(langStorageKey);
+    applyLanguageOrdering([savedLanguage || detectLanguageFromBrowser()]);
     setLanguage(savedLanguage || detectLanguageFromBrowser());
+
+    const policyViewParam = new URLSearchParams(window.location.search).get('view');
+    renderPolicyView(policyViewParam);
 
     const initLanguagePrompt = async () => {
       if (savedLanguage) return;
       const resolution = await detectLanguagePromptFromGeolocation();
       if (resolution) {
+        applyLanguageOrdering([resolution.suggested, ...(resolution.options || [])]);
         showLanguagePrompt(resolution);
         return;
       }
 
       const browserLanguage = detectLanguageFromBrowser();
+      applyLanguageOrdering([browserLanguage]);
       showLanguagePrompt({
         suggested: browserLanguage,
         options: Array.from(new Set(['en', browserLanguage])).filter((lang) => languages[lang]),

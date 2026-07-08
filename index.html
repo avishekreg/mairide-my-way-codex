@@ -19,10 +19,10 @@
       const host = String(window.location.hostname || '').toLowerCase();
       const isLandingHost = host === 'mairide.in' || host === 'www.mairide.in';
       const marketingPolicyRedirects = {
-        '/terms': '/terms-and-conditions.html',
-        '/privacy': '/privacy-policy.html',
-        '/refund': '/terms-and-conditions.html#refund-policy',
-        '/terms-of-use': '/terms-and-conditions.html#terms-of-use',
+        '/terms': '/landing.html?view=terms',
+        '/privacy': '/landing.html?view=privacy',
+        '/refund': '/landing.html?view=refund',
+        '/terms-of-use': '/landing.html?view=terms-of-use',
       };
       const isAppLikeRuntime = (() => {
         const protocol = String(window.location.protocol || '').toLowerCase();
@@ -60,7 +60,13 @@
         if (isAppLikeRuntime) {
           import('/src/main.tsx');
         } else if (marketingPolicyRedirects[window.location.pathname]) {
-          const target = `${marketingPolicyRedirects[window.location.pathname]}${window.location.search}${window.location.hash}`;
+          const targetUrl = new URL(marketingPolicyRedirects[window.location.pathname], window.location.origin);
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.forEach((value, key) => {
+            if (!targetUrl.searchParams.has(key)) targetUrl.searchParams.set(key, value);
+          });
+          targetUrl.hash = currentUrl.hash;
+          const target = `${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`;
           window.location.replace(target);
         } else if (hasAuthCallbackMarkers) {
           const target = `https://rides.mairide.in${window.location.pathname}${window.location.search}${window.location.hash}`;
