@@ -350,6 +350,24 @@
       window.history.replaceState({}, '', `/${window.location.search}${window.location.hash}`);
     }
 
+    if ((currentHost === 'mairide.in' || currentHost === 'www.mairide.in') && 'serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.getRegistrations()
+          .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+          .catch(() => {});
+
+        if ('caches' in window) {
+          caches.keys()
+            .then((keys) => Promise.all(
+              keys
+                .filter((key) => key.startsWith('mairide-shell'))
+                .map((key) => caches.delete(key))
+            ))
+            .catch(() => {});
+        }
+      });
+    }
+
     const rideDomain = 'https://rides.mairide.in';
     const langStorageKey = 'mairide_ui_language';
     const langPromptSeenKey = 'mairide_ui_language_prompt_seen';
