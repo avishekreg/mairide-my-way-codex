@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { supabaseAuthStorage } from './capacitorAuthStorage';
 
 const PROD_SUPABASE_URL = 'https://jcgoccsdlrjnratpaeje.supabase.co';
 const PROD_SUPABASE_ANON_KEY =
@@ -21,6 +22,7 @@ export const supabase = createClient(supabaseUrl || 'https://invalid-project.sup
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
+    storage: supabaseAuthStorage,
   },
 });
 

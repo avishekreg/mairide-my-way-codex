@@ -2313,10 +2313,34 @@ const normalizeVersionTag = (version?: unknown) =>
     .toLowerCase()
     .replace(/\+.*$/, '');
 
-const ANDROID_APP_ID = 'in.mairide.app';
+const parseVersionParts = (value?: unknown) =>
+  normalizeVersionTag(value)
+    .replace(/[^0-9.]/g, '.')
+    .split('.')
+    .filter(Boolean)
+    .map((part) => Number.parseInt(part, 10))
+    .filter((part) => Number.isFinite(part));
 
-const resolveInstalledAndroidVersion = async () => {
-  if (typeof window === 'undefined' || !isAndroidAppRuntime()) return APP_VERSION;
+const compareVersionTags = (left?: unknown, right?: unknown) => {
+  const leftParts = parseVersionParts(left);
+  const rightParts = parseVersionParts(right);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = leftParts[index] ?? 0;
+    const rightValue = rightParts[index] ?? 0;
+    if (leftValue > rightValue) return 1;
+    if (leftValue < rightValue) return -1;
+  }
+
+  return 0;
+};
+
+const ANDROID_APP_ID = 'in.mairide.app';
+const IOS_APP_ID = 'in.mairide.app';
+
+const resolveInstalledNativeVersion = async () => {
+  if (typeof window === 'undefined' || !isMobileAppRuntime()) return APP_VERSION;
 
   try {
     const info = await CapacitorApp.getInfo();
@@ -2327,6 +2351,17 @@ const resolveInstalledAndroidVersion = async () => {
   }
 
   return APP_VERSION;
+};
+
+const resolveInstalledAndroidVersion = async () => {
+  if (!isAndroidAppRuntime()) return APP_VERSION;
+  return resolveInstalledNativeVersion();
+};
+
+const getMobileRuntimePlatform = () => {
+  if (isAndroidAppRuntime()) return 'android' as const;
+  if (isIosAppRuntime()) return 'ios' as const;
+  return 'web' as const;
 };
 
 const openAndroidAppSettings = async () => {
@@ -2354,6 +2389,17 @@ const openAndroidAppSettings = async () => {
   }
 
   return false;
+};
+
+const openMobileUpdateLink = async (url: string) => {
+  const target = String(url || '').trim();
+  if (!target || typeof window === 'undefined') return false;
+  try {
+    window.location.href = withCacheBust(target);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const ensureMobileDriverSignupPermissions = async () => {
@@ -4512,6 +4558,17 @@ type BuildStampInfo = {
   builtAt?: string;
 };
 
+type MobileReleasePolicy = {
+  appVersion: string;
+  minimumAndroidNativeVersion?: string;
+  minimumIosNativeVersion?: string;
+  sessionResetAndroidBelowVersion?: string;
+  sessionResetIosBelowVersion?: string;
+  androidUpdateUrl?: string;
+  iosUpdateUrl?: string;
+  forceUpdateMessage?: string;
+};
+
 const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; buildStamp?: BuildStampInfo | null }) => {
   const [isAndroidDevice, setIsAndroidDevice] = useState(false);
   const [androidUpdateMessage, setAndroidUpdateMessage] = useState('');
@@ -5335,10 +5392,38 @@ const sanitizeDisplayName = (value: string) =>
     .slice(0, 80);
 
 const normalizeEmailValue = (value: string) => String(value || '').trim().toLowerCase();
+const MOBILE_APP_HOSTNAME = 'rides.mairide.in';
 const isLandingWebHost = () => {
   if (typeof window === 'undefined') return false;
   const hostname = String(window.location.hostname || '').toLowerCase();
   return hostname === 'mairide.in' || hostname === 'www.mairide.in';
+};
+const shouldForceNativeAppRideDomain = () => {
+  if (typeof window === 'undefined') return false;
+  if (!isMobileAppRuntime()) return false;
+
+  const protocol = String(window.location.protocol || '').toLowerCase();
+  const hostname = String(window.location.hostname || '').toLowerCase();
+
+  if ((protocol === 'http:' || protocol === 'https:') && hostname === MOBILE_APP_HOSTNAME) {
+    return false;
+  }
+
+  return true;
+};
+const buildNativeRideDomainUrl = () => {
+  if (typeof window === 'undefined') return `https://${MOBILE_APP_HOSTNAME}/`;
+
+  const target = new URL(window.location.href);
+  target.protocol = 'https:';
+  target.hostname = MOBILE_APP_HOSTNAME;
+  target.port = '';
+
+  if (!target.pathname || target.pathname === '/landing.html') {
+    target.pathname = '/';
+  }
+
+  return target.toString();
 };
 const getOAuthUrlParam = (key: string) => {
   if (typeof window === 'undefined') return null;
@@ -22729,14 +22814,19 @@ const App = () => {
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
   const [isApplyingAndroidUpdate, setIsApplyingAndroidUpdate] = useState(false);
   const [remoteAppVersion, setRemoteAppVersion] = useState('');
+  const [mobileReleasePolicy, setMobileReleasePolicy] = useState<MobileReleasePolicy | null>(null);
   const [buildStamp, setBuildStamp] = useState<BuildStampInfo | null>(null);
   const [installedAndroidVersion, setInstalledAndroidVersion] = useState(APP_VERSION);
+  const [installedNativeVersion, setInstalledNativeVersion] = useState(APP_VERSION);
+  const [showForceNativeUpdatePrompt, setShowForceNativeUpdatePrompt] = useState(false);
   const [isUploadingTravelerAvatar, setIsUploadingTravelerAvatar] = useState(false);
   const [showTravelerAvatarOptions, setShowTravelerAvatarOptions] = useState(false);
   const [showTravelerCameraCapture, setShowTravelerCameraCapture] = useState(false);
   const [showTravelerCameraSettingsPrompt, setShowTravelerCameraSettingsPrompt] = useState(false);
   const travelerAvatarInputRef = useRef<HTMLInputElement | null>(null);
   const androidPushRegistrationKeyRef = useRef('');
+  const criticalSessionResetRef = useRef(false);
+  const lastSeenBuildRef = useRef('');
   const releaseVersion = resolveReleaseVersion(appConfigState.config?.appVersion, remoteAppVersion);
 
   useEffect(() => {
@@ -22808,6 +22898,34 @@ const App = () => {
 
   useEffect(() => {
     let active = true;
+    const loadMobileReleasePolicy = async () => {
+      try {
+        const response = await fetch(apiPath('/api/health?action=mobile-release-policy'), { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!active) return;
+        setMobileReleasePolicy({
+          appVersion: String(data?.appVersion || '').trim(),
+          minimumAndroidNativeVersion: String(data?.minimumAndroidNativeVersion || '').trim(),
+          minimumIosNativeVersion: String(data?.minimumIosNativeVersion || '').trim(),
+          sessionResetAndroidBelowVersion: String(data?.sessionResetAndroidBelowVersion || '').trim(),
+          sessionResetIosBelowVersion: String(data?.sessionResetIosBelowVersion || '').trim(),
+          androidUpdateUrl: String(data?.androidUpdateUrl || '').trim(),
+          iosUpdateUrl: String(data?.iosUpdateUrl || '').trim(),
+          forceUpdateMessage: String(data?.forceUpdateMessage || '').trim(),
+        });
+      } catch {
+        // Keep the mobile runtime steady if remote policy is unavailable.
+      }
+    };
+    void loadMobileReleasePolicy();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     const loadBuildStamp = async () => {
       try {
         const response = await fetch(apiPath('/api/health?action=build-stamp'), { cache: 'no-store' });
@@ -22832,6 +22950,113 @@ const App = () => {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!isMobileAppRuntime()) return;
+
+    let active = true;
+    const syncNativeVersion = async () => {
+      const version = await resolveInstalledNativeVersion();
+      if (!active) return;
+      const normalized = String(version || APP_VERSION).trim() || APP_VERSION;
+      setInstalledNativeVersion(normalized);
+      if (isAndroidAppRuntime()) {
+        setInstalledAndroidVersion(normalized);
+      }
+    };
+
+    void syncNativeVersion();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!buildStamp) return;
+    const buildIdentity = String(buildStamp.commitSha || buildStamp.deployId || buildStamp.appVersion || '').trim();
+    if (buildIdentity) {
+      lastSeenBuildRef.current = buildIdentity;
+    }
+  }, [buildStamp]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!isMobileAppRuntime()) return;
+
+    const refreshLiveBundle = async () => {
+      try {
+        const response = await fetch(apiPath('/api/health?action=build-stamp'), { cache: 'no-store' });
+        if (!response.ok) return;
+        const nextStamp = await response.json();
+        const nextIdentity = String(
+          nextStamp?.commitSha || nextStamp?.deployId || nextStamp?.appVersion || ''
+        ).trim();
+        if (!nextIdentity) return;
+
+        if (!lastSeenBuildRef.current) {
+          lastSeenBuildRef.current = nextIdentity;
+          return;
+        }
+
+        if (lastSeenBuildRef.current !== nextIdentity) {
+          lastSeenBuildRef.current = nextIdentity;
+          window.location.reload();
+        }
+      } catch {
+        // Ignore background live-update check failures.
+      }
+    };
+
+    const handleAppStateChange = async ({ isActive }: { isActive: boolean }) => {
+      if (!isActive) return;
+      await refreshLiveBundle();
+    };
+
+    const listenerPromise = CapacitorApp.addListener('appStateChange', handleAppStateChange);
+    void refreshLiveBundle();
+
+    return () => {
+      void listenerPromise.then((listener) => listener.remove()).catch(() => undefined);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileAppRuntime()) return;
+
+    const platform = getMobileRuntimePlatform();
+    const minimumVersion =
+      platform === 'android'
+        ? String(mobileReleasePolicy?.minimumAndroidNativeVersion || '').trim()
+        : platform === 'ios'
+          ? String(mobileReleasePolicy?.minimumIosNativeVersion || '').trim()
+          : '';
+    const sessionResetVersion =
+      platform === 'android'
+        ? String(mobileReleasePolicy?.sessionResetAndroidBelowVersion || '').trim()
+        : platform === 'ios'
+          ? String(mobileReleasePolicy?.sessionResetIosBelowVersion || '').trim()
+          : '';
+
+    const mustForceUpdate = Boolean(minimumVersion) && compareVersionTags(installedNativeVersion, minimumVersion) < 0;
+    setShowForceNativeUpdatePrompt(mustForceUpdate);
+
+    if (
+      user &&
+      sessionResetVersion &&
+      compareVersionTags(installedNativeVersion, sessionResetVersion) < 0 &&
+      !criticalSessionResetRef.current
+    ) {
+      criticalSessionResetRef.current = true;
+      void signOut(auth).catch(() => undefined);
+    }
+  }, [installedNativeVersion, mobileReleasePolicy, user]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!shouldForceNativeAppRideDomain()) return;
+    window.location.replace(buildNativeRideDomainUrl());
   }, []);
 
   useEffect(() => {
@@ -23510,6 +23735,64 @@ const App = () => {
     void runUpdate();
   };
 
+  const handleApplyForcedNativeUpdate = () => {
+    const platform = getMobileRuntimePlatform();
+    const updateUrl =
+      platform === 'android'
+        ? String(mobileReleasePolicy?.androidUpdateUrl || LIVE_ANDROID_APK_URL).trim()
+        : String(mobileReleasePolicy?.iosUpdateUrl || '').trim();
+
+    void openMobileUpdateLink(updateUrl).then((opened) => {
+      if (opened) return;
+      showAppDialog(
+        'We could not open the update link automatically. Please install the latest MaiRide build and reopen the app.',
+        'error',
+        'Update required'
+      );
+    });
+  };
+
+  const forcedNativeUpdatePrompt = showForceNativeUpdatePrompt ? (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-mairide-primary/80 p-4 backdrop-blur-md">
+      <div className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-8 shadow-2xl">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="rounded-2xl bg-mairide-accent/10 p-3 text-mairide-accent">
+            <Smartphone className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Major update required</p>
+            <h2 className="text-2xl font-black text-mairide-primary">Update MaiRide to continue</h2>
+          </div>
+        </div>
+        <p className="text-sm leading-relaxed text-mairide-secondary">
+          {mobileReleasePolicy?.forceUpdateMessage ||
+            'A major new version of MaiRide is available. Please update your app from the Store to continue.'}
+        </p>
+        <div className="mt-6 rounded-2xl bg-mairide-bg p-4 text-sm text-mairide-primary">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-semibold text-mairide-secondary">Installed version</span>
+            <span className="font-black">{installedNativeVersion}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="font-semibold text-mairide-secondary">Required minimum</span>
+            <span className="font-black">
+              {getMobileRuntimePlatform() === 'android'
+                ? mobileReleasePolicy?.minimumAndroidNativeVersion || 'Latest'
+                : mobileReleasePolicy?.minimumIosNativeVersion || 'Latest'}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleApplyForcedNativeUpdate}
+          className="mt-6 w-full rounded-2xl bg-mairide-accent px-4 py-4 text-base font-black text-white transition hover:opacity-90"
+        >
+          Update App
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   const androidUpdatePrompt = showAndroidUpdatePrompt && androidUpdateState.available ? (
     <div className="fixed inset-x-4 bottom-4 z-[96] md:inset-x-auto md:right-6 md:w-[420px]">
       <div className="rounded-[26px] border border-mairide-accent/40 bg-white p-4 shadow-2xl">
@@ -23549,6 +23832,7 @@ const App = () => {
   const withAppConfigProvider = (content: React.ReactElement) => (
     <AppConfigContext.Provider value={appConfigState}>
       {content}
+      {forcedNativeUpdatePrompt}
     </AppConfigContext.Provider>
   );
   const currentPathname = typeof window === 'undefined' ? '/' : window.location.pathname || '/';

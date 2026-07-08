@@ -37,6 +37,10 @@ function getFallbackAppVersion() {
   return String(process.env.VITE_APP_VERSION || "v2.0.1-beta").trim();
 }
 
+function normalizeConfigString(value: unknown) {
+  return String(value || "").trim();
+}
+
 async function withTimeout<T>(promise: Promise<T>, fallback: T, ms = CONFIG_LOOKUP_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
@@ -110,10 +114,9 @@ export default async function handler(req: any, res: any) {
         // ignore parse errors
       }
     }
-    const resolveConfiguredVersion = async () => {
-      const fallbackVersion = getFallbackAppVersion();
+    const loadAppConfigData = async () => {
+      const fallbackData: Record<string, any> = {};
       return withTimeout((async () => {
-        let configuredVersion = "";
         try {
           const supabaseAdmin = getSupabaseAdmin(req);
           const { data, error } = await supabaseAdmin
@@ -122,20 +125,57 @@ export default async function handler(req: any, res: any) {
             .eq("id", "global")
             .maybeSingle();
           if (error) throw error;
-          configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
+          return (data?.data as Record<string, any> | undefined) || {};
         } catch {
           const supabasePublic = getSupabasePublic(req);
-          if (supabasePublic) {
-            const { data } = await supabasePublic
-              .from("app_config")
-              .select("data")
-              .eq("id", "global")
-              .maybeSingle();
-            configuredVersion = String((data?.data as Record<string, any> | undefined)?.appVersion || "").trim();
-          }
+          if (!supabasePublic) return fallbackData;
+          const { data } = await supabasePublic
+            .from("app_config")
+            .select("data")
+            .eq("id", "global")
+            .maybeSingle();
+          return (data?.data as Record<string, any> | undefined) || {};
         }
-        return configuredVersion || fallbackVersion;
-      })(), fallbackVersion);
+      })(), fallbackData);
+    };
+
+    const resolveConfiguredVersion = async () => {
+      const fallbackVersion = getFallbackAppVersion();
+      const configData = await loadAppConfigData();
+      return normalizeConfigString(configData.appVersion) || fallbackVersion;
+    };
+
+    const resolveMobileReleasePolicy = async () => {
+      const fallbackVersion = getFallbackAppVersion();
+      const configData = await loadAppConfigData();
+      return {
+        appVersion: normalizeConfigString(configData.appVersion) || fallbackVersion,
+        minimumAndroidNativeVersion:
+          normalizeConfigString(configData.minimumAndroidNativeVersion) ||
+          normalizeConfigString(configData.minAndroidNativeVersion),
+        minimumIosNativeVersion:
+          normalizeConfigString(configData.minimumIosNativeVersion) ||
+          normalizeConfigString(configData.minIosNativeVersion),
+        sessionResetAndroidBelowVersion:
+          normalizeConfigString(configData.sessionResetAndroidBelowVersion) ||
+          normalizeConfigString(configData.mobileSessionResetAndroidBelowVersion),
+        sessionResetIosBelowVersion:
+          normalizeConfigString(configData.sessionResetIosBelowVersion) ||
+          normalizeConfigString(configData.mobileSessionResetIosBelowVersion),
+        androidUpdateUrl:
+          normalizeConfigString(configData.androidUpdateUrl) ||
+          normalizeConfigString(configData.androidStoreUrl) ||
+          normalizeConfigString(process.env.MAIRIDE_ANDROID_APK_URL) ||
+          "https://downloads.mairide.in/mairide-android.apk",
+        iosUpdateUrl:
+          normalizeConfigString(configData.iosUpdateUrl) ||
+          normalizeConfigString(configData.iosStoreUrl) ||
+          normalizeConfigString(process.env.MAIRIDE_IOS_IPA_URL) ||
+          "https://downloads.mairide.in/ios/mairide-ios.ipa",
+        forceUpdateMessage:
+          normalizeConfigString(configData.forceUpdateMessage) ||
+          "A major new version of MaiRide is available. Please update your app from the Store to continue.",
+      };
     };
 
     const buildStampPayload = async () => ({
@@ -155,6 +195,10 @@ export default async function handler(req: any, res: any) {
 
     if (action === "build-stamp") {
       return res.status(200).json(await buildStampPayload());
+    }
+
+    if (action === "mobile-release-policy") {
+      return res.status(200).json(await resolveMobileReleasePolicy());
     }
 
     if (action === "ping") {
