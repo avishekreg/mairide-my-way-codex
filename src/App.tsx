@@ -4700,12 +4700,10 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
             </p>
           ) : null}
           <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-mairide-secondary">
-            <a href="/terms" className="hover:text-mairide-primary transition">Terms &amp; Conditions</a>
-            <a href="/privacy" className="hover:text-mairide-primary transition">Privacy Policy</a>
-            <a href="/terms-of-use" className="hover:text-mairide-primary transition">Terms of Use</a>
-            <a href="/refund" className="hover:text-mairide-primary transition">Refund Policy</a>
-            <a href="/business-model.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Business Model</a>
-            <a href="/tutorials/index.html" target="_blank" rel="noopener noreferrer" className="hover:text-mairide-primary transition">Tutorials</a>
+            <a href="/terms" onClick={(event) => handleFooterResourceNavigation(event, 'terms')} className="hover:text-mairide-primary transition">Terms &amp; Conditions</a>
+            <a href="/privacy" onClick={(event) => handleFooterResourceNavigation(event, 'privacy')} className="hover:text-mairide-primary transition">Privacy Policy</a>
+            <a href="/terms-of-use" onClick={(event) => handleFooterResourceNavigation(event, 'terms-of-use')} className="hover:text-mairide-primary transition">Terms of Use</a>
+            <a href="/refund" onClick={(event) => handleFooterResourceNavigation(event, 'refund')} className="hover:text-mairide-primary transition">Refund Policy</a>
             <button
               type="button"
               onClick={() => window.dispatchEvent(new Event(COOKIE_CONSENT_OPEN_EVENT))}
@@ -4732,192 +4730,449 @@ type LegalSection = {
   bullets?: string[];
 };
 
+type FooterResourceKey =
+  | 'terms'
+  | 'privacy'
+  | 'refund'
+  | 'terms-of-use'
+  | 'business-model'
+  | 'tutorials';
+
 type LegalPageProps = {
   eyebrow: string;
   title: string;
   effectiveLine: string;
   intro: string;
   sections: LegalSection[];
+  bodyHtml?: string;
 };
 
-const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections }: LegalPageProps) => (
+type FooterResourceDefinition = LegalPageProps & {
+  key: FooterResourceKey;
+  path: string;
+};
+
+const FOOTER_RESOURCE_OPEN_EVENT = 'mairide:footer-resource-open';
+
+const FOOTER_RESOURCE_DEFINITIONS: Record<FooterResourceKey, FooterResourceDefinition> = {
+  terms: {
+    key: 'terms',
+    path: '/terms',
+    eyebrow: 'Terms & Conditions',
+    title: 'Terms & Conditions',
+    effectiveLine: 'Entity: Syncra Systems LLP · Platform: MaiRide · Effective July 2026',
+    intro: 'MaiRide, including mairide.in and rides.mairide.in, is a digital mobility network platform wholly owned, operated, controlled, and commercially administered by Syncra Systems LLP. These Terms and Conditions govern every visitor, rider, driver, fleet owner, hotel partner, resort partner, guest operator, and administrator who accesses any part of the MaiRide ecosystem.',
+    sections: [],
+    bodyHtml: `
+      <h2>1. Platform Identity &amp; Ownership</h2>
+      <h3>1.1 Corporate Ownership</h3>
+      <p><strong>MaiRide</strong> is a dynamic empty-leg mobility network and digital aggregator platform wholly owned, controlled, copyrighted, and operated by <strong>Syncra Systems LLP</strong>. All source code, user-interface systems, matching workflows, brand identifiers, payment routing logic, partner dashboards, analytics layers, support tooling, and platform transaction architecture are proprietary assets administered under the legal and commercial control of Syncra Systems LLP.</p>
+      <h3>1.2 Legal Relationship</h3>
+      <p>By accessing, browsing, registering on, or transacting through MaiRide, you acknowledge that your relationship is with Syncra Systems LLP as the platform operator. Any use of the MaiRide name, service, infrastructure, or subdomain interfaces constitutes acceptance of the rules, limitations, and platform controls set out in these Terms and Conditions.</p>
+      <h2>2. User Eligibility &amp; Compliance</h2>
+      <h3>2.1 Individual and Business Access</h3>
+      <p>You may use MaiRide only if you have the legal capacity to enter into binding agreements under applicable law. If you are creating or operating an account on behalf of a business entity, hotel, resort, fleet, travel agency, or other commercial organization, you represent that you are duly authorized to bind that entity to these Terms and that the information submitted to the platform is accurate, current, and complete.</p>
+      <h3>2.2 Verification Rights</h3>
+      <p>MaiRide may suspend, restrict, or refuse access where eligibility cannot be verified, where identity information appears inconsistent, or where platform usage presents fraud, compliance, reputational, or operational risk. Syncra Systems LLP reserves the right to request additional verification at any point, including business documentation, driver credentials, location verification, or transaction validation records.</p>
+      <ul>
+        <li><strong>Individual users:</strong> must be legally competent to contract and to submit truthful booking information.</li>
+        <li><strong>Business users:</strong> must hold valid internal authority to bind their organization to platform obligations.</li>
+        <li><strong>Verification rights:</strong> Syncra Systems LLP may request supplemental documents or supporting records before permitting continued use.</li>
+      </ul>
+      <h2>3. Nature of Service</h2>
+      <h3>3.1 Platform Function</h3>
+      <p>Syncra Systems LLP provides the technological layer that matches travelers with independent drivers, fleet operators, and approved B2B partners. MaiRide is not a direct transport carrier, does not itself own every vehicle surfaced on the network, and does not guarantee that every route request will result in a confirmed ride assignment.</p>
+      <h3>3.2 Matching Variables</h3>
+      <p>The platform may display empty-leg return journeys, direct route offers, negotiated opportunities, hotel desk bookings, fleet-linked ride inventory, and associated payment workflows. Matching decisions may depend on route overlap, driver availability, partner approval status, safety constraints, payment readiness, operational policies, and real-time telemetry. Syncra Systems LLP may adjust or refine these systems to improve safety, performance, pricing transparency, network efficiency, or dispute prevention.</p>
+      <h2>4. Accounts, Authentication &amp; Google Identity Security</h2>
+      <h3>4.1 Account Protection</h3>
+      <p>Users are responsible for maintaining the confidentiality of their credentials, approved devices, authentication sessions, and account access. Where login occurs through a Google identity handshake or other supported sign-in mechanism, the user is solely responsible for protecting the underlying email account, device session, browser state, and any linked recovery methods.</p>
+      <h3>4.2 Security Enforcement</h3>
+      <p>You agree not to share access credentials, impersonate another person, attempt to bypass session controls, or interfere with authentication flows. Syncra Systems LLP may terminate sessions, invalidate tokens, restrict accounts, or require re-verification whenever suspicious activity, abnormal device behavior, policy violations, or security concerns are detected.</p>
+      <ul>
+        <li><strong>Credential responsibility:</strong> you are responsible for every action carried out through your approved account session.</li>
+        <li><strong>Identity integrity:</strong> impersonation, token abuse, or bypassing sign-in controls may lead to immediate restriction.</li>
+        <li><strong>Security action:</strong> Syncra Systems LLP may revoke sessions or require re-verification where account risk is detected.</li>
+      </ul>
+      <h2>5. User Accounts &amp; Security</h2>
+      <h3>5.1 Account Accuracy</h3>
+      <p>Authentication and session flows on rides.mairide.in operate under the compliance and security framework of Syncra Systems LLP. Users must ensure that profile information, pickup details, route inputs, bank-relevant payment information, contact methods, and commercial records submitted to the platform remain accurate and updated. You must promptly notify the platform if you suspect unauthorized use, account compromise, false identity linkage, or any misuse of your booking or partner account.</p>
+      <h3>5.2 Prohibited Abuse</h3>
+      <p>Any conduct that attempts to exploit the matching engine, manipulate fares, circumvent payment rails, fabricate ride completion status, trigger false disputes, misstate service delivery, or scrape protected operational data may result in immediate suspension, permanent banning, legal escalation, or reporting to appropriate authorities.</p>
+      <h2>6. Dynamic Fare Parameters &amp; Booking Logic</h2>
+      <h3>6.1 Fare Composition</h3>
+      <p>Fares shown on MaiRide may be influenced by listed driver fares, traveler route demands, negotiated offers, B2B commission overlays, convenience fees, platform service logic, applicable taxes, and risk-management controls. A displayed price does not become final until the platform records a confirmed state transition under its active booking or negotiation workflow.</p>
+      <h3>6.2 Non-Final Displayed Values</h3>
+      <p>Syncra Systems LLP may invalidate, re-price, reject, or pause a ride request or partner booking where fare mismatch, route inconsistency, payment failure, partner non-compliance, driver unavailability, or technical irregularity is detected. Users may not claim entitlement to stale, cached, duplicated, incorrectly rendered, or technically broken fare displays.</p>
+      <ul>
+        <li><strong>Variable inputs:</strong> listed fares, negotiated offers, taxes, service logic, and partner overlays may alter final payable values.</li>
+        <li><strong>Confirmation rule:</strong> a fare is binding only once the platform records the relevant confirmed transaction state.</li>
+        <li><strong>Error condition:</strong> stale or technically broken prices do not create an enforceable entitlement.</li>
+      </ul>
+      <h2>7. B2B Partner Operations</h2>
+      <h3>7.1 Platform-Controlled Partner Access</h3>
+      <p>Fleet operators, hotels, resorts, and other approved B2B partners are bound by their own ledgers, commission agreements, document verification rules, onboarding conditions, geo-tagged registration records, and platform approval workflows administered by Syncra Systems LLP. Approval to access a partner dashboard does not create ownership over platform data, routing logic, traveler identities, or payment infrastructure.</p>
+      <h3>7.2 Booking Conduct Obligations</h3>
+      <p>B2B partners must ensure that all booking activity is lawful, properly authorized, transparently disclosed to travelers, and routed through approved system channels. Where hotel or resort commissions are configured, those economic adjustments must be reflected through the platform rules in force at that time. Fleet-linked bookings, settlement calculations, and operator-facing reports remain subject to reconciliation, audit, and administrative correction by Syncra Systems LLP.</p>
+      <h2>8. Limitation of Liability</h2>
+      <h3>8.1 Excluded Loss Categories</h3>
+      <p>To the fullest extent permitted by law, Syncra Systems LLP shall not be liable for indirect, incidental, exemplary, punitive, reputational, or consequential losses arising from ride delays, route mismatches, device failures, telecom outages, third-party payment interruptions, driver conduct, partner conduct, geolocation inaccuracies, force majeure events, or user misuse of the platform.</p>
+      <h3>8.2 Service Availability Disclaimer</h3>
+      <p>MaiRide is provided on an as-available and as-operationally-feasible basis. While Syncra Systems LLP applies substantial care to verification, routing intelligence, identity controls, and payment orchestration, it does not warrant uninterrupted service, universal availability, or error-free operation across every device, browser, vehicle, partner, region, or network state.</p>
+      <ul>
+        <li><strong>No transport guarantee:</strong> Syncra Systems LLP does not guarantee uninterrupted ride availability or universal route fulfillment.</li>
+        <li><strong>Operational limitation:</strong> third-party conduct, network failure, and force majeure events remain outside complete platform control.</li>
+      </ul>
+      <h2>9. Governing Law &amp; Jurisdiction</h2>
+      <h3>9.1 Applicable Law</h3>
+      <p>Any dispute or claim arising from the use of MaiRide or its associated digital properties shall be subject to the exclusive jurisdiction of the courts of West Bengal, India. These Terms and Conditions shall be governed by and interpreted in accordance with the laws of India, without prejudice to any mandatory local consumer rights that may apply where they cannot lawfully be excluded.</p>
+    `,
+  },
+  privacy: {
+    key: 'privacy',
+    path: '/privacy',
+    eyebrow: 'Privacy Policy',
+    title: 'Privacy Policy',
+    effectiveLine: 'Effective Date: July 2026 · Data Controller: Syncra Systems LLP',
+    intro: 'This Privacy Policy explains how Syncra Systems LLP collects, secures, processes, stores, maps, and operationally uses information across MaiRide, including mairide.in and rides.mairide.in. It applies to travelers, drivers, fleet operators, hotels, resorts, administrators, support users, and every person interacting with our web or handheld platform surfaces.',
+    sections: [],
+    bodyHtml: `
+      <h2>1. Data Controller &amp; Corporate Framework</h2>
+      <h3>1.1 Data Control Position</h3>
+      <p><strong>Syncra Systems LLP</strong> is the legal data controller for MaiRide. All personal data, ride intelligence, support records, geo-tagged onboarding records, session continuity artifacts, business verification files, and payment-adjacent operational metadata captured through the platform are processed under the operational control architecture of Syncra Systems LLP.</p>
+      <h3>1.2 Processing Purpose</h3>
+      <p>MaiRide uses this information to deliver matching services, maintain identity continuity, protect users, support dispute resolution, manage partner onboarding, monitor system integrity, and comply with applicable legal, regulatory, tax, banking, or law-enforcement obligations where required.</p>
+      <h2>2. Categories of Data We Collect</h2>
+      <h3>2.1 Core Data Types</h3>
+      <ul>
+        <li><strong>Identity data:</strong> authentication records, profile linkage signals, and account metadata required to preserve continuous access.</li>
+        <li><strong>Telemetry data:</strong> HTML5 geo-tagging coordinates, timestamps, and operational location signals captured across onboarding and active workflows.</li>
+        <li><strong>Verification data:</strong> uploaded business, fleet, hotel, driver, and compliance documents linked to administrative approval states.</li>
+        <li><strong>Session data:</strong> cookie-linked continuity markers, language preferences, browser characteristics, and interaction logs needed for platform stability.</li>
+        <li><strong>Commercial data:</strong> ride, negotiation, payment, commission, support, dispute, and settlement records required to operate the service.</li>
+      </ul>
+      <h2>3. Location Telemetry &amp; Geo-Tagging Protocols</h2>
+      <h3>3.1 Location-Based Functionality</h3>
+      <p>MaiRide may request and process precise device or browser location in order to suggest regional language experiences, verify partner onboarding points, determine nearby ride relevance, improve route intelligence, help validate service fulfillment, and support user safety. This may include point-in-time coordinates, timestamps, inferred city or region context, and geospatial linkage to bookings or partner records.</p>
+      <h3>3.2 Compliance Use of Geo-Tagged Records</h3>
+      <p>Where geo-tagging is captured during verification, partner registration, or operational ride events, that data becomes part of the platform’s secure compliance record. Syncra Systems LLP uses these records to reduce fraud, validate entity presence, monitor abuse, and resolve disputes involving business onboarding, active ride handling, or route delivery.</p>
+      <ul>
+        <li><strong>Suggested language logic:</strong> location may be used to prioritize relevant regional language experiences.</li>
+        <li><strong>Operational use:</strong> location supports route relevance, safety checks, and verification workflows.</li>
+        <li><strong>Compliance retention:</strong> geo-tagged records may be retained where needed for fraud review or dispute resolution.</li>
+      </ul>
+      <h2>4. Cookies, Sessions &amp; Device Continuity</h2>
+      <h3>4.1 Session Persistence</h3>
+      <p>MaiRide uses secure session objects, cookie-linked continuity controls, and local device preferences to maintain authentication state, language preferences, booking continuity, and platform stability. Accepting these baseline storage mechanisms is necessary for the application to remember account state, preserve navigation continuity, and prevent avoidable session loss during ordinary use.</p>
+      <h3>4.2 Abuse Detection Signals</h3>
+      <p>These technologies may also help Syncra Systems LLP detect repeated failures, suspicious access patterns, abrupt device switching, or irregular sign-in behavior. We do not use these controls to sell personal browsing activity to external advertising brokers.</p>
+      <h2>5. Retention, Storage &amp; Security</h2>
+      <h3>5.1 Protected Infrastructure</h3>
+      <p>Database records managed via Supabase, session objects, payment-related callbacks, uploaded documents, and operational logs are stored within encrypted infrastructure controlled by Syncra Systems LLP. Access is restricted according to administrative need, system role, and business justification. We apply reasonable technical and organizational measures to protect data against unauthorized access, unlawful processing, accidental disclosure, or operational misuse.</p>
+      <h3>5.2 Third-Party Processing Boundaries</h3>
+      <p>We do not sell or lease user data to third-party marketing brokers. Data may, however, be processed through tightly scoped technical vendors or payment processors strictly for the purpose of operating authentication, storage, analytics, support, or secure financial workflows on behalf of Syncra Systems LLP.</p>
+      <ul>
+        <li><strong>Encrypted infrastructure:</strong> platform records are maintained inside protected Supabase-backed environments.</li>
+        <li><strong>Restricted access:</strong> internal access is limited by role, administrative need, and business justification.</li>
+        <li><strong>No data sale:</strong> personal information is not sold or leased to external marketing brokers.</li>
+      </ul>
+      <h2>6. Data Mapping, Legal Use &amp; User Choices</h2>
+      <h3>6.1 Internal Data Mapping</h3>
+      <p>Platform data may be linked internally across accounts, rides, negotiations, partner profiles, support tickets, financial states, and compliance actions where such mapping is required to operate the service, investigate fraud, honor lawful requests, or enforce the platform rules. Users may request correction of inaccurate personal information subject to identity verification and platform record integrity.</p>
+      <h3>6.2 Rights Subject to Retention Duties</h3>
+      <p>Where local law grants additional privacy rights, Syncra Systems LLP will evaluate and respond to valid requests in accordance with applicable law, provided such requests do not require us to erase records that must be retained for security, accounting, legal compliance, or dispute-resolution purposes.</p>
+    `,
+  },
+  refund: {
+    key: 'refund',
+    path: '/refund',
+    eyebrow: 'Cancellation & Refund Policy',
+    title: 'Cancellation & Refund Policy',
+    effectiveLine: 'Operator: Syncra Systems LLP · Payments handled through MaiRide Secure Pay',
+    intro: 'All financial clearing, payment orchestration, cancellation handling, settlement logging, and authorized refunds within MaiRide are governed by the digital transaction framework of Syncra Systems LLP. This policy applies to direct bookings, negotiated rides, approved partner-led bookings, and other platform-mediated fare collection events processed through our authorized payment rails.',
+    sections: [],
+    bodyHtml: `
+      <h2>1. Cancellation Window</h2>
+      <h3>1.1 Pre-Dispatch Cancellation</h3>
+      <p>Travelers may cancel an empty-leg booking without penalty until dispatch confirmation, provided the ride has not entered a locked operational state, route assignment phase, or partner-protected payment state. Once a vehicle is dispatched, committed to the route workflow, or materially reserved for the traveler’s trip window, a nominal dynamic convenience fee may apply.</p>
+      <h3>1.2 Partner Booking Variation</h3>
+      <p>Where a ride is booked through an approved hotel, resort, or B2B operator, additional operational cut-off logic may apply to protect platform processing, operator coordination, and driver readiness. These rules remain subject to the commercial controls of Syncra Systems LLP and any disclosed booking context shown at the time of confirmation.</p>
+      <h2>2. Convenience Fee Deductions</h2>
+      <h3>2.1 Deduction Conditions</h3>
+      <p>If cancellation occurs after dispatch, after a driver has accepted a protected ride state, or after payment orchestration has materially progressed, Syncra Systems LLP may deduct a reasonable convenience, handling, gateway, or administrative fee before processing the eligible refund balance. The applicable deduction may depend on trip stage, partner mode, payment state, route preparation, and actual operational cost exposure already incurred.</p>
+      <h3>2.2 Misuse Exclusion</h3>
+      <p>No user is entitled to a full refund where the cancellation results from intentional misuse, repeated abusive booking behavior, false demand creation, fraudulent payment activity, or violation of platform rules.</p>
+      <ul>
+        <li><strong>Fee basis:</strong> any deduction may vary according to route stage, operational preparation, and payment status.</li>
+        <li><strong>Abuse restriction:</strong> fraudulent or intentionally manipulative behavior may disqualify refund eligibility.</li>
+      </ul>
+      <h2>3. Refund Processing</h2>
+      <h3>3.1 Eligible Platform-Side Failure</h3>
+      <p>If routing fails, a driver does not arrive, a confirmed assignment cannot be completed, a protected partner booking cannot be fulfilled, or the ride collapses for an eligible platform-side operational reason, Syncra Systems LLP will initiate a refund back to the original funding source through the authorized payment gateway. Refund decisions may be informed by telemetry records, acceptance state, dispute context, driver logs, partner records, and payment-confirmation evidence.</p>
+      <h3>3.2 Review Framework</h3>
+      <p>Refund eligibility is determined within the platform’s internal review framework. Approval of a refund does not imply admission of fault by any party unless expressly stated by Syncra Systems LLP in writing.</p>
+      <h2>4. Settlement Timelines</h2>
+      <h3>4.1 Standard Banking Window</h3>
+      <p>Authorized refunds are generally processed within standard banking windows of T+2 to T+5 business days, depending on the original payment instrument, banking network, settlement calendar, and payment gateway response timings. Certain instruments may reflect status updates sooner, while others may remain subject to intermediary banking delays outside the direct control of Syncra Systems LLP.</p>
+      <h3>4.2 Unsupported Settlement Modes</h3>
+      <p>Cash handovers, offline collections, or side settlements outside the approved platform payment rails are not eligible for digital refund protection, automated dispute handling, or guaranteed reversal support.</p>
+      <ul>
+        <li><strong>Standard timeline:</strong> most approved refunds move through within T+2 to T+5 business days.</li>
+        <li><strong>Original source rule:</strong> refunds are returned to the original payment instrument wherever applicable.</li>
+        <li><strong>Offline exclusion:</strong> unauthorized off-platform cash settlements do not receive digital refund coverage.</li>
+      </ul>
+      <h2>5. Financial Control &amp; Platform Authority</h2>
+      <h3>5.1 Managed Payment Infrastructure</h3>
+      <p>All fare collection, reconciliation records, payment gateway callbacks, Razorpay-linked processing events, internal ledger states, partner settlement records, and financial clearings processed via the platform are administered within the legal and corporate framework of <strong>Syncra Systems LLP</strong>. Refunds are returned to the original payment source in accordance with gateway, banking, and compliance rules then in force.</p>
+      <h3>5.2 Off-Platform Exclusion</h3>
+      <p>Nothing in this policy obligates Syncra Systems LLP to settle or reimburse claims arising from offline conduct, direct private arrangements, unauthorized payment diversions, or service terms that were independently negotiated outside the controlled MaiRide flow.</p>
+    `,
+  },
+  'terms-of-use': {
+    key: 'terms-of-use',
+    path: '/terms-of-use',
+    eyebrow: 'Terms of Use',
+    title: 'Terms of Use',
+    effectiveLine: 'Compliance contract with Syncra Systems LLP',
+    intro: 'By accessing rides.mairide.in or any MaiRide web property, you enter into a direct platform-use and compliance relationship with Syncra Systems LLP. These Terms of Use define the acceptable use boundaries, account expectations, technical restrictions, and operational limitations that apply to every user and partner within the MaiRide ecosystem.',
+    sections: [],
+    bodyHtml: `
+      <h2>1. Use of the Platform</h2>
+      <h3>1.1 Permitted Access</h3>
+      <p>Users may access MaiRide solely for legitimate ride discovery, booking, partner administration, guest travel coordination, approved commercial workflows, and support interactions permitted by the platform. Any misuse of the booking stack, pricing engine, negotiation flow, verification system, payment modules, or reporting panels may result in immediate restriction or suspension.</p>
+      <h3>1.2 Good-Faith Use</h3>
+      <p>You agree to use the platform in good faith, provide truthful information, and interact only through approved interfaces. You must not create false demand, submit fake bookings, simulate driver activity, abuse dispute systems, interfere with another user’s transaction, or overload the platform with automated traffic, scraping activity, or reverse-engineering attempts.</p>
+      <ul>
+        <li><strong>Permitted purpose:</strong> access is limited to legitimate consumer, driver, partner, or support workflows.</li>
+        <li><strong>Truthful use:</strong> all submitted ride, identity, and business details must be accurate and current.</li>
+        <li><strong>Abuse restriction:</strong> automated scraping, false demand, or system interference is prohibited.</li>
+      </ul>
+      <h2>2. Operational Ownership</h2>
+      <h3>2.1 Proprietary System Rights</h3>
+      <p>All application rights, operational permissions, matching workflows, analytics surfaces, payment-adjacent logs, operational dashboards, and database records managed via Supabase are part of the proprietary software and service framework of <strong>Syncra Systems LLP</strong>. No user, driver, fleet, hotel, or reseller acquires any intellectual property interest merely by using the service.</p>
+      <h3>2.2 Administrative Control</h3>
+      <p>Syncra Systems LLP may moderate, audit, re-sequence, pause, or redesign platform workflows whenever necessary to preserve safety, performance, legal defensibility, operational stability, or commercial consistency. Platform access is a revocable permission, not an irrevocable right.</p>
+      <h2>3. Authentication, Identity &amp; Session Responsibility</h2>
+      <h3>3.1 Identity Integrity</h3>
+      <p>Where login is facilitated through Google identity services or any other approved provider, you remain responsible for the integrity of the linked identity and the security of the underlying account. You may not use another person’s email, profile, device, partner account, or payment identity without explicit authorization.</p>
+      <h3>3.2 Session Review</h3>
+      <p>Any session that appears compromised, duplicated, manipulated, or inconsistent with expected device behavior may be interrupted, revalidated, or terminated by Syncra Systems LLP. The platform may log security-sensitive state changes to preserve evidence and maintain auditability.</p>
+      <h2>4. B2B Partner Compliance</h2>
+      <h3>4.1 Commercial Operator Duties</h3>
+      <p>Fleet operators, travel agents, hotels, and resorts using MaiRide must comply with all onboarding, documentation, geolocation, commission, reporting, and payout-related requirements set by Syncra Systems LLP. These entities must maintain lawful authority to book, dispatch, or administratively manage rides on behalf of customers or associated drivers.</p>
+      <h3>4.2 Disclosure and Conduct Standards</h3>
+      <p>Partners must not create misleading pricing overlays, conceal service conditions, misstate traveler consent, process disallowed offline settlements, or misuse access to traveler or driver information. Failure to comply may trigger suspension, rejection, reversal of dashboard access, or retention of records for investigative review.</p>
+      <ul>
+        <li><strong>Partner authority:</strong> commercial users must hold lawful authority to transact on behalf of their organization or customers.</li>
+        <li><strong>Disclosure duty:</strong> commission overlays, service conditions, and booking basis must not be concealed or misrepresented.</li>
+        <li><strong>Compliance enforcement:</strong> non-compliance may trigger suspension, rejection, or administrative rollback.</li>
+      </ul>
+      <h2>5. Dynamic Fare Use &amp; Payment Restrictions</h2>
+      <h3>5.1 Controlled Fare Actions</h3>
+      <p>Users may view, send, accept, reject, or counter fares only through the active logic exposed by the platform. Any attempt to bypass the approved negotiation flow, settle protected partner bookings outside the authorized payment stack, or manipulate dynamic fare states may be treated as a material breach of these Terms of Use.</p>
+      <h3>5.2 Non-Guaranteed Displayed Pricing</h3>
+      <p>Displayed price values are contextual operational values and may change as route overlap, inventory, partner commission rules, traveler demand, taxes, and platform risk rules evolve. Syncra Systems LLP does not guarantee that every displayed value will remain available if the underlying transaction state changes before confirmation.</p>
+      <h2>6. Availability &amp; Changes</h2>
+      <h3>6.1 Feature Availability</h3>
+      <p>Syncra Systems LLP may improve, suspend, restrict, or discontinue features to maintain performance, safety, compliance, business continuity, or legal obligations. Certain modules may be experimentally released, partner-gated, region-restricted, or subject to staged rollout behavior across devices, browsers, and embedded containers.</p>
+      <h3>6.2 Effect of Continued Use</h3>
+      <p>Continued use after an update constitutes acceptance of the revised platform behavior. If you do not agree with a modification, your remedy is to discontinue use of the affected service surfaces.</p>
+      <h2>7. Restricted Conduct</h2>
+      <h3>7.1 Prohibited Acts</h3>
+      <p>Users may not attempt to reverse engineer, misrepresent identity, bypass approved payment channels, manipulate pricing signals, interfere with live ride state, exploit protected operational information, or use the platform in a manner that threatens drivers, travelers, partners, or the commercial reputation of Syncra Systems LLP.</p>
+      <h2>8. Limitation of Use Liability</h2>
+      <h3>8.1 User Responsibility</h3>
+      <p>Syncra Systems LLP is not responsible for losses arising from a user’s failure to secure their account, disclose accurate information, maintain device hygiene, or follow the approved booking and payment flow. Use of the service is at your own informed discretion, subject to the legal boundaries stated throughout the MaiRide policy framework.</p>
+    `,
+  },
+  'business-model': {
+    key: 'business-model',
+    path: '/business-model',
+    eyebrow: 'Business Model',
+    title: 'How MaiRide Works',
+    effectiveLine: 'Empty-leg mobility network by Syncra Systems LLP',
+    intro: 'MaiRide is structured as a transparent empty-leg aggregation network that helps travelers access return-route cabs while allowing drivers, fleets, and hospitality partners to improve occupancy and reduce idle mileage.',
+    sections: [
+      {
+        title: 'Traveler Layer',
+        body: 'Travelers can request a route, receive matching offers, negotiate transparently when required, and confirm rides through the MaiRide experience without falling into fragmented offline bargaining workflows.',
+      },
+      {
+        title: 'Driver and Fleet Layer',
+        body: 'Independent drivers and fleet operators list open seats, return legs, or full-route availability, allowing the platform to route demand into underused trip segments rather than creating unnecessary empty returns.',
+      },
+      {
+        title: 'Settlement and Platform Role',
+        body: 'Syncra Systems LLP operates the digital matching, verification, pricing, payment, and compliance layer. Where secure digital collection is enabled, platform-led settlement records allow cleaner dispute handling and better operational reporting for all participants.',
+      },
+    ],
+  },
+  tutorials: {
+    key: 'tutorials',
+    path: '/tutorials',
+    eyebrow: 'Tutorials',
+    title: 'MaiRide Quick Guides',
+    effectiveLine: 'Guided help for riders, drivers, and partners',
+    intro: 'These tutorials are a fast orientation layer for the MaiRide ecosystem. They explain how each participant uses the platform while keeping the live booking flow, negotiation flow, and partner workflows easy to understand.',
+    sections: [
+      {
+        title: 'For Travelers',
+        body: 'Post a ride request, watch for matching offers, review listed fare transparency, and respond to negotiation updates directly inside your active booking card without leaving the current session.',
+      },
+      {
+        title: 'For Drivers',
+        body: 'List open route inventory, monitor negotiation events, confirm ride-start actions, and manage active trips from the driver workspace while separating live bookings from historical completed rides.',
+      },
+      {
+        title: 'For Partners',
+        body: 'Hotels, resorts, fleets, and travel operators can onboard through their respective partner entry points, complete verification, and then access dashboards tailored to their booking, reporting, and settlement workflows.',
+      },
+    ],
+  },
+};
+
+const FOOTER_RESOURCE_PATHS = Object.values(FOOTER_RESOURCE_DEFINITIONS).map((resource) => resource.path);
+
+const openFooterResource = (key: FooterResourceKey) => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(FOOTER_RESOURCE_OPEN_EVENT, { detail: { key } }));
+};
+
+const handleFooterResourceNavigation = (
+  event: React.MouseEvent<HTMLElement>,
+  key: FooterResourceKey
+) => {
+  const resource = FOOTER_RESOURCE_DEFINITIONS[key];
+  if (!resource || typeof window === 'undefined') return;
+
+  if (isMobileAppRuntime()) {
+    event.preventDefault();
+    openFooterResource(key);
+    return;
+  }
+
+  event.preventDefault();
+  window.location.assign(resource.path);
+};
+
+const legalRichTextClassName =
+  'prose prose-lg mt-10 max-w-none text-mairide-secondary ' +
+  'prose-headings:font-black prose-p:leading-8 prose-li:leading-8 prose-strong:text-mairide-primary ' +
+  'prose-h2:text-mairide-accent prose-h2:text-xl prose-h2:mt-10 prose-h2:mb-4 ' +
+  'prose-h3:text-mairide-primary prose-h3:text-base prose-h3:font-semibold prose-h3:mt-5 prose-h3:mb-2 ' +
+  'prose-p:mb-4 prose-ul:my-4 prose-li:mb-2';
+
+const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections, bodyHtml }: LegalPageProps) => (
   <div className="px-4 py-8 md:px-8 md:py-10">
-    <div className="mx-auto max-w-5xl">
-      <div className="rounded-[36px] border border-mairide-secondary bg-white p-6 shadow-sm md:p-10">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-mairide-secondary pb-6">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-accent">{eyebrow}</p>
-            <h1 className="mt-3 text-3xl font-black tracking-tight text-mairide-primary md:text-5xl">{title}</h1>
-            <p className="mt-3 text-sm font-semibold text-mairide-secondary">{effectiveLine}</p>
+    <div className="mx-auto max-w-4xl">
+      <div className="rounded-[40px] border border-mairide-secondary/20 bg-white p-8 shadow-sm sm:p-10">
+        <h1 className="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl">{title}</h1>
+        <p className="mt-5 text-base leading-8 text-mairide-secondary">{intro}</p>
+        {bodyHtml ? (
+          <div className={legalRichTextClassName} dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+        ) : (
+          <div className="mt-8 space-y-5">
+            {sections.map((section) => (
+              <section key={section.title}>
+                <h2 className="text-xl font-black text-mairide-accent">{section.title}</h2>
+                {section.body ? (
+                  <p className="mt-3 text-sm leading-7 text-mairide-secondary md:text-[15px]">{section.body}</p>
+                ) : null}
+                {section.bullets?.length ? (
+                  <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-7 text-mairide-secondary md:text-[15px]">
+                    {section.bullets.map((bullet) => (
+                      <li key={bullet}>{bullet}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            ))}
           </div>
-          <div className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-right">
-            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Operator</p>
-            <p className="mt-1 text-sm font-black text-mairide-primary">Syncra Systems LLP</p>
-            <p className="text-xs text-mairide-secondary">MaiRide · mairide.in · rides.mairide.in</p>
-          </div>
-        </div>
-
-        <div className="mt-8 rounded-[28px] bg-mairide-bg p-5 md:p-6">
-          <p className="text-sm leading-7 text-mairide-primary/85 md:text-base">{intro}</p>
-        </div>
-
-        <div className="mt-8 space-y-5">
-          {sections.map((section) => (
-            <section key={section.title} className="rounded-[28px] border border-mairide-secondary bg-white p-5 md:p-6">
-              <h2 className="text-lg font-black text-mairide-accent md:text-xl">{section.title}</h2>
-              {section.body ? (
-                <p className="mt-3 text-sm leading-7 text-mairide-secondary md:text-[15px]">{section.body}</p>
-              ) : null}
-              {section.bullets?.length ? (
-                <div className="mt-4 space-y-3">
-                  {section.bullets.map((bullet) => (
-                    <div key={bullet} className="flex items-start gap-3">
-                      <span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-mairide-accent" />
-                      <p className="text-sm leading-7 text-mairide-secondary md:text-[15px]">{bullet}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </section>
-          ))}
-        </div>
-
-        <div className="mt-8 flex flex-wrap gap-3 border-t border-mairide-secondary pt-6">
-          <Link to="/" className="rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white transition hover:bg-mairide-accent">
-            Back to MaiRide
-          </Link>
-          <Link to="/terms" className="rounded-2xl border border-mairide-secondary px-5 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg">
-            Terms
-          </Link>
-          <Link to="/terms-of-use" className="rounded-2xl border border-mairide-secondary px-5 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg">
-            Terms of Use
-          </Link>
-          <Link to="/privacy" className="rounded-2xl border border-mairide-secondary px-5 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg">
-            Privacy
-          </Link>
-          <Link to="/refund" className="rounded-2xl border border-mairide-secondary px-5 py-3 text-sm font-bold text-mairide-primary transition hover:bg-mairide-bg">
-            Refunds
-          </Link>
-        </div>
+        )}
       </div>
     </div>
   </div>
 );
 
-const TermsPage = () => (
-  <LegalPage
-    eyebrow="Terms & Conditions"
-    title="MaiRide Terms and Conditions"
-    effectiveLine="Entity: Syncra Systems LLP · Platform: MaiRide · Effective July 2026"
-    intro="MaiRide is a dynamic empty-leg mobility network and digital aggregator platform wholly owned, controlled, copyrighted, and operated by Syncra Systems LLP. By accessing or using MaiRide, including rides.mairide.in, you enter into a direct compliance relationship with Syncra Systems LLP."
-    sections={[
-      {
-        title: 'Platform Identity',
-        body: 'All MaiRide codebase rights, trademarks, service workflows, transaction infrastructure, and operating surfaces are properties of Syncra Systems LLP. The MaiRide experience is offered as a branded digital mobility ecosystem under that ownership structure.',
-      },
-      {
-        title: 'Nature of Service',
-        body: 'MaiRide provides technological matching, routing logic, onboarding, negotiation workflows, and platform support for consumers, independent drivers, fleet operators, and approved B2B partners. Syncra Systems LLP provides the platform layer and is not itself the direct transport operator.',
-      },
-      {
-        title: 'Terms of Use & Service',
-        body: 'All access via rides.mairide.in, associated mobile containers, and connected login surfaces constitutes use of a Syncra Systems LLP operated service. Users agree to comply with all verification, security, pricing, booking, and conduct rules enforced through the platform.',
-      },
-      {
-        title: 'User Account & Security',
-        body: 'You are responsible for maintaining the confidentiality of your credentials during the Google Identity Services handshake and any other approved sign-in flows. You must ensure that your device access, login state, and verification methods remain under your control while using MaiRide.',
-      },
-      {
-        title: 'B2B Partners',
-        body: 'Fleet operators and hotel or resort partners are bound by separate operational ledgers, approval workflows, and custom commission agreements as defined within the Syncra Systems database framework and their approved onboarding terms.',
-      },
-      {
-        title: 'Governing Law',
-        body: 'Any disputes arising out of the use of this platform shall be subject to the exclusive jurisdiction of the courts of West Bengal, India.',
-      },
-    ]}
-  />
-);
+const FooterResourcePage = ({ resourceKey }: { resourceKey: FooterResourceKey }) => {
+  const definition = FOOTER_RESOURCE_DEFINITIONS[resourceKey];
+  return <LegalPage {...definition} />;
+};
 
-const PrivacyPage = () => (
-  <LegalPage
-    eyebrow="Privacy Policy"
-    title="MaiRide Privacy Policy"
-    effectiveLine="Effective Date: July 2026 · Data Controller: Syncra Systems LLP"
-    intro="At MaiRide, protecting your privacy is a core operating principle. All identity, telemetry, device preference, and onboarding data processed through MaiRide is managed under the privacy and security architecture of Syncra Systems LLP."
-    sections={[
-      {
-        title: 'Data We Collect',
-        bullets: [
-          'Identity data retrieved via secure Google Auth tokens, including your name, email address, and profile identifier.',
-          'Real-time high-precision telemetry, including device or browser HTML5 geo-tagging coordinates captured during registration, onboarding, and active ride-tracking.',
-          'Uploaded business, registration, and verification documents for B2B fleet, hotel, and resort operations.',
-        ],
-      },
-      {
-        title: 'Privacy Framework',
-        body: 'All captured HTML5 user telemetry, high-precision geo-tagging logs, uploaded verification documents, and hardware device preferences are securely managed and processed under the data control architecture of Syncra Systems LLP via encrypted database instances and associated protected service infrastructure.',
-      },
-      {
-        title: 'Data Retention & Safety',
-        body: 'Sensitive data, sessions, and hardware-backed tokens are managed within encrypted Supabase-backed infrastructure and related secured systems operated for MaiRide. Syncra Systems LLP does not sell or lease user data to third-party marketing brokers.',
-      },
-      {
-        title: 'Cookie Usage & Session State',
-        body: 'We use secure session objects and baseline cookie storage to maintain continuous handheld authentication, route continuity, and core platform behavior. Accepting the cookie overlay is required for platform state retention and expected login continuity.',
-      },
-    ]}
-  />
-);
+const FooterResourceModal = ({
+  resourceKey,
+  onClose,
+}: {
+  resourceKey: FooterResourceKey | null;
+  onClose: () => void;
+}) => {
+  if (!resourceKey) return null;
 
-const RefundPage = () => (
-  <LegalPage
-    eyebrow="Cancellation & Refund Policy"
-    title="MaiRide Cancellation and Refund Policy"
-    effectiveLine="Operator: Syncra Systems LLP · Payments handled through MaiRide Secure Pay"
-    intro="Syncra Systems LLP aims to provide a transparent, fixed-fee empty-leg aggregation experience. All financial clearing, processing, and transaction management on MaiRide are powered through authorized secure digital gateways controlled by Syncra Systems LLP."
-    sections={[
-      {
-        title: 'Cancellation Window',
-        bullets: [
-          'Travelers may cancel an empty-leg booking without penalty up to the point of driver dispatch confirmation.',
-          'If a cancellation occurs after the vehicle is dispatched, a standard nominal dynamic convenience fee may be deducted from the collected amount.',
-        ],
-      },
-      {
-        title: 'Refund Processing',
-        bullets: [
-          'In the event of network routing failures or non-arrival of the assigned vehicle, a 100% refund of the pre-collected aggregate turnover fare will be initiated immediately.',
-          'All authorized refunds are automatically routed through our central payment gateway directly back to the original funding source, including Card, UPI, or Net Banking, within T+2 to T+5 business days.',
-          'Manual cash handovers are not eligible for digital platform refunds, and Syncra Systems LLP does not assume physical cash alternative liability outside the recorded digital settlement path.',
-        ],
-      },
-    ]}
-  />
-);
+  const definition = FOOTER_RESOURCE_DEFINITIONS[resourceKey];
+  if (!definition) return null;
 
-const TermsOfUsePage = () => (
-  <LegalPage
-    eyebrow="Terms of Use"
-    title="MaiRide Terms of Use and Service"
-    effectiveLine="Compliance contract with Syncra Systems LLP"
-    intro="MaiRide is a service interface of Syncra Systems LLP. Every user, partner, fleet operator, and booking participant accessing rides.mairide.in or any related app shell uses the platform subject to the operational and compliance standards of Syncra Systems LLP."
-    sections={[
-      {
-        title: 'Service Relationship',
-        body: 'Syncra Systems LLP provides the underlying digital marketplace, data workflows, identity orchestration, and settlement-linked service interfaces that power the MaiRide platform.',
-      },
-      {
-        title: 'Operational Expectations',
-        body: 'Users must provide accurate booking, location, pricing, and identity information and must not misuse the platform, interfere with negotiation flows, or attempt to bypass approved booking, payment, and verification systems.',
-      },
-      {
-        title: 'Partner and Driver Compliance',
-        body: 'Independent drivers, fleet owners, hotels, resorts, and all approved B2B partners remain responsible for complying with their applicable transport, tax, and business obligations while using the Syncra Systems LLP managed MaiRide ecosystem.',
-      },
-    ]}
-  />
-);
+  const panel = (
+    <div className="fixed inset-0 z-[140] bg-black/80 backdrop-blur-md">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 12 }}
+        className="flex h-full flex-col bg-[#0B1118]"
+      >
+        <div className="sticky top-0 z-10 border-b border-white/10 bg-[#0B1118]/95 px-4 py-4 backdrop-blur">
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-accent">{definition.eyebrow}</p>
+              <h2 className="mt-2 text-2xl font-black tracking-tight text-white">{definition.title}</h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:bg-white/10"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-5">
+          <div className="mx-auto max-w-4xl rounded-[40px] border border-mairide-secondary/20 bg-white p-8 shadow-sm sm:p-10">
+            <h2 className="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl">{definition.title}</h2>
+            <p className="mt-5 text-base leading-8 text-mairide-secondary">{definition.intro}</p>
+            {definition.bodyHtml ? (
+              <div className={legalRichTextClassName} dangerouslySetInnerHTML={{ __html: definition.bodyHtml }} />
+            ) : (
+              <div className="mt-8 space-y-5">
+                {definition.sections.map((section) => (
+                  <section key={section.title}>
+                    <h3 className="text-xl font-black text-mairide-accent">{section.title}</h3>
+                    {section.body ? <p className="mt-3 text-sm leading-7 text-mairide-secondary">{section.body}</p> : null}
+                    {section.bullets?.length ? (
+                      <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-7 text-mairide-secondary">
+                        {section.bullets.map((bullet) => (
+                          <li key={bullet}>{bullet}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+
+  return createPortal(panel, document.body);
+};
+
+const TermsPage = () => <FooterResourcePage resourceKey="terms" />;
+const PrivacyPage = () => <FooterResourcePage resourceKey="privacy" />;
+const RefundPage = () => <FooterResourcePage resourceKey="refund" />;
+const TermsOfUsePage = () => <FooterResourcePage resourceKey="terms-of-use" />;
+const BusinessModelPage = () => <FooterResourcePage resourceKey="business-model" />;
+const TutorialsPage = () => <FooterResourcePage resourceKey="tutorials" />;
 
 const CookieConsentManager = ({
   onChange,
@@ -7121,9 +7376,8 @@ const findUserProfileByPhone = async (value: string) => {
           </p>
 
           <a
-            href="/business-model.html"
-            target="_blank"
-            rel="noopener noreferrer"
+            href="/business-model"
+            onClick={(event) => handleFooterResourceNavigation(event, 'business-model')}
             className="mt-1 block w-full rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-center text-sm font-bold text-mairide-primary transition-all hover:bg-mairide-bg"
           >
             Learn How MaiRide Works
@@ -23820,6 +24074,24 @@ const App = () => {
     };
   }, [installedAndroidVersion]);
 
+  const [activeFooterResource, setActiveFooterResource] = useState<FooterResourceKey | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleOpenFooterResource = (event: Event) => {
+      const customEvent = event as CustomEvent<{ key?: FooterResourceKey }>;
+      const nextKey = customEvent.detail?.key;
+      if (!nextKey || !FOOTER_RESOURCE_DEFINITIONS[nextKey] || !isMobileAppRuntime()) return;
+      setActiveFooterResource(nextKey);
+    };
+
+    window.addEventListener(FOOTER_RESOURCE_OPEN_EVENT, handleOpenFooterResource as EventListener);
+    return () => {
+      window.removeEventListener(FOOTER_RESOURCE_OPEN_EVENT, handleOpenFooterResource as EventListener);
+    };
+  }, []);
+
   const commitUiLanguage = (nextLanguage: string) => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
     if (!canUseCookieCategory(cookieConsent, 'preferences')) {
@@ -23991,6 +24263,13 @@ const App = () => {
   ) : null;
 
   const cookieConsentManager = <CookieConsentManager onChange={setCookieConsent} />;
+  const footerResourceModal = (
+    <AnimatePresence>
+      {activeFooterResource ? (
+        <FooterResourceModal resourceKey={activeFooterResource} onClose={() => setActiveFooterResource(null)} />
+      ) : null}
+    </AnimatePresence>
+  );
   const withAppConfigProvider = (content: React.ReactElement) => (
     <AppConfigContext.Provider value={appConfigState}>
       {content}
@@ -23999,9 +24278,9 @@ const App = () => {
   );
   const currentPathname = typeof window === 'undefined' ? '/' : window.location.pathname || '/';
   const isPartnerRoute = isPartnerRoutePath(currentPathname);
-  const isLegalRoute = ['/terms', '/privacy', '/refund', '/terms-of-use'].includes(currentPathname);
+  const isFooterResourceRoute = FOOTER_RESOURCE_PATHS.includes(currentPathname);
 
-  const renderLegalRouteElement = () => {
+  const renderFooterResourceRouteElement = () => {
     switch (currentPathname) {
       case '/privacy':
         return <PrivacyPage />;
@@ -24009,13 +24288,17 @@ const App = () => {
         return <RefundPage />;
       case '/terms-of-use':
         return <TermsOfUsePage />;
+      case '/business-model':
+        return <BusinessModelPage />;
+      case '/tutorials':
+        return <TutorialsPage />;
       case '/terms':
       default:
         return <TermsPage />;
     }
   };
 
-  if (isLegalRoute) {
+  if (isFooterResourceRoute) {
     const shellHeader = user && profile ? (
       <Navbar
         user={user}
@@ -24035,7 +24318,7 @@ const App = () => {
             {shellHeader}
             <div id="google_translate_element" className="hidden" />
             <main className="pb-20">
-              {renderLegalRouteElement()}
+              {renderFooterResourceRouteElement()}
             </main>
             <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
             {!user || !profile ? (
@@ -24046,6 +24329,7 @@ const App = () => {
             <AppDialogHost />
             {androidUpdatePrompt}
             {cookieConsentManager}
+            {footerResourceModal}
           </div>
         </Router>
       </ErrorBoundary>
@@ -24068,6 +24352,8 @@ const App = () => {
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/refund" element={<RefundPage />} />
               <Route path="/terms-of-use" element={<TermsOfUsePage />} />
+              <Route path="/business-model" element={<BusinessModelPage />} />
+              <Route path="/tutorials" element={<TutorialsPage />} />
               <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={null} />} />
               <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={null} />} />
               <Route path="*" element={
@@ -24094,6 +24380,7 @@ const App = () => {
           <AppDialogHost />
           {androidUpdatePrompt}
           {cookieConsentManager}
+          {footerResourceModal}
           <AnimatePresence>
             {showLanguagePrompt && (
               <motion.div
@@ -24165,6 +24452,8 @@ const App = () => {
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/refund" element={<RefundPage />} />
               <Route path="/terms-of-use" element={<TermsOfUsePage />} />
+              <Route path="/business-model" element={<BusinessModelPage />} />
+              <Route path="/tutorials" element={<TutorialsPage />} />
               <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={user} />} />
               <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={user} />} />
               <Route path="/partners/portal" element={<PartnerPortal partner={partnerProfile} currentUser={user} onPartnerUpdated={setPartnerProfile} />} />
@@ -24174,6 +24463,7 @@ const App = () => {
             <AppDialogHost />
             {androidUpdatePrompt}
             {cookieConsentManager}
+            {footerResourceModal}
           </div>
         </Router>
       </ErrorBoundary>
@@ -24190,6 +24480,8 @@ const App = () => {
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/refund" element={<RefundPage />} />
               <Route path="/terms-of-use" element={<TermsOfUsePage />} />
+              <Route path="/business-model" element={<BusinessModelPage />} />
+              <Route path="/tutorials" element={<TutorialsPage />} />
               <Route path="/partners/fleet/apply" element={<PartnerApplicationPage partnerType="fleet_owner" currentUser={user} />} />
               <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={user} />} />
               <Route path="*" element={<Navigate to="/partners/fleet/apply" replace />} />
@@ -24198,6 +24490,7 @@ const App = () => {
             <AppDialogHost />
             {androidUpdatePrompt}
             {cookieConsentManager}
+            {footerResourceModal}
           </div>
         </Router>
       </ErrorBoundary>
@@ -24232,6 +24525,7 @@ const App = () => {
           <AppDialogHost />
           {androidUpdatePrompt}
           {cookieConsentManager}
+          {footerResourceModal}
         </div>
       </ErrorBoundary>
     );
@@ -24257,6 +24551,8 @@ const App = () => {
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/refund" element={<RefundPage />} />
               <Route path="/terms-of-use" element={<TermsOfUsePage />} />
+              <Route path="/business-model" element={<BusinessModelPage />} />
+              <Route path="/tutorials" element={<TutorialsPage />} />
               <Route path="/" element={
                 profile?.role === 'admin' ? <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> :
                 profile?.role === 'driver' ? <DriverApp profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : 
@@ -24276,6 +24572,7 @@ const App = () => {
           <AppDialogHost />
           {androidUpdatePrompt}
           {cookieConsentManager}
+          {footerResourceModal}
           {isTravelerProfile && (
             <input
               ref={travelerAvatarInputRef}
