@@ -2068,6 +2068,20 @@ const safeStorageSet = (storageType: 'local' | 'session', key: string, value: st
     // Ignore storage-write failures in restricted browsers
   }
 };
+
+const BrandWordmark = ({
+  className = '',
+  aiClassName = 'text-[#E65F2B]',
+}: {
+  className?: string;
+  aiClassName?: string;
+}) => (
+  <span className={cn('inline-flex items-baseline whitespace-nowrap', className)}>
+    <span>m</span>
+    <span className={aiClassName}>AI</span>
+    <span>Ride</span>
+  </span>
+);
 const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
   if (typeof window === 'undefined') return;
   try {
@@ -5140,7 +5154,7 @@ const LegalPage = ({ eyebrow, title, effectiveLine, intro, sections, bodyHtml }:
               ariaLabel="Return to mAIRide home"
             >
               <img src={LOGO_URL} alt="mAIRide Logo" className="h-11 w-11 rounded-2xl object-contain" />
-              <span className="text-xl font-black tracking-tight">mAIRide</span>
+              <BrandWordmark className="text-xl font-black tracking-tight text-mairide-primary" />
             </DomainAwareHomeLink>
             <a
               href={authHomeHref}
@@ -5681,9 +5695,7 @@ const Navbar = ({
           alt="mAIRide Logo"
         />
         <div className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden leading-none">
-          <span className={cn("block overflow-hidden text-ellipsis whitespace-nowrap font-black tracking-tighter text-mairide-primary", brandClassName)}>
-            mAIRide
-          </span>
+          <BrandWordmark className={cn("block overflow-hidden text-ellipsis whitespace-nowrap font-black tracking-tighter text-mairide-primary", brandClassName)} />
           <span className={cn("mt-1 block overflow-hidden text-ellipsis whitespace-nowrap font-black text-mairide-primary", subBrandClassName)}>
             my way
           </span>
@@ -5741,7 +5753,7 @@ const Navbar = ({
                 >
                   <img src={LOGO_URL} className="mr-4 h-[84px] w-[84px] shrink-0 rounded-[22%] object-contain" alt="mAIRide Logo" />
                   <div className="flex min-w-0 flex-col justify-center overflow-visible py-2.5 leading-[1.04]">
-                    <span className="truncate text-[2.55rem] font-black leading-[1.02] tracking-tighter text-mairide-primary">mAIRide</span>
+                    <BrandWordmark className="truncate text-[2.55rem] font-black leading-[1.02] tracking-tighter text-mairide-primary" />
                     <span className="mt-1.5 truncate text-[1.2rem] font-black leading-[1.04] tracking-[0.1em] text-mairide-primary">my way</span>
                   </div>
                 </button>
@@ -21293,9 +21305,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
           <div className={cn("flex min-w-0 items-center overflow-hidden transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
             <img src={LOGO_URL} className="mr-3 h-12 w-12 shrink-0 rounded-[18px] object-contain" alt="mAIRide Logo" />
             <div className="flex min-w-0 flex-col justify-center leading-none">
-              <span className="block truncate text-[1.45rem] font-black leading-[0.95] tracking-tighter text-mairide-primary">
-                mAIRide
-              </span>
+              <BrandWordmark className="block truncate text-[1.45rem] font-black leading-[0.95] tracking-tighter text-mairide-primary" />
               <span className="mt-1 block truncate text-[0.78rem] font-black leading-none tracking-[0.14em] text-mairide-primary">
                 my way
               </span>
@@ -21438,9 +21448,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
           <div className="flex min-w-0 items-center">
             <img src={LOGO_URL} className="mr-2.5 h-11 w-11 shrink-0 rounded-[16px] object-contain" alt="mAIRide Logo" />
             <div className="flex min-w-0 flex-col justify-center leading-none">
-              <span className="block truncate text-[1.28rem] font-black leading-[0.95] tracking-tighter text-mairide-primary">
-                mAIRide
-              </span>
+              <BrandWordmark className="block truncate text-[1.28rem] font-black leading-[0.95] tracking-tighter text-mairide-primary" />
               <span className="mt-1 block truncate text-[0.68rem] font-black leading-none tracking-[0.12em] text-mairide-primary">
                 my way
               </span>
