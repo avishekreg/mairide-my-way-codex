@@ -226,17 +226,38 @@ const resolveLanguageContext = ({
     buildAddressTokens([country, adminArea1, adminArea2, locality, sublocality])
   );
 
-  const options = buildLanguageOptions(
-    normalizedBrowser,
-    ...countryLanguages,
-    ...indiaStateLanguages,
-    ...borderLanguages,
-    "en"
-  );
+  const regionalPriority =
+    indiaStateLanguages[0] ||
+    borderLanguages[0] ||
+    countryLanguages.find((code) => code !== "en") ||
+    normalizedBrowser ||
+    "en";
 
-  const suggested = options.includes(normalizedBrowser) && normalizedBrowser !== "en"
-    ? normalizedBrowser
-    : indiaStateLanguages[0] || countryLanguages[0] || normalizedBrowser || "en";
+  const options =
+    countryCode === "in"
+      ? buildLanguageOptions(
+          regionalPriority,
+          "en",
+          "hi",
+          ...indiaStateLanguages,
+          ...borderLanguages,
+          ...countryLanguages,
+          normalizedBrowser
+        )
+      : buildLanguageOptions(
+          regionalPriority,
+          "en",
+          ...borderLanguages,
+          ...countryLanguages,
+          normalizedBrowser
+        );
+
+  const suggested =
+    regionalPriority && regionalPriority !== "en"
+      ? regionalPriority
+      : countryCode === "in"
+        ? indiaStateLanguages[0] || borderLanguages[0] || "hi"
+        : countryLanguages.find((code) => code !== "en") || normalizedBrowser || "en";
 
   return {
     suggested: LANGUAGE_BY_CODE.has(suggested) ? suggested : "en",

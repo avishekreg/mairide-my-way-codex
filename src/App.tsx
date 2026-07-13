@@ -2078,10 +2078,16 @@ const BrandWordmark = ({
 }) => (
   <span className={cn('inline-flex items-baseline whitespace-nowrap', className)}>
     <span>m</span>
-    <span className={aiClassName}>AI</span>
+    <span className={aiClassName} style={{ color: '#E65F2B' }}>AI</span>
     <span>Ride</span>
   </span>
 );
+
+const BrandLockup = ({
+  wordmarkClassName = '',
+}: {
+  wordmarkClassName?: string;
+}) => <BrandWordmark className={cn('text-mairide-primary', wordmarkClassName)} />;
 const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
   if (typeof window === 'undefined') return;
   try {
@@ -2108,13 +2114,23 @@ const setCookieValue = (name: string, value: string, maxAge = 60 * 60 * 24 * 365
   if (typeof document === 'undefined') return;
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}${getCrossDomainCookieDomain()}`;
 };
-const getSharedPreferenceValue = (key: string) => getCookieValue(key) || safeStorageGet('local', key);
+const setSessionCookieValue = (name: string, value: string) => {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/${getCrossDomainCookieDomain()}`;
+};
+const getSharedPreferenceValue = (key: string) =>
+  getCookieValue(key) || safeStorageGet('local', key) || safeStorageGet('session', key);
 const setSharedPreferenceValue = (key: string, value: string) => {
   safeStorageSet('local', key, value);
   setCookieValue(key, value);
 };
+const setSharedSessionValue = (key: string, value: string) => {
+  safeStorageSet('session', key, value);
+  setSessionCookieValue(key, value);
+};
 const removeSharedPreferenceValue = (key: string) => {
   safeStorageRemove('local', key);
+  safeStorageRemove('session', key);
   expireCookie(key);
 };
 const buildRegistrationPermissionStorageKey = (prefix: string, uid: string) => `${prefix}:${uid}`;
@@ -2714,6 +2730,9 @@ const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 const UI_LANGUAGE_STORAGE_KEY = 'mairide_ui_language';
 const UI_LANGUAGE_PROMPT_SEEN_KEY = 'mairide_ui_language_prompt_seen';
 const UI_LANGUAGE_PROMPT_SESSION_KEY = 'mairide_ui_language_prompt_session';
+const UI_LANGUAGE_SESSION_KEY = 'mairide_ui_language_session';
+const UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY = 'mairide_ui_language_prompt_session_shared';
+const UI_LANGUAGE_GEO_SESSION_KEY = 'mairide_ui_language_geo_session';
 type SupportedUiLanguage = {
   value: string;
   label: string;
@@ -4535,9 +4554,7 @@ const LoadingScreen = ({ releaseVersion: releaseVersionProp }: { releaseVersion?
       >
         <div className="flex flex-col items-center">
           <img src={LOGO_URL} className="w-48 h-48 object-contain rounded-[22%]" alt="mAIRide Logo" />
-          <h1 className="text-4xl font-black text-mairide-primary mt-4 tracking-tighter">
-            {BRAND_NAME}
-          </h1>
+          <BrandLockup wordmarkClassName="mt-4 text-4xl font-black tracking-tighter" />
         </div>
       </motion.div>
     </div>
@@ -5657,13 +5674,11 @@ const Navbar = ({
   const renderCompactHeader = ({
     logoSize = "h-[58px] w-[58px] rounded-[20px]",
     brandClassName = "text-[1.72rem]",
-    subBrandClassName = "text-[0.92rem] tracking-[0.05em]",
     containerClassName = "",
     rightLaneClassName = "",
   }: {
     logoSize?: string;
     brandClassName?: string;
-    subBrandClassName?: string;
     containerClassName?: string;
     rightLaneClassName?: string;
   }) => (
@@ -5696,9 +5711,6 @@ const Navbar = ({
         />
         <div className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden leading-none">
           <BrandWordmark className={cn("block overflow-hidden text-ellipsis whitespace-nowrap font-black tracking-tighter text-mairide-primary", brandClassName)} />
-          <span className={cn("mt-1 block overflow-hidden text-ellipsis whitespace-nowrap font-black text-mairide-primary", subBrandClassName)}>
-            my way
-          </span>
         </div>
       </button>
 
@@ -5712,7 +5724,6 @@ const Navbar = ({
     renderCompactHeader({
       logoSize: "h-[54px] w-[54px] rounded-[18px]",
       brandClassName: "text-[1.54rem]",
-      subBrandClassName: "text-[0.84rem] tracking-[0.04em]",
       containerClassName: "grid-cols-[58px_minmax(0,1fr)_52px] gap-2",
     })
   );
@@ -5721,7 +5732,6 @@ const Navbar = ({
     renderCompactHeader({
       logoSize: "h-[56px] w-[56px] rounded-[20px]",
       brandClassName: "text-[1.68rem]",
-      subBrandClassName: "text-[0.9rem] tracking-[0.05em]",
       containerClassName: "grid-cols-[56px_minmax(0,1fr)_50px] gap-2",
     })
   );
@@ -5754,7 +5764,6 @@ const Navbar = ({
                   <img src={LOGO_URL} className="mr-4 h-[84px] w-[84px] shrink-0 rounded-[22%] object-contain" alt="mAIRide Logo" />
                   <div className="flex min-w-0 flex-col justify-center overflow-visible py-2.5 leading-[1.04]">
                     <BrandWordmark className="truncate text-[2.55rem] font-black leading-[1.02] tracking-tighter text-mairide-primary" />
-                    <span className="mt-1.5 truncate text-[1.2rem] font-black leading-[1.04] tracking-[0.1em] text-mairide-primary">my way</span>
                   </div>
                 </button>
               </div>
@@ -7082,9 +7091,7 @@ const findUserProfileByPhone = async (value: string) => {
       >
         <div className="flex flex-col items-center mb-6">
           <img src={LOGO_URL} className="w-32 h-32 object-contain rounded-[22%] mb-2" alt="mAIRide Logo" />
-          <h1 className="text-2xl font-black tracking-tighter text-mairide-primary">
-            {BRAND_NAME}
-          </h1>
+          <BrandLockup wordmarkClassName="text-2xl font-black tracking-tighter" />
         </div>
 
         {!isRedirectedFromLogin && (
@@ -8301,9 +8308,7 @@ const DriverOnboarding = ({
         <div className="flex flex-col items-center mb-8">
           <div className="flex items-center mb-4">
             <img src={LOGO_URL} className="w-12 h-12 object-contain rounded-[22%] mr-2" alt="mAIRide Logo" />
-            <span className="text-xl font-black tracking-tighter text-mairide-primary">
-              {BRAND_NAME}
-            </span>
+            <BrandLockup wordmarkClassName="text-xl font-black tracking-tighter" />
           </div>
           <div className="flex justify-between items-center w-full mb-4">
             <div>
@@ -21306,9 +21311,6 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             <img src={LOGO_URL} className="mr-3 h-12 w-12 shrink-0 rounded-[18px] object-contain" alt="mAIRide Logo" />
             <div className="flex min-w-0 flex-col justify-center leading-none">
               <BrandWordmark className="block truncate text-[1.45rem] font-black leading-[0.95] tracking-tighter text-mairide-primary" />
-              <span className="mt-1 block truncate text-[0.78rem] font-black leading-none tracking-[0.14em] text-mairide-primary">
-                my way
-              </span>
             </div>
           </div>
           <button 
@@ -21449,9 +21451,6 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
             <img src={LOGO_URL} className="mr-2.5 h-11 w-11 shrink-0 rounded-[16px] object-contain" alt="mAIRide Logo" />
             <div className="flex min-w-0 flex-col justify-center leading-none">
               <BrandWordmark className="block truncate text-[1.28rem] font-black leading-[0.95] tracking-tighter text-mairide-primary" />
-              <span className="mt-1 block truncate text-[0.68rem] font-black leading-none tracking-[0.12em] text-mairide-primary">
-                my way
-              </span>
             </div>
           </div>
           <button 
@@ -23329,9 +23328,7 @@ const App = () => {
   const [role, setRole] = useState<'consumer' | 'driver'>('consumer');
   const [uiLanguage, setUiLanguage] = useState<string>(() => {
     if (typeof window === 'undefined') return 'en';
-    return canUseCookieCategory(getStoredCookieConsent(), 'preferences')
-      ? safeStorageGet('local', UI_LANGUAGE_STORAGE_KEY) || 'en'
-      : 'en';
+    return getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) || getSharedPreferenceValue(UI_LANGUAGE_SESSION_KEY) || 'en';
   });
   const [cookieConsent, setCookieConsent] = useState<CookieConsentRecord | null>(() => getStoredCookieConsent());
   const [translatorReady, setTranslatorReady] = useState(false);
@@ -24081,15 +24078,7 @@ const App = () => {
   useEffect(() => {
     if (typeof window === 'undefined' || user) return;
     if (!cookieConsent) return;
-    if (!canUseCookieCategory(cookieConsent, 'preferences')) {
-      setShowLanguagePrompt(false);
-      return;
-    }
-    const languageSaved = Boolean(getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY));
-    const promptSeen = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
-    const appPromptSeen = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_APP_SEEN_KEY) === '1';
-    const shouldForcePromptForApp = isAppWebViewRuntime() && !appPromptSeen && !languageSaved && !promptSeen;
-    if (languageSaved && promptSeen && !shouldForcePromptForApp) {
+    if (getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY) === '1') {
       setShowLanguagePrompt(false);
       return;
     }
@@ -24098,16 +24087,24 @@ const App = () => {
 
     let cancelled = false;
     safeStorageSet('session', UI_LANGUAGE_PROMPT_SESSION_KEY, '1');
+    setSharedSessionValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY, '1');
 
     const runDetection = async () => {
       const browserPreferred = detectBrowserPreferredLanguage();
-      let detected = getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) || browserPreferred;
-      let promptOptions = buildLanguagePromptOptions('en', 'hi', detected, 'bn', 'as', 'ne');
+      let detected =
+        getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) ||
+        getSharedPreferenceValue(UI_LANGUAGE_SESSION_KEY) ||
+        browserPreferred;
+      let promptOptions = buildLanguagePromptOptions('en', detected);
       try {
-        const geoDetected = await detectLanguagePromptFromGeolocation();
-        if (geoDetected) {
-          detected = geoDetected.suggested;
-          promptOptions = geoDetected.options;
+        const geoAlreadyResolved = getSharedPreferenceValue(UI_LANGUAGE_GEO_SESSION_KEY) === '1';
+        if (!geoAlreadyResolved) {
+          setSharedSessionValue(UI_LANGUAGE_GEO_SESSION_KEY, '1');
+          const geoDetected = await detectLanguagePromptFromGeolocation();
+          if (geoDetected) {
+            detected = geoDetected.suggested;
+            promptOptions = geoDetected.options;
+          }
         }
       } catch {
         // fallback remains detected
@@ -24199,8 +24196,12 @@ const App = () => {
     const normalized = getSupportedUiLanguage(nextLanguage).value;
     if (!canUseCookieCategory(cookieConsent, 'preferences')) {
       setUiLanguage(normalized);
+      setSharedSessionValue(UI_LANGUAGE_SESSION_KEY, normalized);
+      setSharedSessionValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY, '1');
       removeSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY);
       removeSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY);
+      removeSharedPreferenceValue(UI_LANGUAGE_PROMPT_APP_SEEN_KEY);
+      setShowLanguagePrompt(false);
       if (normalized === 'en') {
         clearGoogleTranslateArtifacts();
       } else {
@@ -24218,6 +24219,8 @@ const App = () => {
       return;
     }
     setUiLanguage(normalized);
+    setSharedSessionValue(UI_LANGUAGE_SESSION_KEY, normalized);
+    setSharedSessionValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY, '1');
     setSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY, normalized);
     setSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
     if (isAppWebViewRuntime()) {

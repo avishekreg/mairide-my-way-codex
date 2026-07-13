@@ -442,6 +442,9 @@
     const rideDomain = 'https://rides.mairide.in';
     const langStorageKey = 'mairide_ui_language';
     const langPromptSeenKey = 'mairide_ui_language_prompt_seen';
+    const langSessionKey = 'mairide_ui_language_session';
+    const langPromptSessionKey = 'mairide_ui_language_prompt_session_shared';
+    const langGeoSessionKey = 'mairide_ui_language_geo_session';
     const sharedPreferenceCookieAge = 60 * 60 * 24 * 365;
     const passThroughKeys = [
       'utm_source',
@@ -515,7 +518,12 @@
       document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=${sharedPreferenceCookieAge}${getSharedCookieDomain()}`;
     };
 
-    const getSharedPreference = (key) => getCookieValue(key) || localStorage.getItem(key);
+    const setSharedSessionPreference = (key, value) => {
+      sessionStorage.setItem(key, value);
+      document.cookie = `${key}=${encodeURIComponent(value)}; path=/${getSharedCookieDomain()}`;
+    };
+
+    const getSharedPreference = (key) => getCookieValue(key) || localStorage.getItem(key) || sessionStorage.getItem(key);
 
     const translations = {
       en: {
@@ -983,6 +991,7 @@
     const setLanguage = (lang) => {
       const requested = languages[lang] ? lang : 'en';
       const textLanguage = translations[requested] ? requested : 'en';
+      setSharedSessionPreference(langSessionKey, requested);
       setSharedPreference(langStorageKey, requested);
       document.documentElement.lang = requested;
       const select = document.getElementById('languageSelect');
@@ -1119,6 +1128,8 @@
     };
 
     const detectLanguagePromptFromGeolocation = async () => {
+      if (getSharedPreference(langGeoSessionKey) === '1') return null;
+      setSharedSessionPreference(langGeoSessionKey, '1');
       if (!navigator.geolocation) return null;
 
       const position = await new Promise((resolve, reject) =>
@@ -1149,6 +1160,7 @@
     const buildPromptButtonLabel = (lang) => `Continue in ${languages[lang]?.nativeLabel || languages[lang]?.short || lang}`;
 
     const commitLanguageSelection = (lang) => {
+      setSharedSessionPreference(langPromptSessionKey, 'true');
       setSharedPreference(langPromptSeenKey, 'true');
       setLanguage(lang);
       const prompt = document.getElementById('languagePrompt');
@@ -1157,7 +1169,8 @@
     };
 
     const showLanguagePrompt = (resolution) => {
-      if (!resolution || getSharedPreference(langPromptSeenKey) === 'true') return;
+      if (!resolution) return;
+      if (getSharedPreference(langPromptSessionKey) === 'true') return;
       const suggestedLang = resolution.suggested;
       const options = Array.isArray(resolution.options) && resolution.options.length
         ? resolution.options.filter((lang) => languages[lang])
@@ -1212,6 +1225,7 @@
     });
 
     document.getElementById('languageSelect').addEventListener('change', (event) => {
+      setSharedSessionPreference(langPromptSessionKey, 'true');
       setSharedPreference(langPromptSeenKey, 'true');
       setLanguage(event.target.value);
     });

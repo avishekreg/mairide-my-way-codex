@@ -1,6 +1,6 @@
 {
-  "name": "MaiRide my way",
-  "short_name": "MaiRide",
+  "name": "mAIRide",
+  "short_name": "mAIRide",
   "description": "Empty-leg ride aggregation platform for travelers and drivers.",
   "start_url": "/",
   "display": "standalone",
