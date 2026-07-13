@@ -2803,6 +2803,20 @@ const getSupportedUiLanguage = (value: string) =>
 
 const getGoogleTranslateCode = (value: string) => getSupportedUiLanguage(value).googleCode;
 
+const getActiveGoogleTranslateLanguage = () => {
+  const raw = getCookieValue('googtrans');
+  if (!raw) return '';
+  const parts = String(raw).split('/');
+  const target = String(parts[parts.length - 1] || '').trim().toLowerCase();
+  if (!target) return '';
+  const matched = SUPPORTED_UI_LANGUAGES.find(
+    (option) => option.googleCode.toLowerCase() === target || option.value.toLowerCase() === target
+  );
+  if (matched) return matched.value;
+  if (target.startsWith('zh')) return 'zh';
+  return target;
+};
+
 const setGoogleTranslateCookie = (language: string) => {
   if (typeof document === 'undefined') return;
   if (!hasStoredCookieConsentCategory('preferences')) {
@@ -2862,6 +2876,31 @@ const detectBrowserPreferredLanguage = () => {
   return matched?.value || 'en';
 };
 
+const detectBrowserRegionalLanguageHints = () => {
+  if (typeof navigator === 'undefined') return ['en'];
+  const hints = new Set<string>();
+  const browserLocales = Array.isArray(navigator.languages) && navigator.languages.length
+    ? navigator.languages
+    : [navigator.language || 'en'];
+
+  browserLocales.forEach((locale) => {
+    const normalized = String(locale || '').trim().toLowerCase().replace('_', '-');
+    const base = normalized.split('-')[0];
+    if (isSupportedUiLanguage(normalized)) hints.add(normalized);
+    if (isSupportedUiLanguage(base)) hints.add(base);
+    if (normalized.startsWith('zh')) hints.add('zh');
+  });
+
+  const timeZone = String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').toLowerCase();
+  if (timeZone.includes('kolkata') || timeZone.includes('calcutta')) {
+    hints.add('hi');
+    hints.add('bn');
+    hints.add('mr');
+  }
+
+  return buildLanguagePromptOptions('en', ...Array.from(hints));
+};
+
 const detectLanguagePromptFromGeolocation = async (): Promise<LanguagePromptResolution | null> => {
   if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return null;
   const position = await new Promise<GeolocationPosition>((resolve, reject) =>
@@ -2891,6 +2930,14 @@ const detectLanguagePromptFromGeolocation = async (): Promise<LanguagePromptReso
     suggested: getSupportedUiLanguage(String(payload.suggested)).value,
     options: buildLanguagePromptOptions(...payload.options),
   };
+};
+
+const resetGoogleTranslateToEnglish = async () => {
+  clearGoogleTranslateArtifacts();
+  await ensureGoogleTranslateScriptLoaded(true);
+  window.setTimeout(() => applyGoogleTranslateLanguage('en'), 40);
+  window.setTimeout(() => applyGoogleTranslateLanguage('en'), 220);
+  window.setTimeout(() => applyGoogleTranslateLanguage('en'), 650);
 };
 
 const LanguageSwitcher = ({
@@ -23328,7 +23375,10 @@ const App = () => {
   const [role, setRole] = useState<'consumer' | 'driver'>('consumer');
   const [uiLanguage, setUiLanguage] = useState<string>(() => {
     if (typeof window === 'undefined') return 'en';
-    return getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) || getSharedPreferenceValue(UI_LANGUAGE_SESSION_KEY) || 'en';
+    const sessionLanguage = getSharedPreferenceValue(UI_LANGUAGE_SESSION_KEY);
+    const savedLanguage = getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY);
+    const hasExplicitSelection = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
+    return sessionLanguage || (hasExplicitSelection ? savedLanguage : '') || 'en';
   });
   const [cookieConsent, setCookieConsent] = useState<CookieConsentRecord | null>(() => getStoredCookieConsent());
   const [translatorReady, setTranslatorReady] = useState(false);
@@ -24047,6 +24097,8 @@ const App = () => {
     if (!cookieConsent) return;
     const lang = getSupportedUiLanguage(uiLanguage).value;
     document.documentElement.lang = lang;
+    document.documentElement.dir = ['ar', 'he', 'fa'].includes(lang) ? 'rtl' : 'ltr';
+    const activeTranslatedLanguage = getActiveGoogleTranslateLanguage();
 
     if (!canUseCookieCategory(cookieConsent, 'preferences')) {
       removeSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY);
@@ -24057,13 +24109,19 @@ const App = () => {
           window.setTimeout(() => applyGoogleTranslateLanguage(lang), 220);
           window.setTimeout(() => applyGoogleTranslateLanguage(lang), 650);
         });
+      } else if (activeTranslatedLanguage && activeTranslatedLanguage !== 'en') {
+        void resetGoogleTranslateToEnglish();
       }
       return;
     }
 
     setSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY, lang);
     if (lang === 'en') {
-      clearGoogleTranslateArtifacts();
+      if (activeTranslatedLanguage && activeTranslatedLanguage !== 'en') {
+        void resetGoogleTranslateToEnglish();
+      } else {
+        clearGoogleTranslateArtifacts();
+      }
     } else {
       setGoogleTranslateCookie(lang);
       if (!translatorReady) {
@@ -24087,15 +24145,16 @@ const App = () => {
 
     let cancelled = false;
     safeStorageSet('session', UI_LANGUAGE_PROMPT_SESSION_KEY, '1');
-    setSharedSessionValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY, '1');
 
     const runDetection = async () => {
       const browserPreferred = detectBrowserPreferredLanguage();
+      const browserHints = detectBrowserRegionalLanguageHints();
+      const hasExplicitSelection = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
       let detected =
-        getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) ||
         getSharedPreferenceValue(UI_LANGUAGE_SESSION_KEY) ||
+        (hasExplicitSelection ? getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) : '') ||
         browserPreferred;
-      let promptOptions = buildLanguagePromptOptions('en', detected);
+      let promptOptions = buildLanguagePromptOptions(...browserHints, detected);
       try {
         const geoAlreadyResolved = getSharedPreferenceValue(UI_LANGUAGE_GEO_SESSION_KEY) === '1';
         if (!geoAlreadyResolved) {
@@ -24111,10 +24170,17 @@ const App = () => {
       }
       if (!cancelled) {
         const normalizedSuggested = getSupportedUiLanguage(detected).value;
+        const finalOptions = buildLanguagePromptOptions(...promptOptions, normalizedSuggested);
+        const shouldShowPrompt = finalOptions.length > 1 || normalizedSuggested !== 'en';
+
+        if (!shouldShowPrompt) {
+          setShowLanguagePrompt(false);
+          return;
+        }
+
         setSuggestedLanguage(normalizedSuggested);
-        setLanguagePromptOptions(
-          buildLanguagePromptOptions(...promptOptions, normalizedSuggested)
-        );
+        setLanguagePromptOptions(finalOptions);
+        setSharedSessionValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY, '1');
         setShowLanguagePrompt(true);
       }
     };

@@ -938,6 +938,24 @@
       }
     };
 
+    const getActiveGoogleTranslateLanguage = () => {
+      const cookieEntry = document.cookie
+        .split('; ')
+        .find((entry) => entry.startsWith('googtrans='));
+      if (!cookieEntry) return '';
+      const value = decodeURIComponent(cookieEntry.slice('googtrans='.length));
+      const parts = String(value || '').split('/');
+      const target = String(parts[parts.length - 1] || '').trim().toLowerCase();
+      if (!target) return '';
+      const matched = Object.entries(languages).find(([, item]) => {
+        const code = String(item.googleCode || '').trim().toLowerCase();
+        return code === target;
+      });
+      if (matched) return matched[0];
+      if (target.startsWith('zh')) return 'zh';
+      return target;
+    };
+
     let googleTranslateScriptPromise = null;
     const ensureGoogleTranslateScriptLoaded = () => {
       if (window.google?.translate?.TranslateElement) return Promise.resolve();
@@ -994,6 +1012,7 @@
       setSharedSessionPreference(langSessionKey, requested);
       setSharedPreference(langStorageKey, requested);
       document.documentElement.lang = requested;
+      document.documentElement.dir = ['ar', 'he', 'fa'].includes(requested) ? 'rtl' : 'ltr';
       const select = document.getElementById('languageSelect');
       if (select.querySelector(`option[value="${requested}"]`)) {
         select.value = requested;
@@ -1004,7 +1023,17 @@
       });
 
       if (requested === 'en') {
-        clearGoogleTranslateArtifacts();
+        const activeTranslatedLanguage = getActiveGoogleTranslateLanguage();
+        if (activeTranslatedLanguage && activeTranslatedLanguage !== 'en') {
+          clearGoogleTranslateArtifacts();
+          ensureGoogleTranslateScriptLoaded().then(() => {
+            window.setTimeout(() => applyGoogleTranslateLanguage('en'), 40);
+            window.setTimeout(() => applyGoogleTranslateLanguage('en'), 220);
+            window.setTimeout(() => applyGoogleTranslateLanguage('en'), 650);
+          });
+        } else {
+          clearGoogleTranslateArtifacts();
+        }
         return;
       }
 
@@ -1127,6 +1156,30 @@
       return 'en';
     };
 
+    const detectBrowserLanguageHints = () => {
+      const hints = new Set(['en']);
+      const browserLocales = Array.isArray(navigator.languages) && navigator.languages.length
+        ? navigator.languages
+        : [navigator.language || 'en'];
+
+      browserLocales.forEach((locale) => {
+        const normalized = String(locale || '').trim().toLowerCase().replace('_', '-');
+        const base = normalized.split('-')[0];
+        if (languages[normalized]) hints.add(normalized);
+        if (languages[base]) hints.add(base);
+        if (normalized.startsWith('zh')) hints.add('zh');
+      });
+
+      const timeZone = String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').toLowerCase();
+      if (timeZone.includes('kolkata') || timeZone.includes('calcutta')) {
+        hints.add('hi');
+        hints.add('bn');
+        hints.add('mr');
+      }
+
+      return buildLanguagePromptOptions(...Array.from(hints));
+    };
+
     const detectLanguagePromptFromGeolocation = async () => {
       if (getSharedPreference(langGeoSessionKey) === '1') return null;
       setSharedSessionPreference(langGeoSessionKey, '1');
@@ -1240,9 +1293,11 @@
     }, { threshold: 0.12 });
 
     document.querySelectorAll('.reveal').forEach((node) => observer.observe(node));
-    const savedLanguage = getSharedPreference(langStorageKey);
-    applyLanguageOrdering([savedLanguage || detectLanguageFromBrowser()]);
-    setLanguage(savedLanguage || detectLanguageFromBrowser());
+    const hasExplicitLanguageSelection = getSharedPreference(langPromptSeenKey) === 'true';
+    const savedLanguage = hasExplicitLanguageSelection ? getSharedPreference(langStorageKey) : null;
+    const bootLanguage = getSharedPreference(langSessionKey) || savedLanguage || detectLanguageFromBrowser();
+    applyLanguageOrdering([bootLanguage, ...detectBrowserLanguageHints()]);
+    setLanguage(bootLanguage);
 
     const resolvePolicyView = () => {
       const queryView = new URLSearchParams(window.location.search).get('view');
@@ -1264,7 +1319,7 @@
     renderPolicyView(activePolicyView);
 
     const initLanguagePrompt = async () => {
-      if (savedLanguage) return;
+      if (hasExplicitLanguageSelection) return;
       const resolution = await detectLanguagePromptFromGeolocation();
       if (resolution) {
         applyLanguageOrdering([resolution.suggested, ...(resolution.options || [])]);
@@ -1273,10 +1328,11 @@
       }
 
       const browserLanguage = detectLanguageFromBrowser();
-      applyLanguageOrdering([browserLanguage]);
+      const browserHints = detectBrowserLanguageHints();
+      applyLanguageOrdering([browserLanguage, ...browserHints]);
       showLanguagePrompt({
         suggested: browserLanguage,
-        options: Array.from(new Set(['en', browserLanguage])).filter((lang) => languages[lang]),
+        options: buildLanguagePromptOptions(browserLanguage, ...browserHints),
       });
     };
 
