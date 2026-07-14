@@ -82,7 +82,9 @@ export interface UserCredential {
 type AuthListener = (user: User | null) => void;
 
 const GIS_SCRIPT_ID = 'mairide-google-gsi-client';
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_ID =
+  import.meta.env.VITE_GOOGLE_CLIENT_ID ||
+  '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com';
 let nativeGoogleInitialized = false;
 
 function normalizeUser(user: any, accessToken?: string | null): User {

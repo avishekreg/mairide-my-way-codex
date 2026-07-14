@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MaiRide</string>
+    <string name="title_activity_main">MaiRide</string>
+    <string name="package_name">in.mairide.app</string>
+    <string name="custom_url_scheme">in.mairide.app</string>
+    <string name="google_web_client_id">506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com</string>
+    <string name="default_web_client_id">506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com</string>
+</resources>
