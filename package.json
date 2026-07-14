@@ -24,6 +24,7 @@
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/push-notifications": "^8.0.3",
     "@capawesome-team/capacitor-file-opener": "^8.0.1",
+    "@capawesome/capacitor-google-sign-in": "^0.1.2",
     "@google/genai": "^1.46.0",
     "@react-google-maps/api": "^2.20.8",
     "@supabase/supabase-js": "^2.56.0",

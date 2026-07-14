@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import { supabase } from '../supabase';
 
 declare global {
@@ -81,6 +83,7 @@ type AuthListener = (user: User | null) => void;
 
 const GIS_SCRIPT_ID = 'mairide-google-gsi-client';
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+let nativeGoogleInitialized = false;
 
 function normalizeUser(user: any, accessToken?: string | null): User {
   const identities = Array.isArray(user?.identities) ? user.identities : [];
@@ -139,6 +142,23 @@ function ensureGoogleClientId() {
     new Error('Google sign-in is not configured. Add VITE_GOOGLE_CLIENT_ID for rides.mairide.in.'),
     { code: 'auth/operation-not-allowed' }
   );
+}
+
+function isNativeGoogleRuntime() {
+  return Capacitor.isNativePlatform() && (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios');
+}
+
+async function ensureNativeGoogleSignInInitialized() {
+  const clientId = ensureGoogleClientId();
+  if (!isNativeGoogleRuntime() || nativeGoogleInitialized) return clientId;
+
+  await GoogleSignIn.initialize({
+    clientId,
+    scopes: ['profile', 'email'],
+  });
+
+  nativeGoogleInitialized = true;
+  return clientId;
 }
 
 function loadGoogleIdentityScript() {
@@ -210,6 +230,33 @@ function buildOverlay(text: { title: string; body: string; secondary: string }) 
 
 async function requestGoogleIdToken(context: 'signin' | 'signup') {
   ensureGoogleClientId();
+
+  if (isNativeGoogleRuntime()) {
+    try {
+      await ensureNativeGoogleSignInInitialized();
+      const result = await GoogleSignIn.signIn();
+      const idToken = String(result?.idToken || '').trim();
+
+      if (!idToken) {
+        throw new Error('Google sign-in did not return an ID token.');
+      }
+
+      return idToken;
+    } catch (error: any) {
+      const message = String(error?.message || error || '').trim();
+      if (/cancel/i.test(message)) {
+        throw Object.assign(new Error('Google sign-in was closed before it completed.'), {
+          code: 'auth/popup-closed-by-user',
+        });
+      }
+
+      throw Object.assign(
+        new Error(message || `Failed to load Google sign-in for ${context}.`),
+        { code: error?.code || 'auth/native-google-sign-in-failed' }
+      );
+    }
+  }
+
   await loadGoogleIdentityScript();
 
   return await new Promise<string>((resolve, reject) => {
@@ -355,6 +402,9 @@ export function onAuthStateChanged(
 }
 
 export async function signOut(authInstance: SupabaseAuthCompat) {
+  if (isNativeGoogleRuntime()) {
+    await GoogleSignIn.signOut().catch(() => undefined);
+  }
   const { error } = await supabase.auth.signOut({ scope: 'local' });
   authInstance.currentUser = null;
   if (error) throw mapAuthError(error);
