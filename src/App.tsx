@@ -2042,9 +2042,13 @@ const APP_NAV_HOME_EVENT = 'mairide:navigate-home';
 const APP_NAV_TAB_EVENT = 'mairide:navigate-tab';
 const APP_DIALOG_EVENT = 'mairide:dialog';
 const APP_RIDE_RETIRED_EVENT = 'mairide:ride-retired';
-const CONSENT_VERSION = 'consent-v1';
-const COOKIE_CONSENT_STORAGE_KEY = 'mairide_cookie_consent_v1';
+const CONSENT_VERSION = 'consent-v2';
+const COOKIE_CONSENT_STORAGE_KEY = 'mairide_cookie_consent_v2';
 const COOKIE_CONSENT_OPEN_EVENT = 'mairide:cookie-consent-open';
+const ENTRY_FLOW_VERSION = 'entry-v2';
+const LOCATION_DISCLOSURE_SEEN_KEY = `mairide_location_disclosure_seen_${ENTRY_FLOW_VERSION}`;
+const LANGUAGE_DISCLOSURE_SEEN_KEY = `mairide_language_disclosure_seen_${ENTRY_FLOW_VERSION}`;
+const COOKIE_DISCLOSURE_SESSION_KEY = `mairide_cookie_disclosure_session_${ENTRY_FLOW_VERSION}`;
 const REGISTRATION_CAMERA_PERMISSION_KEY_PREFIX = 'mairide_registration_camera_prompted_v1';
 const REGISTRATION_LOCATION_PERMISSION_KEY_PREFIX = 'mairide_registration_location_prompted_v1';
 const isAndroidAppRuntime = () => isAndroidWebViewLikeRuntime();
@@ -2902,7 +2906,7 @@ const detectTimezoneLanguageHints = (): LanguagePromptResolution => {
 
   const normalized = timezone.replace(/_/g, ' ');
   const rules: Array<{ match: string[]; suggested: string; options: string[] }> = [
-    { match: ['asia/kolkata', 'asia/calcutta'], suggested: 'hi', options: ['en', 'hi'] },
+    { match: ['asia/kolkata', 'asia/calcutta'], suggested: 'hi', options: ['en', 'hi', 'bn', 'ne', 'as'] },
     { match: ['kolkata', 'calcutta'], suggested: 'bn', options: ['en', 'hi', 'bn'] },
     { match: ['guwahati'], suggested: 'as', options: ['en', 'hi', 'as', 'bn'] },
     { match: ['kathmandu'], suggested: 'ne', options: ['en', 'ne', 'hi'] },
@@ -5389,17 +5393,25 @@ const TutorialsPage = () => <FooterResourcePage resourceKey="tutorials" />;
 
 const CookieConsentManager = ({
   onChange,
+  deferInitialPrompt = false,
 }: {
   onChange?: (consent: CookieConsentRecord) => void;
+  deferInitialPrompt?: boolean;
 }) => {
   const [consent, setConsent] = useState<CookieConsentRecord | null>(() => getStoredCookieConsent());
-  const [isOpen, setIsOpen] = useState(() => !getStoredCookieConsent());
+  const [isOpen, setIsOpen] = useState(() => !deferInitialPrompt && !getStoredCookieConsent());
   const [showCustomize, setShowCustomize] = useState(false);
   const [draftChoices, setDraftChoices] = useState<Record<CookieConsentCategory, boolean>>(() => ({
     ...COOKIE_CONSENT_DEFAULT_CHOICES,
     ...(getStoredCookieConsent()?.choices || {}),
     necessary: true,
   }));
+
+  useEffect(() => {
+    if (!deferInitialPrompt && !getStoredCookieConsent()) {
+      setIsOpen(true);
+    }
+  }, [deferInitialPrompt]);
 
   useEffect(() => {
     const openPreferences = () => {
@@ -5616,6 +5628,53 @@ const AppDialogHost = () => {
         >
           Got it
         </button>
+      </div>
+    </div>
+  );
+};
+
+const LocationPermissionPrompt = ({
+  isOpen,
+  isBusy = false,
+  onAllow,
+  onSkip,
+}: {
+  isOpen: boolean;
+  isBusy?: boolean;
+  onAllow: () => void;
+  onSkip: () => void;
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[94] flex items-center justify-center bg-mairide-primary/40 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl">
+        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-mairide-accent/10 text-mairide-accent">
+          <MapPin className="h-8 w-8" />
+        </div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Location preference</p>
+        <h3 className="mt-2 text-2xl font-black text-mairide-primary">Allow location for local language suggestions</h3>
+        <p className="mt-2 text-sm leading-6 text-mairide-secondary">
+          mAIRide uses your location once to suggest the right regional language options for your city, state, or border region. English always stays available as the standard option.
+        </p>
+        <div className="mt-5 grid gap-3">
+          <button
+            type="button"
+            onClick={onAllow}
+            disabled={isBusy}
+            className="rounded-2xl bg-mairide-accent px-4 py-3 text-left text-sm font-bold text-white disabled:opacity-70"
+          >
+            {isBusy ? 'Checking location…' : 'Allow location'}
+          </button>
+          <button
+            type="button"
+            onClick={onSkip}
+            disabled={isBusy}
+            className="rounded-2xl border border-mairide-secondary px-4 py-3 text-left text-sm font-bold text-mairide-primary disabled:opacity-70"
+          >
+            Continue without location
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -23433,6 +23492,9 @@ const App = () => {
   });
   const [cookieConsent, setCookieConsent] = useState<CookieConsentRecord | null>(() => getStoredCookieConsent());
   const [translatorReady, setTranslatorReady] = useState(false);
+  const [showLocationPrompt, setShowLocationPrompt] = useState(false);
+  const [isResolvingLocationPrompt, setIsResolvingLocationPrompt] = useState(false);
+  const [seededLanguageResolution, setSeededLanguageResolution] = useState<LanguagePromptResolution | null>(null);
   const [showLanguagePrompt, setShowLanguagePrompt] = useState(false);
   const [suggestedLanguage, setSuggestedLanguage] = useState<string>('en');
   const [languagePromptOptions, setLanguagePromptOptions] = useState<string[]>(['en', 'hi']);
@@ -24184,12 +24246,33 @@ const App = () => {
     }
   }, [cookieConsent, translatorReady, uiLanguage]);
 
+  const openCookieConsentStep = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (safeStorageGet('session', COOKIE_DISCLOSURE_SESSION_KEY) === '1') return;
+    safeStorageSet('session', COOKIE_DISCLOSURE_SESSION_KEY, '1');
+    window.dispatchEvent(new Event(COOKIE_CONSENT_OPEN_EVENT));
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined' || user) return;
-    if (!cookieConsent) return;
+    const locationSeen = getSharedPreferenceValue(LOCATION_DISCLOSURE_SEEN_KEY) === '1';
+    if (!locationSeen) {
+      setShowLocationPrompt(true);
+      return;
+    }
+    setShowLocationPrompt(false);
+  }, [user]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || user) return;
+    if (showLocationPrompt) return;
     const hasExplicitSelection = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
-    if (hasExplicitSelection || getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY) === '1') {
+    const languageDisclosureComplete = getSharedPreferenceValue(LANGUAGE_DISCLOSURE_SEEN_KEY) === '1';
+    if (languageDisclosureComplete || hasExplicitSelection || getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY) === '1') {
       setShowLanguagePrompt(false);
+      if (!cookieConsent) {
+        openCookieConsentStep();
+      }
       return;
     }
     const sessionPrompted = safeStorageGet('session', UI_LANGUAGE_PROMPT_SESSION_KEY) === '1';
@@ -24204,19 +24287,25 @@ const App = () => {
         (hasExplicitSelection ? getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) : '') ||
         'en';
       let promptOptions = ['en'];
-      try {
-        const geoAlreadyResolved = getSharedPreferenceValue(UI_LANGUAGE_GEO_SESSION_KEY) === '1';
-        if (!geoAlreadyResolved) {
-          const geoDetected = await detectLanguagePromptFromGeolocation();
-          if (geoDetected) {
-            setSharedSessionValue(UI_LANGUAGE_GEO_SESSION_KEY, '1');
-            detected = geoDetected.suggested;
-            promptOptions = geoDetected.options;
+      if (seededLanguageResolution) {
+        detected = seededLanguageResolution.suggested;
+        promptOptions = seededLanguageResolution.options;
+      } else {
+        try {
+          const geoAlreadyResolved = getSharedPreferenceValue(UI_LANGUAGE_GEO_SESSION_KEY) === '1';
+          if (!geoAlreadyResolved) {
+            const geoDetected = await detectLanguagePromptFromGeolocation();
+            if (geoDetected) {
+              setSharedSessionValue(UI_LANGUAGE_GEO_SESSION_KEY, '1');
+              detected = geoDetected.suggested;
+              promptOptions = geoDetected.options;
+            }
           }
+        } catch {
+          // fallback remains detected
         }
-      } catch {
-        // fallback remains detected
       }
+      setSeededLanguageResolution(null);
 
       if (promptOptions.length <= 1 && detected === 'en') {
         const timezoneDetected = detectTimezoneLanguageHints();
@@ -24230,7 +24319,11 @@ const App = () => {
         const shouldShowPrompt = finalOptions.length > 1 || normalizedSuggested !== 'en';
 
         if (!shouldShowPrompt) {
+          setSharedPreferenceValue(LANGUAGE_DISCLOSURE_SEEN_KEY, '1');
           setShowLanguagePrompt(false);
+          if (!cookieConsent) {
+            openCookieConsentStep();
+          }
           return;
         }
 
@@ -24244,7 +24337,24 @@ const App = () => {
     return () => {
       cancelled = true;
     };
-  }, [cookieConsent, user]);
+  }, [cookieConsent, openCookieConsentStep, seededLanguageResolution, showLocationPrompt, user]);
+
+  const handleAllowLocationDisclosure = useCallback(async () => {
+    setIsResolvingLocationPrompt(true);
+    const resolution = await detectLanguagePromptFromGeolocation().catch(() => null);
+    if (resolution) {
+      setSharedSessionValue(UI_LANGUAGE_GEO_SESSION_KEY, '1');
+      setSeededLanguageResolution(resolution);
+    }
+    setSharedPreferenceValue(LOCATION_DISCLOSURE_SEEN_KEY, '1');
+    setShowLocationPrompt(false);
+    setIsResolvingLocationPrompt(false);
+  }, []);
+
+  const handleSkipLocationDisclosure = useCallback(() => {
+    setSharedPreferenceValue(LOCATION_DISCLOSURE_SEEN_KEY, '1');
+    setShowLocationPrompt(false);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -24319,6 +24429,7 @@ const App = () => {
       setUiLanguage(normalized);
       setSharedSessionValue(UI_LANGUAGE_SESSION_KEY, normalized);
       setSharedSessionValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY, '1');
+      setSharedPreferenceValue(LANGUAGE_DISCLOSURE_SEEN_KEY, '1');
       removeSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY);
       removeSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY);
       removeSharedPreferenceValue(UI_LANGUAGE_PROMPT_APP_SEEN_KEY);
@@ -24337,11 +24448,13 @@ const App = () => {
         'info',
         'Language updated'
       );
+      openCookieConsentStep();
       return;
     }
     setUiLanguage(normalized);
     setSharedSessionValue(UI_LANGUAGE_SESSION_KEY, normalized);
     setSharedSessionValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY, '1');
+    setSharedPreferenceValue(LANGUAGE_DISCLOSURE_SEEN_KEY, '1');
     setSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY, normalized);
     setSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY, '1');
     if (isAppWebViewRuntime()) {
@@ -24353,6 +24466,7 @@ const App = () => {
       window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 220);
       window.setTimeout(() => applyGoogleTranslateLanguage(normalized), 650);
     });
+    openCookieConsentStep();
   };
 
   const handleDismissAndroidUpdatePrompt = () => {
@@ -24489,7 +24603,15 @@ const App = () => {
     </div>
   ) : null;
 
-  const cookieConsentManager = <CookieConsentManager onChange={setCookieConsent} />;
+  const cookieConsentManager = <CookieConsentManager onChange={setCookieConsent} deferInitialPrompt={!user} />;
+  const locationPermissionPrompt = (
+    <LocationPermissionPrompt
+      isOpen={!user && showLocationPrompt}
+      isBusy={isResolvingLocationPrompt}
+      onAllow={handleAllowLocationDisclosure}
+      onSkip={handleSkipLocationDisclosure}
+    />
+  );
   const footerResourceModal = (
     <AnimatePresence>
       {activeFooterResource ? (
@@ -24604,6 +24726,7 @@ const App = () => {
             <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
           </div>
           <div id="google_translate_element" className="hidden" />
+          {locationPermissionPrompt}
           <AppDialogHost />
           {androidUpdatePrompt}
           {cookieConsentManager}

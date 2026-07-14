@@ -221,6 +221,8 @@ const resolveLanguageContext = ({
   const normalizedBrowser = normalizeBrowserLanguage(browserLanguage);
   const countryLanguages = COUNTRY_LANGUAGE_MAP[countryCode] || [];
   const indiaStateLanguages = countryCode === "in" ? INDIA_STATE_LANGUAGE_MAP[adminArea1] || [] : [];
+  const genericIndiaRegionalLanguages =
+    countryCode === "in" && !adminArea1 ? ["bn", "ne", "as"] : [];
   const borderLanguages = getBorderLanguages(
     countryCode,
     buildAddressTokens([country, adminArea1, adminArea2, locality, sublocality])
@@ -240,6 +242,7 @@ const resolveLanguageContext = ({
           "en",
           "hi",
           ...indiaStateLanguages,
+          ...genericIndiaRegionalLanguages,
           ...borderLanguages,
           ...countryLanguages
         )
