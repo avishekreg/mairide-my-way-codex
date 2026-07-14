@@ -24129,7 +24129,8 @@ const App = () => {
   useEffect(() => {
     if (typeof window === 'undefined' || user) return;
     if (!cookieConsent) return;
-    if (getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY) === '1') {
+    const hasExplicitSelection = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
+    if (hasExplicitSelection || getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY) === '1') {
       setShowLanguagePrompt(false);
       return;
     }
@@ -24142,7 +24143,6 @@ const App = () => {
     const runDetection = async () => {
       const browserPreferred = detectBrowserPreferredLanguage();
       const browserHints = detectBrowserRegionalLanguageHints();
-      const hasExplicitSelection = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
       let detected =
         getSharedPreferenceValue(UI_LANGUAGE_SESSION_KEY) ||
         (hasExplicitSelection ? getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) : '') ||
@@ -24173,7 +24173,6 @@ const App = () => {
 
         setSuggestedLanguage(normalizedSuggested);
         setLanguagePromptOptions(finalOptions);
-        setSharedSessionValue(UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY, '1');
         setShowLanguagePrompt(true);
       }
     };
