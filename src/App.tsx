@@ -23492,7 +23492,10 @@ const App = () => {
   });
   const [cookieConsent, setCookieConsent] = useState<CookieConsentRecord | null>(() => getStoredCookieConsent());
   const [translatorReady, setTranslatorReady] = useState(false);
-  const [showLocationPrompt, setShowLocationPrompt] = useState(false);
+  const [showLocationPrompt, setShowLocationPrompt] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return getSharedPreferenceValue(LOCATION_DISCLOSURE_SEEN_KEY) !== '1';
+  });
   const [isResolvingLocationPrompt, setIsResolvingLocationPrompt] = useState(false);
   const [seededLanguageResolution, setSeededLanguageResolution] = useState<LanguagePromptResolution | null>(null);
   const [showLanguagePrompt, setShowLanguagePrompt] = useState(false);
@@ -24257,6 +24260,7 @@ const App = () => {
     if (typeof window === 'undefined' || user) return;
     const locationSeen = getSharedPreferenceValue(LOCATION_DISCLOSURE_SEEN_KEY) === '1';
     if (!locationSeen) {
+      safeStorageRemove('session', UI_LANGUAGE_PROMPT_SESSION_KEY);
       setShowLocationPrompt(true);
       return;
     }
@@ -24265,6 +24269,8 @@ const App = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined' || user) return;
+    const locationDisclosureComplete = getSharedPreferenceValue(LOCATION_DISCLOSURE_SEEN_KEY) === '1';
+    if (!locationDisclosureComplete) return;
     if (showLocationPrompt) return;
     const hasExplicitSelection = getSharedPreferenceValue(UI_LANGUAGE_PROMPT_SEEN_KEY) === '1';
     const languageDisclosureComplete = getSharedPreferenceValue(LANGUAGE_DISCLOSURE_SEEN_KEY) === '1';
@@ -24347,12 +24353,14 @@ const App = () => {
       setSeededLanguageResolution(resolution);
     }
     setSharedPreferenceValue(LOCATION_DISCLOSURE_SEEN_KEY, '1');
+    safeStorageRemove('session', UI_LANGUAGE_PROMPT_SESSION_KEY);
     setShowLocationPrompt(false);
     setIsResolvingLocationPrompt(false);
   }, []);
 
   const handleSkipLocationDisclosure = useCallback(() => {
     setSharedPreferenceValue(LOCATION_DISCLOSURE_SEEN_KEY, '1');
+    safeStorageRemove('session', UI_LANGUAGE_PROMPT_SESSION_KEY);
     setShowLocationPrompt(false);
   }, []);
 
