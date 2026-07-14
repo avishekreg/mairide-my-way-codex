@@ -23722,6 +23722,31 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!isMobileAppRuntime()) return;
+
+    const isRootLoginPath = () => {
+      const pathname = String(window.location.pathname || '/').trim() || '/';
+      return pathname === '/' || pathname === '/index.html' || pathname === '/landing.html';
+    };
+
+    const listenerPromise = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (!canGoBack && isRootLoginPath() && !user) {
+        void CapacitorApp.exitApp();
+        return;
+      }
+
+      if (canGoBack && !isRootLoginPath()) {
+        window.history.back();
+      }
+    });
+
+    return () => {
+      void listenerPromise.then((listener) => listener.remove()).catch(() => undefined);
+    };
+  }, [user]);
+
+  useEffect(() => {
     if (!isMobileAppRuntime()) return;
 
     const platform = getMobileRuntimePlatform();
