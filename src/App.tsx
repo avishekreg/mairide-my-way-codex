@@ -2891,13 +2891,6 @@ const detectBrowserRegionalLanguageHints = () => {
     if (normalized.startsWith('zh')) hints.add('zh');
   });
 
-  const timeZone = String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').toLowerCase();
-  if (timeZone.includes('kolkata') || timeZone.includes('calcutta')) {
-    hints.add('hi');
-    hints.add('bn');
-    hints.add('mr');
-  }
-
   return buildLanguagePromptOptions('en', ...Array.from(hints));
 };
 
