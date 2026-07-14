@@ -1301,9 +1301,60 @@
       return buildLanguagePromptOptions(...Array.from(hints));
     };
 
+    const detectTimezoneLanguageHints = () => {
+      const timezone = String(Intl.DateTimeFormat?.().resolvedOptions?.().timeZone || '').trim().toLowerCase();
+      if (!timezone) return { suggested: 'en', options: ['en'] };
+      const normalized = timezone.replace(/_/g, ' ');
+
+      const timezoneRules = [
+        { match: ['asia/kolkata', 'asia/calcutta'], suggested: 'hi', options: ['en', 'hi'] },
+        { match: ['kolkata', 'calcutta'], suggested: 'bn', options: ['en', 'hi', 'bn'] },
+        { match: ['guwahati'], suggested: 'as', options: ['en', 'hi', 'as', 'bn'] },
+        { match: ['kathmandu'], suggested: 'ne', options: ['en', 'ne', 'hi'] },
+        { match: ['dhaka'], suggested: 'bn', options: ['en', 'bn', 'hi'] },
+        { match: ['tokyo'], suggested: 'ja', options: ['en', 'ja'] },
+        { match: ['seoul'], suggested: 'ko', options: ['en', 'ko'] },
+        { match: ['shanghai', 'beijing', 'hong kong', 'taipei'], suggested: 'zh', options: ['en', 'zh'] },
+        { match: ['singapore'], suggested: 'en', options: ['en', 'zh', 'ms', 'ta'] },
+        { match: ['bangkok'], suggested: 'th', options: ['en', 'th'] },
+        { match: ['jakarta'], suggested: 'id', options: ['en', 'id'] },
+        { match: ['kuala lumpur'], suggested: 'ms', options: ['en', 'ms', 'zh'] },
+        { match: ['dubai', 'riyadh', 'doha', 'muscat', 'kuwait', 'bahrain'], suggested: 'ar', options: ['en', 'ar'] },
+        { match: ['paris'], suggested: 'fr', options: ['en', 'fr'] },
+        { match: ['madrid', 'barcelona'], suggested: 'es', options: ['en', 'es'] },
+        { match: ['lisbon'], suggested: 'pt', options: ['en', 'pt'] },
+        { match: ['amsterdam'], suggested: 'nl', options: ['en', 'nl'] },
+        { match: ['berlin'], suggested: 'de', options: ['en', 'de'] },
+        { match: ['rome'], suggested: 'it', options: ['en', 'it'] },
+      ];
+
+      const matchedRule = timezoneRules.find((rule) => rule.match.some((token) => normalized.includes(token)));
+      if (matchedRule) {
+        return {
+          suggested: matchedRule.suggested,
+          options: buildLanguagePromptOptions(...matchedRule.options),
+        };
+      }
+
+      const zonePrefix = timezone.split('/')[0];
+      if (zonePrefix === 'europe') {
+        return { suggested: 'en', options: buildLanguagePromptOptions('en', 'fr', 'de', 'es', 'pt', 'it', 'nl') };
+      }
+      if (zonePrefix === 'asia') {
+        return { suggested: 'en', options: buildLanguagePromptOptions('en', 'hi', 'ja', 'ko', 'zh', 'th', 'id', 'ms', 'ar') };
+      }
+      if (zonePrefix === 'america') {
+        return { suggested: 'en', options: buildLanguagePromptOptions('en', 'es', 'pt', 'fr') };
+      }
+      if (zonePrefix === 'africa') {
+        return { suggested: 'en', options: buildLanguagePromptOptions('en', 'fr', 'ar') };
+      }
+
+      return { suggested: 'en', options: ['en'] };
+    };
+
     const detectLanguagePromptFromGeolocation = async () => {
       if (getSharedPreference(langGeoSessionKey) === '1') return null;
-      setSharedSessionPreference(langGeoSessionKey, '1');
       if (!navigator.geolocation) return null;
 
       const position = await new Promise((resolve, reject) =>
@@ -1325,9 +1376,14 @@
       if (!response || !response.ok) return null;
       const payload = await response.json().catch(() => null);
       if (!payload?.ok) return null;
+      const suggested = languages[payload.suggested] ? payload.suggested : 'en';
+      const options = Array.isArray(payload.options) ? payload.options.filter((lang) => languages[lang]) : [];
+      const hasMeaningfulGeoSuggestion = suggested !== 'en' || options.some((lang) => lang !== 'en');
+      if (!hasMeaningfulGeoSuggestion) return null;
+      setSharedSessionPreference(langGeoSessionKey, '1');
       return {
-        suggested: languages[payload.suggested] ? payload.suggested : 'en',
-        options: Array.isArray(payload.options) ? payload.options.filter((lang) => languages[lang]) : [],
+        suggested,
+        options,
       };
     };
 
@@ -1418,7 +1474,7 @@
     const existingConsent = getStoredCookieConsent();
     const hasExplicitLanguageSelection = getSharedPreference(langPromptSeenKey) === 'true';
     const savedLanguage = hasExplicitLanguageSelection ? getSharedPreference(langStorageKey) : null;
-    const bootLanguage = getSharedPreference(langSessionKey) || savedLanguage || detectLanguageFromBrowser();
+    const bootLanguage = getSharedPreference(langSessionKey) || savedLanguage || 'en';
     applyLanguageOrdering([bootLanguage, ...detectBrowserLanguageHints()]);
     setLanguage(bootLanguage);
 
@@ -1514,12 +1570,11 @@
         return;
       }
 
-      const browserLanguage = detectLanguageFromBrowser();
-      const browserHints = detectBrowserLanguageHints();
-      applyLanguageOrdering([browserLanguage, ...browserHints]);
+      const timezoneHints = detectTimezoneLanguageHints();
+      applyLanguageOrdering([timezoneHints.suggested, ...(timezoneHints.options || []), ...detectBrowserLanguageHints()]);
       showLanguagePrompt({
-        suggested: browserLanguage,
-        options: buildLanguagePromptOptions(browserLanguage, ...browserHints),
+        suggested: timezoneHints.suggested,
+        options: buildLanguagePromptOptions(timezoneHints.suggested, ...(timezoneHints.options || [])),
       });
     };
 

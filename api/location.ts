@@ -241,15 +241,13 @@ const resolveLanguageContext = ({
           "hi",
           ...indiaStateLanguages,
           ...borderLanguages,
-          ...countryLanguages,
-          normalizedBrowser
+          ...countryLanguages
         )
       : buildLanguageOptions(
           regionalPriority,
           "en",
           ...borderLanguages,
-          ...countryLanguages,
-          normalizedBrowser
+          ...countryLanguages
         );
 
   const suggested =

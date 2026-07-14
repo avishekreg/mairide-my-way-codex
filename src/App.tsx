@@ -2894,6 +2894,60 @@ const detectBrowserRegionalLanguageHints = () => {
   return buildLanguagePromptOptions('en', ...Array.from(hints));
 };
 
+const detectTimezoneLanguageHints = (): LanguagePromptResolution => {
+  const timezone = String(Intl.DateTimeFormat?.().resolvedOptions?.().timeZone || '').trim().toLowerCase();
+  if (!timezone) {
+    return { suggested: 'en', options: ['en'] };
+  }
+
+  const normalized = timezone.replace(/_/g, ' ');
+  const rules: Array<{ match: string[]; suggested: string; options: string[] }> = [
+    { match: ['asia/kolkata', 'asia/calcutta'], suggested: 'hi', options: ['en', 'hi'] },
+    { match: ['kolkata', 'calcutta'], suggested: 'bn', options: ['en', 'hi', 'bn'] },
+    { match: ['guwahati'], suggested: 'as', options: ['en', 'hi', 'as', 'bn'] },
+    { match: ['kathmandu'], suggested: 'ne', options: ['en', 'ne', 'hi'] },
+    { match: ['dhaka'], suggested: 'bn', options: ['en', 'bn', 'hi'] },
+    { match: ['tokyo'], suggested: 'ja', options: ['en', 'ja'] },
+    { match: ['seoul'], suggested: 'ko', options: ['en', 'ko'] },
+    { match: ['shanghai', 'beijing', 'hong kong', 'taipei'], suggested: 'zh', options: ['en', 'zh'] },
+    { match: ['singapore'], suggested: 'en', options: ['en', 'zh', 'ms', 'ta'] },
+    { match: ['bangkok'], suggested: 'th', options: ['en', 'th'] },
+    { match: ['jakarta'], suggested: 'id', options: ['en', 'id'] },
+    { match: ['kuala lumpur'], suggested: 'ms', options: ['en', 'ms', 'zh'] },
+    { match: ['dubai', 'riyadh', 'doha', 'muscat', 'kuwait', 'bahrain'], suggested: 'ar', options: ['en', 'ar'] },
+    { match: ['paris'], suggested: 'fr', options: ['en', 'fr'] },
+    { match: ['madrid', 'barcelona'], suggested: 'es', options: ['en', 'es'] },
+    { match: ['lisbon'], suggested: 'pt', options: ['en', 'pt'] },
+    { match: ['amsterdam'], suggested: 'nl', options: ['en', 'nl'] },
+    { match: ['berlin'], suggested: 'de', options: ['en', 'de'] },
+    { match: ['rome'], suggested: 'it', options: ['en', 'it'] },
+  ];
+
+  const matched = rules.find((rule) => rule.match.some((token) => normalized.includes(token)));
+  if (matched) {
+    return {
+      suggested: getSupportedUiLanguage(matched.suggested).value,
+      options: buildLanguagePromptOptions(...matched.options),
+    };
+  }
+
+  const zonePrefix = timezone.split('/')[0];
+  if (zonePrefix === 'europe') {
+    return { suggested: 'en', options: buildLanguagePromptOptions('en', 'fr', 'de', 'es', 'pt', 'it', 'nl') };
+  }
+  if (zonePrefix === 'asia') {
+    return { suggested: 'en', options: buildLanguagePromptOptions('en', 'hi', 'ja', 'ko', 'zh', 'th', 'id', 'ms', 'ar') };
+  }
+  if (zonePrefix === 'america') {
+    return { suggested: 'en', options: buildLanguagePromptOptions('en', 'es', 'pt', 'fr') };
+  }
+  if (zonePrefix === 'africa') {
+    return { suggested: 'en', options: buildLanguagePromptOptions('en', 'fr', 'ar') };
+  }
+
+  return { suggested: 'en', options: ['en'] };
+};
+
 const detectLanguagePromptFromGeolocation = async (): Promise<LanguagePromptResolution | null> => {
   if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return null;
   const position = await new Promise<GeolocationPosition>((resolve, reject) =>
@@ -2919,9 +2973,13 @@ const detectLanguagePromptFromGeolocation = async (): Promise<LanguagePromptReso
   const payload = await response.json().catch(() => null);
   if (!payload?.ok) return null;
   if (!Array.isArray(payload?.options) || !payload?.suggested) return null;
+  const suggested = getSupportedUiLanguage(String(payload.suggested)).value;
+  const options = buildLanguagePromptOptions(...payload.options);
+  const hasMeaningfulGeoSuggestion = suggested !== 'en' || options.some((lang) => lang !== 'en');
+  if (!hasMeaningfulGeoSuggestion) return null;
   return {
-    suggested: getSupportedUiLanguage(String(payload.suggested)).value,
-    options: buildLanguagePromptOptions(...payload.options),
+    suggested,
+    options,
   };
 };
 
@@ -24141,19 +24199,17 @@ const App = () => {
     safeStorageSet('session', UI_LANGUAGE_PROMPT_SESSION_KEY, '1');
 
     const runDetection = async () => {
-      const browserPreferred = detectBrowserPreferredLanguage();
-      const browserHints = detectBrowserRegionalLanguageHints();
       let detected =
         getSharedPreferenceValue(UI_LANGUAGE_SESSION_KEY) ||
         (hasExplicitSelection ? getSharedPreferenceValue(UI_LANGUAGE_STORAGE_KEY) : '') ||
-        browserPreferred;
-      let promptOptions = buildLanguagePromptOptions(...browserHints, detected);
+        'en';
+      let promptOptions = ['en'];
       try {
         const geoAlreadyResolved = getSharedPreferenceValue(UI_LANGUAGE_GEO_SESSION_KEY) === '1';
         if (!geoAlreadyResolved) {
-          setSharedSessionValue(UI_LANGUAGE_GEO_SESSION_KEY, '1');
           const geoDetected = await detectLanguagePromptFromGeolocation();
           if (geoDetected) {
+            setSharedSessionValue(UI_LANGUAGE_GEO_SESSION_KEY, '1');
             detected = geoDetected.suggested;
             promptOptions = geoDetected.options;
           }
@@ -24161,6 +24217,13 @@ const App = () => {
       } catch {
         // fallback remains detected
       }
+
+      if (promptOptions.length <= 1 && detected === 'en') {
+        const timezoneDetected = detectTimezoneLanguageHints();
+        detected = timezoneDetected.suggested;
+        promptOptions = timezoneDetected.options;
+      }
+
       if (!cancelled) {
         const normalizedSuggested = getSupportedUiLanguage(detected).value;
         const finalOptions = buildLanguagePromptOptions(...promptOptions, normalizedSuggested);
