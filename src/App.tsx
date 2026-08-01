@@ -4090,20 +4090,30 @@ const fetchRecentRouteAlertReports = async () => {
   })) as RouteAlertReport[];
 };
 
-const filterRouteReportsForBooking = (
-  reports: RouteAlertReport[],
-  booking?: Partial<Booking> | null
-) => {
-  if (!booking) return [];
-  const threadKey = getBookingThreadKey(booking);
-  const originText = normalizeSearchText(String(booking.origin || ''));
-  const destinationText = normalizeSearchText(String(booking.destination || ''));
+const filterVisibleRouteReports = ({
+  reports,
+  booking,
+  viewerLocation,
+}: {
+  reports: RouteAlertReport[];
+  booking?: Partial<Booking> | null;
+  viewerLocation?: { lat: number; lng: number } | null;
+}) => {
+  const threadKey = booking ? getBookingThreadKey(booking) : '';
+  const originText = normalizeSearchText(String(booking?.origin || ''));
+  const destinationText = normalizeSearchText(String(booking?.destination || ''));
   return reports.filter((report) => {
     if (report.status !== 'active') return false;
-    if (report.routeThreadKey === threadKey) return true;
+    if (threadKey && report.routeThreadKey === threadKey) return true;
     const reportOrigin = normalizeSearchText(report.origin || '');
     const reportDestination = normalizeSearchText(report.destination || '');
-    return reportOrigin === originText && reportDestination === destinationText;
+    if (originText && destinationText && reportOrigin === originText && reportDestination === destinationText) {
+      return true;
+    }
+    if (viewerLocation && Number.isFinite(report.location?.lat) && Number.isFinite(report.location?.lng)) {
+      return getDistance(viewerLocation.lat, viewerLocation.lng, report.location.lat, report.location.lng) <= 25;
+    }
+    return false;
   });
 };
 
@@ -9690,9 +9700,13 @@ const FareGuidanceHint = ({
 const RouteAlertsTicker = ({
   alerts,
   title,
+  actionLabel,
+  onAction,
 }: {
   alerts: RouteAlertItem[];
   title: string;
+  actionLabel?: string;
+  onAction?: () => void;
 }) => {
   const effectiveAlerts = alerts.length
     ? alerts
@@ -9709,9 +9723,21 @@ const RouteAlertsTicker = ({
 
   return (
     <div className="mb-6 overflow-hidden rounded-[24px] border border-mairide-secondary bg-white shadow-sm">
-      <div className="flex items-center gap-3 border-b border-mairide-secondary/60 px-4 py-3">
-        <AlertTriangle className="h-4 w-4 text-mairide-accent" />
-        <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">{title}</p>
+      <div className="flex items-center justify-between gap-3 border-b border-mairide-secondary/60 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <AlertTriangle className="h-4 w-4 text-mairide-accent" />
+          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">{title}</p>
+        </div>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-2 text-xs font-bold text-mairide-primary transition-all hover:border-mairide-accent hover:text-mairide-accent"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {actionLabel}
+          </button>
+        )}
       </div>
       <div className="overflow-hidden px-4 py-3">
         <motion.div
@@ -13454,7 +13480,11 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       tripSession: primaryBooking ? tripSessions[primaryBooking.id] : undefined,
       activeOverlapCount: overlapCount,
       requiresDetour: Boolean(primaryBooking?.requiresDetour),
-      communityReports: primaryBooking ? filterRouteReportsForBooking(routeAlertReports, primaryBooking) : [],
+      communityReports: filterVisibleRouteReports({
+        reports: routeAlertReports,
+        booking: primaryBooking,
+        viewerLocation: travelerFeedLocation,
+      }),
     });
   }, [dashboardBookings, partialRides, rides, routeAlertReports, search.from, search.to, travelerFeedLocation, travelerRequests, tripSessions]);
   const travelerFareGuidance = useMemo(
@@ -13477,15 +13507,23 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const activeTravelerRouteReports = useMemo(
     () =>
       activeTravelerSessionBooking
-        ? filterRouteReportsForBooking(routeAlertReports, activeTravelerSessionBooking)
-        : [],
+        ? filterVisibleRouteReports({
+            reports: routeAlertReports,
+            booking: activeTravelerSessionBooking,
+            viewerLocation: travelerFeedLocation,
+          })
+        : filterVisibleRouteReports({
+            reports: routeAlertReports,
+            viewerLocation: travelerFeedLocation,
+          }),
     [activeTravelerSessionBooking, routeAlertReports]
   );
   const travelerRouteAlertDraftBooking = useMemo(() => {
     if (activeTravelerSessionBooking) return activeTravelerSessionBooking;
     const primaryRequest = travelerRequests.find(isUnifiedRideActive);
-    const origin = primaryRequest?.origin || search.from || newRequest.origin;
-    const destination = primaryRequest?.destination || search.to || newRequest.destination;
+    const hasViewerLocation = Boolean(travelerFeedLocation);
+    const origin = primaryRequest?.origin || search.from || newRequest.origin || (hasViewerLocation ? 'Current location' : '');
+    const destination = primaryRequest?.destination || search.to || newRequest.destination || (hasViewerLocation ? 'Nearby corridor' : '');
     if (!origin || !destination) return null;
     return buildDraftRouteAlertBooking({
       origin,
@@ -13493,7 +13531,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       viewerRole: 'consumer',
       profile,
     });
-  }, [activeTravelerSessionBooking, newRequest.destination, newRequest.origin, profile, search.from, search.to, travelerRequests]);
+  }, [activeTravelerSessionBooking, newRequest.destination, newRequest.origin, profile, search.from, search.to, travelerFeedLocation, travelerRequests]);
 
   useEffect(() => {
     dashboardBookingsRef.current = dashboardBookings;
@@ -15509,24 +15547,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           <RouteAlertsTicker
             alerts={travelerRouteAlerts}
             title="Geo-tagged route watch"
+            actionLabel="Report Route Issue"
+            onAction={() => setShowTravelerRouteAlertModal(true)}
           />
-
-          <div className="mb-8 mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                if (!travelerRouteAlertDraftBooking) {
-                  showAppDialog('Choose or request a route first so we know which corridor the issue belongs to.', 'warning');
-                  return;
-                }
-                setShowTravelerRouteAlertModal(true);
-              }}
-              className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-5 py-3 text-sm font-bold text-mairide-primary transition-all hover:border-mairide-accent hover:text-mairide-accent"
-            >
-              <AlertTriangle className="h-4 w-4" />
-              Report Route Issue
-            </button>
-          </div>
 
           <div className="mb-8">
             {activeTravelerSessionBooking ? (
@@ -15559,7 +15582,11 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             booking={showTravelerRouteAlertModal ? travelerRouteAlertDraftBooking : null}
             viewerRole="consumer"
             viewerProfile={profile}
-            reports={travelerRouteAlertDraftBooking ? filterRouteReportsForBooking(routeAlertReports, travelerRouteAlertDraftBooking) : []}
+            reports={filterVisibleRouteReports({
+              reports: routeAlertReports,
+              booking: travelerRouteAlertDraftBooking,
+              viewerLocation: travelerFeedLocation,
+            })}
             onSubmit={handleTravelerRouteAlertSubmit}
             onClose={() => setShowTravelerRouteAlertModal(false)}
           />
@@ -16567,7 +16594,11 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       tripSession: primaryRequest ? tripSessions[primaryRequest.id] : undefined,
       activeOverlapCount: overlapCount,
       requiresDetour: Boolean(primaryRequest?.requiresDetour),
-      communityReports: primaryRequest ? filterRouteReportsForBooking(routeAlertReports, primaryRequest) : [],
+      communityReports: filterVisibleRouteReports({
+        reports: routeAlertReports,
+        booking: primaryRequest,
+        viewerLocation: driverFeedLocation,
+      }),
     });
   }, [
     activeDashboardRequests,
@@ -16600,8 +16631,15 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const activeDriverRouteReports = useMemo(
     () =>
       activeDriverSessionBooking
-        ? filterRouteReportsForBooking(routeAlertReports, activeDriverSessionBooking)
-        : [],
+        ? filterVisibleRouteReports({
+            reports: routeAlertReports,
+            booking: activeDriverSessionBooking,
+            viewerLocation: driverFeedLocation,
+          })
+        : filterVisibleRouteReports({
+            reports: routeAlertReports,
+            viewerLocation: driverFeedLocation,
+          }),
     [activeDriverSessionBooking, routeAlertReports]
   );
   const driverRouteAlertDraftBooking = useMemo(() => {
@@ -16609,8 +16647,9 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     const primaryRequest = activeDashboardRequests.find((booking) =>
       ['pending', 'negotiating', 'confirmed'].includes(String(booking.status || ''))
     );
-    const origin = primaryRequest?.origin || newRide.origin;
-    const destination = primaryRequest?.destination || newRide.destination;
+    const hasViewerLocation = Boolean(driverFeedLocation);
+    const origin = primaryRequest?.origin || newRide.origin || (hasViewerLocation ? 'Current location' : '');
+    const destination = primaryRequest?.destination || newRide.destination || (hasViewerLocation ? 'Nearby corridor' : '');
     if (!origin || !destination) return null;
     return buildDraftRouteAlertBooking({
       origin,
@@ -16618,7 +16657,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       viewerRole: 'driver',
       profile,
     });
-  }, [activeDashboardRequests, activeDriverSessionBooking, newRide.destination, newRide.origin, profile]);
+  }, [activeDashboardRequests, activeDriverSessionBooking, driverFeedLocation, newRide.destination, newRide.origin, profile]);
 
   useEffect(() => {
     let isMounted = true;
@@ -18791,24 +18830,9 @@ const finalizeDriverDashboardRazorpayPayment = async (
           <RouteAlertsTicker
             alerts={driverRouteAlerts}
             title="Geo-tagged route watch"
+            actionLabel="Report Route Issue"
+            onAction={() => setShowDriverRouteAlertModal(true)}
           />
-
-          <div className="mb-8 mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                if (!driverRouteAlertDraftBooking) {
-                  showAppDialog('Select a live route or start drafting an offer first so the issue is mapped to the correct corridor.', 'warning');
-                  return;
-                }
-                setShowDriverRouteAlertModal(true);
-              }}
-              className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-5 py-3 text-sm font-bold text-mairide-primary transition-all hover:border-mairide-accent hover:text-mairide-accent"
-            >
-              <AlertTriangle className="h-4 w-4" />
-              Report Route Issue
-            </button>
-          </div>
 
           <div className="mb-8">
             {activeDriverSessionBooking ? (
@@ -18841,7 +18865,11 @@ const finalizeDriverDashboardRazorpayPayment = async (
             booking={showDriverRouteAlertModal ? driverRouteAlertDraftBooking : null}
             viewerRole="driver"
             viewerProfile={profile}
-            reports={driverRouteAlertDraftBooking ? filterRouteReportsForBooking(routeAlertReports, driverRouteAlertDraftBooking) : []}
+            reports={filterVisibleRouteReports({
+              reports: routeAlertReports,
+              booking: driverRouteAlertDraftBooking,
+              viewerLocation: driverFeedLocation,
+            })}
             onSubmit={handleDriverRouteAlertSubmit}
             onClose={() => setShowDriverRouteAlertModal(false)}
           />
