@@ -3947,28 +3947,65 @@ const buildFareGuidance = (
   entries: Array<Partial<Booking> | Partial<Ride> | Partial<TravelerRideRequest>>,
   origin: string,
   destination: string,
-  quotedFare?: number
+  quotedFare?: number,
+  originLocation?: { lat: number; lng: number } | null,
+  destinationLocation?: { lat: number; lng: number } | null
 ) => {
-  const samples = getComparableFareSamples(entries, origin, destination);
-  if (!samples.length) return null;
+  const normalizedOrigin = normalizeSearchText(origin);
+  const normalizedDestination = normalizeSearchText(destination);
+  if (!normalizedOrigin || !normalizedDestination) return null;
 
-  const weightedAverage =
-    samples.reduce((sum, sample) => sum + sample.fare * sample.weight, 0) /
-    samples.reduce((sum, sample) => sum + sample.weight, 0);
-  const fares = samples.map((sample) => sample.fare).sort((a, b) => a - b);
-  const low = fares[0];
-  const high = fares[fares.length - 1];
+  const samples = getComparableFareSamples(entries, origin, destination);
+  let average: number | null = null;
+  let low: number | null = null;
+  let high: number | null = null;
+  let sampleCount = samples.length;
+  let source: 'live' | 'estimate' = 'live';
+
+  if (samples.length) {
+    const weightedAverage =
+      samples.reduce((sum, sample) => sum + sample.fare * sample.weight, 0) /
+      samples.reduce((sum, sample) => sum + sample.weight, 0);
+    const fares = samples.map((sample) => sample.fare).sort((a, b) => a - b);
+    average = Math.round(weightedAverage);
+    low = Math.round(fares[0]);
+    high = Math.round(fares[fares.length - 1]);
+  } else if (originLocation && destinationLocation) {
+    const corridorDistanceKm =
+      getDistance(
+        originLocation.lat,
+        originLocation.lng,
+        destinationLocation.lat,
+        destinationLocation.lng
+      ) * 1.2;
+    const roundedDistance = Math.max(8, corridorDistanceKm);
+    const perKmRate =
+      roundedDistance > 250 ? 18 :
+      roundedDistance > 120 ? 20 :
+      roundedDistance > 50 ? 23 :
+      26;
+    const estimatedAverage = Math.round(220 + roundedDistance * perKmRate);
+    average = estimatedAverage;
+    low = Math.round(estimatedAverage * 0.88);
+    high = Math.round(estimatedAverage * 1.12);
+    sampleCount = 0;
+    source = 'estimate';
+  } else {
+    return null;
+  }
+
   const variance =
-    Number.isFinite(quotedFare) && quotedFare && weightedAverage > 0
-      ? ((quotedFare - weightedAverage) / weightedAverage) * 100
+    Number.isFinite(quotedFare) && quotedFare && average > 0
+      ? ((quotedFare - average) / average) * 100
       : null;
 
   return {
-    average: Math.round(weightedAverage),
-    low: Math.round(low),
-    high: Math.round(high),
-    sampleCount: samples.length,
+    average,
+    low,
+    high,
+    sampleCount,
     variance: variance !== null ? Math.round(variance) : null,
+    source,
   };
 };
 
@@ -9657,11 +9694,34 @@ const FareGuidanceHint = ({
   guidance,
   quotedFare,
   mode = 'soft',
+  routeReady = true,
+  placeholder = 'Enter Origin and Destination to calculate route fare range.',
 }: {
   guidance: ReturnType<typeof buildFareGuidance> | null;
   quotedFare?: number;
   mode?: 'soft' | 'compact';
+  routeReady?: boolean;
+  placeholder?: string;
 }) => {
+  if (!routeReady) {
+    return (
+      <div
+        className={cn(
+          "rounded-2xl border border-mairide-secondary bg-mairide-bg/80 text-mairide-primary",
+          mode === 'compact' ? "mt-3 px-3 py-2" : "mt-4 px-4 py-3"
+        )}
+      >
+        <div className="flex items-start gap-2">
+          <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-mairide-secondary" />
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Smart Fare Guide</p>
+            <p className="mt-1 text-xs text-mairide-secondary">{placeholder}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!guidance) return null;
 
   const varianceCopy =
@@ -9685,10 +9745,12 @@ const FareGuidanceHint = ({
         <div className="min-w-0">
           <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-accent">Smart Fare Guide</p>
           <p className="mt-1 text-sm font-semibold text-mairide-primary">
-            Typical live range: {formatCurrency(guidance.low)} to {formatCurrency(guidance.high)} • Avg {formatCurrency(guidance.average)}
+            {guidance.source === 'estimate' ? 'Estimated route range' : 'Typical live range'}: {formatCurrency(guidance.low)} to {formatCurrency(guidance.high)} • Avg {formatCurrency(guidance.average)}
           </p>
           <p className="mt-1 text-xs text-mairide-secondary">
-            {varianceCopy} Based on {guidance.sampleCount} comparable live fares.
+            {varianceCopy} {guidance.source === 'estimate'
+              ? 'Based on route distance because no comparable live corridor fares are available yet.'
+              : `Based on ${guidance.sampleCount} comparable live fares.`}
             {Number.isFinite(quotedFare) && quotedFare ? ` Your current quote: ${formatCurrency(Number(quotedFare))}.` : ''}
           </p>
         </div>
@@ -13493,9 +13555,11 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         [...rides, ...partialRides, ...dashboardBookings],
         newRequest.origin,
         newRequest.destination,
-        Number(newRequest.fare || 0)
+        Number(newRequest.fare || 0),
+        requestOriginLocation,
+        requestDestinationLocation
       ),
-    [dashboardBookings, newRequest.destination, newRequest.fare, newRequest.origin, partialRides, rides]
+    [dashboardBookings, newRequest.destination, newRequest.fare, newRequest.origin, partialRides, requestDestinationLocation, requestOriginLocation, rides]
   );
   const activeTravelerSessionBooking = useMemo(
     () =>
@@ -16033,6 +16097,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                         guidance={travelerFareGuidance}
                         quotedFare={Number(newRequest.fare || 0)}
                         mode="compact"
+                        routeReady={Boolean(normalizeSearchText(newRequest.origin) && normalizeSearchText(newRequest.destination))}
+                        placeholder="Enter Origin and Destination to calculate route fare range."
                       />
                     </div>
                     <div>
@@ -16617,9 +16683,11 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         [...travelerRideRequests, ...requests, ...driverBookings],
         newRide.origin,
         newRide.destination,
-        Number(newRide.price || 0)
+        Number(newRide.price || 0),
+        originLocation,
+        destinationLocation
       ),
-    [driverBookings, newRide.destination, newRide.origin, newRide.price, requests, travelerRideRequests]
+    [destinationLocation, driverBookings, newRide.destination, newRide.origin, newRide.price, originLocation, requests, travelerRideRequests]
   );
   const activeDriverSessionBooking = useMemo(
     () =>
@@ -18984,6 +19052,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
                     guidance={driverFareGuidance}
                     quotedFare={Number(newRide.price || 0)}
                     mode="compact"
+                    routeReady={Boolean(normalizeSearchText(newRide.origin) && normalizeSearchText(newRide.destination))}
+                    placeholder="Enter Origin and Destination to calculate route fare range."
                   />
                 </div>
                 <div>
