@@ -55,7 +55,7 @@ import {
 } from 'firebase/storage';
 import { auth, db, storage } from './lib/firebase';
 import { supabase } from './lib/supabase';
-import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest, B2BPartner, BookingCommunicationMessage } from './types';
+import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest, B2BPartner, BookingCommunicationMessage, RouteAlertReport } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import { b2bPartnerService } from './services/b2bPartnerService';
 import { AdminB2BVerificationDesk, PartnerApplicationPage, PartnerPortal } from './b2b';
@@ -3687,6 +3687,42 @@ const getRuntimeLanguageCode = () => {
   return 'en';
 };
 
+const getPreciseLocationSnapshot = (): Promise<{ lat: number; lng: number; timestamp: number }> =>
+  new Promise((resolve, reject) => {
+    if (Capacitor.isNativePlatform()) {
+      Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 8000,
+        maximumAge: 0,
+      })
+        .then((pos) =>
+          resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            timestamp: Date.now(),
+          })
+        )
+        .catch((error) => reject(error));
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      reject(new Error('Geolocation not supported'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          timestamp: Date.now(),
+        }),
+      (error) => reject(error),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  });
+
 const getSpeechRecognitionConstructor = () => {
   if (typeof window === 'undefined') return null;
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -3750,6 +3786,7 @@ const useSpeechToText = (
   onTranscript: (text: string) => void
 ) => {
   const recognitionRef = useRef<BrowserSpeechRecognitionInstance | null>(null);
+  const lastTranscriptRef = useRef('');
   const [isListening, setIsListening] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const isSupported = Boolean(getSpeechRecognitionConstructor());
@@ -3770,17 +3807,21 @@ const useSpeechToText = (
     recognitionRef.current?.abort();
     const recognition = new RecognitionCtor();
     recognition.lang = resolveSpeechLocale(language);
-    recognition.interimResults = true;
+    recognition.interimResults = false;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
+    lastTranscriptRef.current = '';
 
     recognition.onresult = (event) => {
-      let transcript = '';
+      const nextFinalTranscripts: string[] = [];
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        transcript += `${event.results[index][0]?.transcript || ''} `;
+        if (event.results[index]?.isFinal) {
+          nextFinalTranscripts.push(String(event.results[index][0]?.transcript || '').trim());
+        }
       }
-      const normalizedTranscript = transcript.trim();
-      if (normalizedTranscript) {
+      const normalizedTranscript = nextFinalTranscripts.join(' ').trim();
+      if (normalizedTranscript && normalizedTranscript !== lastTranscriptRef.current) {
+        lastTranscriptRef.current = normalizedTranscript;
         onTranscript(normalizedTranscript);
       }
     };
@@ -3794,6 +3835,7 @@ const useSpeechToText = (
 
     recognition.onend = () => {
       recognitionRef.current = null;
+      lastTranscriptRef.current = '';
       setIsListening(false);
     };
 
@@ -3935,6 +3977,8 @@ type RouteAlertItem = {
   severity: 'info' | 'watch' | 'caution';
   title: string;
   body: string;
+  photoUrl?: string;
+  submittedByName?: string;
 };
 
 const MOUNTAIN_ROUTE_TOKENS = ['sikkim', 'darjeeling', 'gangtok', 'kalimpong', 'shimla', 'manali', 'kashmir', 'nilgiri', 'bhutan', 'nepal'];
@@ -3948,6 +3992,7 @@ const buildRouteAlerts = ({
   tripSession,
   activeOverlapCount,
   requiresDetour,
+  communityReports = [],
 }: {
   origin: string;
   destination: string;
@@ -3955,9 +4000,21 @@ const buildRouteAlerts = ({
   tripSession?: TripSession;
   activeOverlapCount?: number;
   requiresDetour?: boolean;
+  communityReports?: RouteAlertReport[];
 }): RouteAlertItem[] => {
   const routeText = `${origin} ${destination}`.toLowerCase();
   const alerts: RouteAlertItem[] = [];
+
+  communityReports.slice(0, 2).forEach((report) => {
+    alerts.push({
+      id: `community-${report.id}`,
+      severity: report.issueType === 'accident' || report.issueType === 'blockage' ? 'caution' : 'watch',
+      title: `${report.issueType.replace('_', ' ')} reported near route`,
+      body: `${report.note} • Updated by ${report.submittedByName}`,
+      photoUrl: report.photoUrl,
+      submittedByName: report.submittedByName,
+    });
+  });
 
   if (tripSession?.isStale || tripSession?.networkState === 'offline') {
     alerts.push({
@@ -4014,6 +4071,40 @@ const buildRouteAlerts = ({
   }
 
   return alerts.slice(0, 3);
+};
+
+const uploadRouteAlertImage = async (base64: string, userId: string) => {
+  const normalizedImage = await compressDataUrlImage(base64, 1440, 0.78);
+  const imageRef = storageRef(storage, `route-alerts/${userId}/${Date.now()}.jpg`);
+  await uploadString(imageRef, normalizedImage, 'data_url');
+  return getDownloadURL(imageRef);
+};
+
+const fetchRecentRouteAlertReports = async () => {
+  const snapshot = await getDocs(
+    query(collection(db, 'route_alert_reports'), orderBy('createdAt', 'desc'), limit(30))
+  );
+  return snapshot.docs.map((entry) => ({
+    id: entry.id,
+    ...entry.data(),
+  })) as RouteAlertReport[];
+};
+
+const filterRouteReportsForBooking = (
+  reports: RouteAlertReport[],
+  booking?: Partial<Booking> | null
+) => {
+  if (!booking) return [];
+  const threadKey = getBookingThreadKey(booking);
+  const originText = normalizeSearchText(String(booking.origin || ''));
+  const destinationText = normalizeSearchText(String(booking.destination || ''));
+  return reports.filter((report) => {
+    if (report.status !== 'active') return false;
+    if (report.routeThreadKey === threadKey) return true;
+    const reportOrigin = normalizeSearchText(report.origin || '');
+    const reportDestination = normalizeSearchText(report.destination || '');
+    return reportOrigin === originText && reportDestination === destinationText;
+  });
 };
 
 const primaryActionButtonClass =
@@ -9643,6 +9734,7 @@ const DashboardTranslatorCard = ({
   const [targetLanguage, setTargetLanguage] = useState(defaultTargetLanguage || (getRuntimeLanguageCode() === 'en' ? 'hi' : 'en'));
   const [sourceText, setSourceText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
+  const [translationError, setTranslationError] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const {
     isSupported: isSpeechSupported,
@@ -9664,6 +9756,7 @@ const DashboardTranslatorCard = ({
 
   const handleTranslate = async () => {
     if (!sourceText.trim()) return;
+    setTranslationError(null);
     setIsTranslating(true);
     try {
       const response = await fetch('/api/translate', {
@@ -9681,10 +9774,27 @@ const DashboardTranslatorCard = ({
       }
 
       const result = await response.json();
-      setTranslatedText(String(result.translatedText || sourceText.trim()));
+      const normalizedSource = sourceText.trim();
+      const normalizedOutput = String(result.translatedText || '').trim();
+      const provider = String(result.provider || '');
+      const isSameLanguage = sourceLanguage === targetLanguage;
+
+      if (isSameLanguage) {
+        setTranslatedText(normalizedSource);
+        return;
+      }
+
+      if (!normalizedOutput || normalizedOutput === normalizedSource || provider !== 'gemini') {
+        setTranslatedText('');
+        setTranslationError('Translation is temporarily unavailable for this language pair. Please try again in a moment.');
+        return;
+      }
+
+      setTranslatedText(normalizedOutput);
     } catch (error) {
       console.error('Quick translator failed:', error);
-      setTranslatedText(sourceText.trim());
+      setTranslatedText('');
+      setTranslationError('Translation could not be completed right now. Please try again.');
     } finally {
       setIsTranslating(false);
     }
@@ -9778,8 +9888,169 @@ const DashboardTranslatorCard = ({
           <p className="mt-3 text-sm leading-relaxed text-mairide-primary">
             {translatedText || 'Your translated message will appear here.'}
           </p>
+          {translationError && (
+            <p className="mt-3 text-xs font-semibold text-red-600">{translationError}</p>
+          )}
         </div>
       </div>
+    </div>
+  );
+};
+
+const RouteAlertComposer = ({
+  booking,
+  viewerRole,
+  viewerProfile,
+  reports,
+  onSubmit,
+}: {
+  booking: Booking;
+  viewerRole: 'consumer' | 'driver';
+  viewerProfile: UserProfile;
+  reports: RouteAlertReport[];
+  onSubmit: (
+    booking: Booking,
+    payload: { issueType: RouteAlertReport['issueType']; note: string; photoDataUrl: string }
+  ) => Promise<void>;
+}) => {
+  const [issueType, setIssueType] = useState<RouteAlertReport['issueType']>('blockage');
+  const [note, setNote] = useState('');
+  const [photoDataUrl, setPhotoDataUrl] = useState('');
+  const [photoName, setPhotoName] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showAppDialog('Please upload an image for route validation.', 'warning');
+      return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    const normalized = await compressDataUrlImage(dataUrl, 1440, 0.78);
+    setPhotoDataUrl(normalized);
+    setPhotoName(file.name);
+  };
+
+  const handleSubmit = async () => {
+    if (!note.trim() || !photoDataUrl) {
+      showAppDialog('Add a short route note and one geotagged photo before submitting.', 'warning');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await onSubmit(booking, {
+        issueType,
+        note: note.trim(),
+        photoDataUrl,
+      });
+      setNote('');
+      setPhotoDataUrl('');
+      setPhotoName('');
+      setIssueType('blockage');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">Route watch update</p>
+          <h3 className="mt-2 text-xl font-black tracking-tight text-mairide-primary">Report a live road issue</h3>
+          <p className="mt-2 text-sm leading-relaxed text-mairide-secondary">
+            Submit one geotagged image plus a short note for this matched ride corridor. Both traveler and driver updates stay tied to this ride session only.
+          </p>
+        </div>
+        <Camera className="h-6 w-6 shrink-0 text-mairide-accent" />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Issue type</span>
+          <select
+            value={issueType}
+            onChange={(event) => setIssueType(event.target.value as RouteAlertReport['issueType'])}
+            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+          >
+            <option value="blockage">Blockage</option>
+            <option value="accident">Accident</option>
+            <option value="construction">Construction</option>
+            <option value="traffic">Traffic</option>
+            <option value="checkpoint">Checkpoint</option>
+            <option value="weather">Weather</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <div className="rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Session linked</p>
+          <p className="mt-2 text-sm font-semibold text-mairide-primary">
+            {viewerRole === 'driver' ? booking.consumerName : booking.driverName} • {booking.origin} → {booking.destination}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_280px]">
+        <textarea
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Describe the blockage, accident, checkpoint, diversion, or route risk"
+          className="min-h-[120px] w-full rounded-2xl border border-mairide-secondary bg-mairide-bg p-4 text-sm text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+        />
+        <label className="flex min-h-[120px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-mairide-secondary bg-mairide-bg p-4 text-center transition-colors hover:border-mairide-accent">
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileChange} />
+          {photoDataUrl ? (
+            <img src={photoDataUrl} alt="Route alert preview" className="h-24 w-full rounded-xl object-cover" />
+          ) : (
+            <>
+              <Upload className="h-6 w-6 text-mairide-accent" />
+              <p className="mt-2 text-sm font-bold text-mairide-primary">Upload route photo</p>
+              <p className="mt-1 text-xs text-mairide-secondary">Image only. No video.</p>
+            </>
+          )}
+          {photoName && <p className="mt-2 text-[11px] font-semibold text-mairide-secondary">{photoName}</p>}
+        </label>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-4">
+        <p className="text-xs text-mairide-secondary">
+          mAIRide will capture your current geolocation at submit time and attach it to this route report for validation.
+        </p>
+        <button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={isSubmitting}
+          className="rounded-2xl bg-mairide-accent px-5 py-3 text-sm font-bold text-white transition-all hover:bg-mairide-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSubmitting ? 'Submitting...' : 'Submit route update'}
+        </button>
+      </div>
+
+      {reports.length > 0 && (
+        <div className="mt-5 space-y-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Latest ride-linked reports</p>
+          {reports.slice(0, 2).map((report) => (
+            <div key={report.id} className="rounded-2xl border border-mairide-secondary/40 bg-mairide-bg p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-bold text-mairide-primary">
+                    {report.issueType.replace('_', ' ')} • {report.submittedByName}
+                  </p>
+                  <p className="mt-1 text-xs text-mairide-secondary">{report.note}</p>
+                </div>
+                <p className="text-[10px] text-mairide-secondary">{new Date(report.createdAt).toLocaleTimeString()}</p>
+              </div>
+              <div className="mt-3 flex items-center gap-3">
+                <img src={report.photoUrl} alt="Route alert evidence" className="h-16 w-24 rounded-xl object-cover" />
+                <p className="text-xs text-mairide-secondary">
+                  Geo-tagged at {report.location.lat.toFixed(4)}, {report.location.lng.toFixed(4)}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -12944,6 +13215,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     departureClock: '09:00',
   });
   const [travelerRequests, setTravelerRequests] = useState<TravelerRideRequest[]>([]);
+  const [routeAlertReports, setRouteAlertReports] = useState<RouteAlertReport[]>([]);
   const [requestAutocompleteFrom, setRequestAutocompleteFrom] = useState<any | null>(null);
   const [requestAutocompleteTo, setRequestAutocompleteTo] = useState<any | null>(null);
   const [requestOriginLocation, setRequestOriginLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -13087,8 +13359,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       tripSession: primaryBooking ? tripSessions[primaryBooking.id] : undefined,
       activeOverlapCount: overlapCount,
       requiresDetour: Boolean(primaryBooking?.requiresDetour),
+      communityReports: primaryBooking ? filterRouteReportsForBooking(routeAlertReports, primaryBooking) : [],
     });
-  }, [dashboardBookings, partialRides, rides, search.from, search.to, travelerFeedLocation, travelerRequests, tripSessions]);
+  }, [dashboardBookings, partialRides, rides, routeAlertReports, search.from, search.to, travelerFeedLocation, travelerRequests, tripSessions]);
   const travelerFareGuidance = useMemo(
     () =>
       buildFareGuidance(
@@ -13099,6 +13372,20 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       ),
     [dashboardBookings, newRequest.destination, newRequest.fare, newRequest.origin, partialRides, rides]
   );
+  const activeTravelerSessionBooking = useMemo(
+    () =>
+      dashboardBookings.find((booking) =>
+        ['pending', 'negotiating', 'confirmed'].includes(String(booking.status || ''))
+      ) || null,
+    [dashboardBookings]
+  );
+  const activeTravelerRouteReports = useMemo(
+    () =>
+      activeTravelerSessionBooking
+        ? filterRouteReportsForBooking(routeAlertReports, activeTravelerSessionBooking)
+        : [],
+    [activeTravelerSessionBooking, routeAlertReports]
+  );
 
   useEffect(() => {
     dashboardBookingsRef.current = dashboardBookings;
@@ -13107,6 +13394,62 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   useEffect(() => {
     travelerRequestsRef.current = travelerRequests;
   }, [travelerRequests]);
+
+  useEffect(() => {
+    let isMounted = true;
+    void fetchRecentRouteAlertReports()
+      .then((reports) => {
+        if (isMounted) {
+          setRouteAlertReports(reports);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load traveler route alert reports:', error);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleTravelerRouteAlertSubmit = useCallback(
+    async (
+      booking: Booking,
+      payload: { issueType: RouteAlertReport['issueType']; note: string; photoDataUrl: string }
+    ) => {
+      if (!auth.currentUser?.uid) {
+        showAppDialog('Please sign in again before sending a route update.', 'error');
+        return;
+      }
+
+      try {
+        const location = await getPreciseLocationSnapshot();
+        const photoUrl = await uploadRouteAlertImage(payload.photoDataUrl, auth.currentUser.uid);
+        const createdAt = new Date().toISOString();
+        const reportDraft: Omit<RouteAlertReport, 'id'> = {
+          bookingId: booking.id,
+          rideId: booking.rideId,
+          routeThreadKey: getBookingThreadKey(booking),
+          origin: booking.origin,
+          destination: booking.destination,
+          issueType: payload.issueType,
+          note: payload.note.trim(),
+          photoUrl,
+          location,
+          submittedById: profile.uid,
+          submittedByName: profile.displayName || profile.email || 'Traveler',
+          submittedRole: 'consumer',
+          status: 'active',
+          createdAt,
+        };
+        const reportRef = await addDoc(collection(db, 'route_alert_reports'), reportDraft);
+        setRouteAlertReports((prev) => [{ id: reportRef.id, ...reportDraft }, ...prev].slice(0, 30));
+        showAppDialog('Route update submitted with geotagged photo evidence.', 'success');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'route_alert_reports');
+      }
+    },
+    [profile.displayName, profile.email, profile.uid]
+  );
 
   const refreshNearbyDrivers = useCallback(async (reason = 'manual') => {
     try {
@@ -15061,10 +15404,30 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           />
 
           <div className="mb-8">
-            <DashboardTranslatorCard
-              title="Talk to drivers across languages"
-              description="Translate short ride notes instantly before or during negotiation. Your live booking thread will still carry translated notes automatically."
-            />
+            {activeTravelerSessionBooking ? (
+              <div className="space-y-5">
+                <NegotiationCommunicationPanel
+                  booking={activeTravelerSessionBooking}
+                  viewerRole="consumer"
+                  onSend={handleTravelerCommunicationMessage}
+                />
+                <RouteAlertComposer
+                  booking={activeTravelerSessionBooking}
+                  viewerRole="consumer"
+                  viewerProfile={profile}
+                  reports={activeTravelerRouteReports}
+                  onSubmit={handleTravelerRouteAlertSubmit}
+                />
+              </div>
+            ) : (
+              <div className="rounded-[28px] border border-mairide-secondary bg-white p-6 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Ride session tools</p>
+                <h3 className="mt-3 text-xl font-black tracking-tight text-mairide-primary">Translator and route watch unlock after a match.</h3>
+                <p className="mt-2 text-sm text-mairide-secondary">
+                  Once a driver and traveler are linked to the same live booking, mAIRide opens a private translated communication thread and lets both sides post geotagged route evidence for that ride only.
+                </p>
+              </div>
+            )}
           </div>
 
           <TravelerDashboardSummary
@@ -15967,6 +16330,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
   const [driverBookings, setDriverBookings] = useState<Booking[]>([]);
+  const [routeAlertReports, setRouteAlertReports] = useState<RouteAlertReport[]>([]);
   const [rideOffersRefreshKey, setRideOffersRefreshKey] = useState(0);
   const [driverAvailableRideRoutes, setDriverAvailableRideRoutes] = useState<
     Array<{ originLocation: { lat: number; lng: number }; destinationLocation: { lat: number; lng: number } }>
@@ -16068,6 +16432,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       tripSession: primaryRequest ? tripSessions[primaryRequest.id] : undefined,
       activeOverlapCount: overlapCount,
       requiresDetour: Boolean(primaryRequest?.requiresDetour),
+      communityReports: primaryRequest ? filterRouteReportsForBooking(routeAlertReports, primaryRequest) : [],
     });
   }, [
     activeDashboardRequests,
@@ -16077,6 +16442,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     newRide.destination,
     newRide.origin,
     originLocation,
+    routeAlertReports,
     tripSessions,
   ]);
   const driverFareGuidance = useMemo(
@@ -16088,6 +16454,76 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         Number(newRide.price || 0)
       ),
     [driverBookings, newRide.destination, newRide.origin, newRide.price, requests, travelerRideRequests]
+  );
+  const activeDriverSessionBooking = useMemo(
+    () =>
+      activeDashboardRequests.find((booking) =>
+        ['pending', 'negotiating', 'confirmed'].includes(String(booking.status || ''))
+      ) || null,
+    [activeDashboardRequests]
+  );
+  const activeDriverRouteReports = useMemo(
+    () =>
+      activeDriverSessionBooking
+        ? filterRouteReportsForBooking(routeAlertReports, activeDriverSessionBooking)
+        : [],
+    [activeDriverSessionBooking, routeAlertReports]
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    void fetchRecentRouteAlertReports()
+      .then((reports) => {
+        if (isMounted) {
+          setRouteAlertReports(reports);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load driver route alert reports:', error);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleDriverRouteAlertSubmit = useCallback(
+    async (
+      booking: Booking,
+      payload: { issueType: RouteAlertReport['issueType']; note: string; photoDataUrl: string }
+    ) => {
+      if (!auth.currentUser?.uid) {
+        showAppDialog('Please sign in again before sending a route update.', 'error');
+        return;
+      }
+
+      try {
+        const location = await getPreciseLocationSnapshot();
+        const photoUrl = await uploadRouteAlertImage(payload.photoDataUrl, auth.currentUser.uid);
+        const createdAt = new Date().toISOString();
+        const reportDraft: Omit<RouteAlertReport, 'id'> = {
+          bookingId: booking.id,
+          rideId: booking.rideId,
+          routeThreadKey: getBookingThreadKey(booking),
+          origin: booking.origin,
+          destination: booking.destination,
+          issueType: payload.issueType,
+          note: payload.note.trim(),
+          photoUrl,
+          location,
+          submittedById: profile.uid,
+          submittedByName: profile.displayName || profile.email || 'Driver',
+          submittedRole: 'driver',
+          status: 'active',
+          createdAt,
+        };
+        const reportRef = await addDoc(collection(db, 'route_alert_reports'), reportDraft);
+        setRouteAlertReports((prev) => [{ id: reportRef.id, ...reportDraft }, ...prev].slice(0, 30));
+        showAppDialog('Route update submitted with geotagged photo evidence.', 'success');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'route_alert_reports');
+      }
+    },
+    [profile.displayName, profile.email, profile.uid]
   );
 
   const markDriverRideStartedInState = useCallback((rideId: string, startedAt: string) => {
@@ -18208,10 +18644,30 @@ const finalizeDriverDashboardRazorpayPayment = async (
           />
 
           <div className="mb-8">
-            <DashboardTranslatorCard
-              title="Talk to travelers across languages"
-              description="Use the quick translator for route clarifications, fare context, or pickup notes. During live negotiations, translated messages will also stay attached to the booking thread."
-            />
+            {activeDriverSessionBooking ? (
+              <div className="space-y-5">
+                <NegotiationCommunicationPanel
+                  booking={activeDriverSessionBooking}
+                  viewerRole="driver"
+                  onSend={handleDriverCommunicationMessage}
+                />
+                <RouteAlertComposer
+                  booking={activeDriverSessionBooking}
+                  viewerRole="driver"
+                  viewerProfile={profile}
+                  reports={activeDriverRouteReports}
+                  onSubmit={handleDriverRouteAlertSubmit}
+                />
+              </div>
+            ) : (
+              <div className="rounded-[28px] border border-mairide-secondary bg-white p-6 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Ride session tools</p>
+                <h3 className="mt-3 text-xl font-black tracking-tight text-mairide-primary">Translator and route watch activate per live negotiation.</h3>
+                <p className="mt-2 text-sm text-mairide-secondary">
+                  Once a traveler is matched to your ride, mAIRide opens a private translated session for that booking and lets both sides publish geotagged photo-backed route reports without leaking messages to any other ride.
+                </p>
+              </div>
+            )}
           </div>
 
           {showOfferForm && (

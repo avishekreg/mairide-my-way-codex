@@ -401,6 +401,28 @@ export interface BookingCommunicationMessage {
   translationProvider?: 'gemini' | 'fallback';
 }
 
+export interface RouteAlertReport {
+  id: string;
+  bookingId?: string;
+  rideId?: string;
+  routeThreadKey: string;
+  origin: string;
+  destination: string;
+  issueType: 'blockage' | 'accident' | 'construction' | 'traffic' | 'checkpoint' | 'weather' | 'other';
+  note: string;
+  photoUrl: string;
+  location: {
+    lat: number;
+    lng: number;
+    timestamp: number;
+  };
+  submittedById: string;
+  submittedByName: string;
+  submittedRole: 'driver' | 'consumer';
+  status: 'active' | 'resolved';
+  createdAt: string;
+}
+
 export interface Booking {
   id: string;
   rideId: string;
