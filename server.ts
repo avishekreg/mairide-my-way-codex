@@ -9,6 +9,7 @@ import paymentsHandler from "./api/payments.ts";
 import adminHandler from "./api/admin-api.ts";
 import userHandler from "./api/user.ts";
 import chatHandler from "./api/chat.ts";
+import translateHandler from "./api/translate.ts";
 import analyticsHandler from "./api/analytics.ts";
 import notificationsHandler from "./api/notifications.ts";
 import locationHandler from "./api/location.ts";
@@ -47,6 +48,7 @@ async function startServer() {
 
   app.get("/api/health", handleHealth);
   app.post("/api/chat", chatHandler);
+  app.post("/api/translate", translateHandler);
   app.all("/api/analytics", analyticsHandler);
   app.all("/api/notifications", notificationsHandler);
   app.all("/api/location", locationHandler);

@@ -55,7 +55,7 @@ import {
 } from 'firebase/storage';
 import { auth, db, storage } from './lib/firebase';
 import { supabase } from './lib/supabase';
-import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest, B2BPartner } from './types';
+import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest, B2BPartner, BookingCommunicationMessage } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import { b2bPartnerService } from './services/b2bPartnerService';
 import { AdminB2BVerificationDesk, PartnerApplicationPage, PartnerPortal } from './b2b';
@@ -138,10 +138,44 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
 
+type BrowserSpeechRecognitionAlternative = {
+  transcript: string;
+};
+
+type BrowserSpeechRecognitionResult = {
+  isFinal: boolean;
+  length: number;
+  [index: number]: BrowserSpeechRecognitionAlternative;
+};
+
+type BrowserSpeechRecognitionEvent = {
+  resultIndex: number;
+  results: ArrayLike<BrowserSpeechRecognitionResult>;
+};
+
+type BrowserSpeechRecognitionErrorEvent = {
+  error: string;
+};
+
+type BrowserSpeechRecognitionInstance = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  maxAlternatives: number;
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+
 declare global {
   interface Window {
     Razorpay?: new (options: Record<string, any>) => { open: () => void };
     googleTranslateElementInit?: () => void;
+    webkitSpeechRecognition?: new () => BrowserSpeechRecognitionInstance;
+    SpeechRecognition?: new () => BrowserSpeechRecognitionInstance;
   }
 }
 
@@ -3410,6 +3444,29 @@ const persistNegotiationResolutionThroughCompatStore = async (
   return updatedAt;
 };
 
+const persistCommunicationMessageThroughCompatStore = async (
+  seedBooking: Booking,
+  message: BookingCommunicationMessage
+) => {
+  const updatedAt = new Date().toISOString();
+  const threadRows = await loadNegotiationThreadBookings(seedBooking);
+
+  await Promise.all(
+    threadRows.map((booking) => {
+      const currentThread = getCommunicationThread(booking);
+      const nextThread = [...currentThread, message].slice(-12);
+      return updateDoc(doc(db, 'bookings', booking.id), {
+        communicationThread: nextThread,
+        'data.communicationThread': nextThread,
+        updatedAt,
+        'data.updatedAt': updatedAt,
+      });
+    })
+  );
+
+  return updatedAt;
+};
+
 const applyThreadNegotiationState = (
   seedBooking: Booking,
   actor: 'driver' | 'consumer',
@@ -3562,35 +3619,43 @@ const dedupeBookingsByThread = <T extends Booking>(bookings: T[]) => {
 };
 
 const getBookingRenderSignature = (booking: Booking) =>
-  [
-    booking.id,
-    booking.rideId,
-    booking.status,
-    booking.negotiationStatus,
-    booking.negotiationActor,
-    booking.rideLifecycleStatus,
-    booking.fare,
-    (booking as any).listedFare,
-    (booking as any).travelerListedFare,
-    (booking as any).requestedFare,
-    (booking as any).driverListedFare,
-    booking.negotiatedFare,
-    (booking as any).driverBid,
-    (booking as any).consumerBid,
-    booking.origin,
-    booking.destination,
-    booking.driverId,
-    booking.consumerId,
-    booking.driverName,
-    booking.consumerName,
-    booking.seatsBooked,
-    (booking as any).seatsAvailable,
-    booking.feePaid,
-    booking.driverFeePaid,
-    booking.rideStartedAt,
-    booking.rideEndedAt,
-    (booking as any).rideRetired,
-  ].join('|');
+  (() => {
+    const communicationThread = getBookingNegotiationField<BookingCommunicationMessage[]>(booking, 'communicationThread') || [];
+    const latestMessage = communicationThread[communicationThread.length - 1];
+    return [
+      booking.id,
+      booking.rideId,
+      booking.status,
+      booking.negotiationStatus,
+      booking.negotiationActor,
+      booking.rideLifecycleStatus,
+      booking.fare,
+      (booking as any).listedFare,
+      (booking as any).travelerListedFare,
+      (booking as any).requestedFare,
+      (booking as any).driverListedFare,
+      booking.negotiatedFare,
+      (booking as any).driverBid,
+      (booking as any).consumerBid,
+      booking.origin,
+      booking.destination,
+      booking.driverId,
+      booking.consumerId,
+      booking.driverName,
+      booking.consumerName,
+      booking.seatsBooked,
+      (booking as any).seatsAvailable,
+      booking.feePaid,
+      booking.driverFeePaid,
+      booking.rideStartedAt,
+      booking.rideEndedAt,
+      (booking as any).rideRetired,
+      communicationThread.length,
+      latestMessage?.sourceText || '',
+      latestMessage?.translatedText || '',
+      latestMessage?.createdAt || '',
+    ].join('|');
+  })();
 
 const areBookingRenderListsEqual = (current: Booking[], next: Booking[]) => {
   if (current.length !== next.length) return false;
@@ -3608,6 +3673,348 @@ const mergeNegotiationThread = (bookings: Booking[], updatedThread: Booking) =>
       new Date((b as any).updatedAt || b.createdAt).getTime() -
       new Date((a as any).updatedAt || a.createdAt).getTime()
   );
+
+const normalizeUiLanguageCode = (value?: string) =>
+  getSupportedUiLanguage(String(value || 'en').trim().toLowerCase()).value;
+
+const getRuntimeLanguageCode = () => {
+  if (typeof document !== 'undefined' && document.documentElement.lang) {
+    return normalizeUiLanguageCode(document.documentElement.lang);
+  }
+  if (typeof navigator !== 'undefined') {
+    return normalizeUiLanguageCode(navigator.language.split('-')[0]);
+  }
+  return 'en';
+};
+
+const getSpeechRecognitionConstructor = () => {
+  if (typeof window === 'undefined') return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+};
+
+const resolveSpeechLocale = (language?: string) => {
+  const normalized = normalizeUiLanguageCode(language);
+  const localeMap: Record<string, string> = {
+    en: 'en-US',
+    hi: 'hi-IN',
+    bn: 'bn-IN',
+    ne: 'ne-NP',
+    gu: 'gu-IN',
+    mr: 'mr-IN',
+    ta: 'ta-IN',
+    te: 'te-IN',
+    kn: 'kn-IN',
+    ml: 'ml-IN',
+    pa: 'pa-IN',
+    as: 'as-IN',
+    or: 'or-IN',
+    pt: 'pt-PT',
+    es: 'es-ES',
+    nl: 'nl-NL',
+    fr: 'fr-FR',
+    de: 'de-DE',
+    it: 'it-IT',
+    ar: 'ar-SA',
+    ja: 'ja-JP',
+    ko: 'ko-KR',
+    zh: 'zh-CN',
+    ru: 'ru-RU',
+    tr: 'tr-TR',
+    pl: 'pl-PL',
+    uk: 'uk-UA',
+    vi: 'vi-VN',
+    th: 'th-TH',
+    id: 'id-ID',
+    ms: 'ms-MY',
+    sv: 'sv-SE',
+    no: 'nb-NO',
+    da: 'da-DK',
+    fi: 'fi-FI',
+    cs: 'cs-CZ',
+    hu: 'hu-HU',
+    ro: 'ro-RO',
+    el: 'el-GR',
+    he: 'he-IL',
+    fa: 'fa-IR',
+  };
+
+  if (typeof navigator !== 'undefined' && navigator.language?.toLowerCase().startsWith(normalized)) {
+    return navigator.language;
+  }
+
+  return localeMap[normalized] || 'en-US';
+};
+
+const useSpeechToText = (
+  language: string,
+  onTranscript: (text: string) => void
+) => {
+  const recognitionRef = useRef<BrowserSpeechRecognitionInstance | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const isSupported = Boolean(getSpeechRecognitionConstructor());
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setIsListening(false);
+  }, []);
+
+  const startListening = useCallback(() => {
+    const RecognitionCtor = getSpeechRecognitionConstructor();
+    if (!RecognitionCtor) {
+      setSpeechError('Voice input is not supported on this device/browser yet.');
+      return;
+    }
+
+    recognitionRef.current?.abort();
+    const recognition = new RecognitionCtor();
+    recognition.lang = resolveSpeechLocale(language);
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        transcript += `${event.results[index][0]?.transcript || ''} `;
+      }
+      const normalizedTranscript = transcript.trim();
+      if (normalizedTranscript) {
+        onTranscript(normalizedTranscript);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error !== 'aborted') {
+        setSpeechError(`Voice input issue: ${event.error}`);
+      }
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setIsListening(false);
+    };
+
+    setSpeechError(null);
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
+  }, [language, onTranscript]);
+
+  useEffect(() => () => {
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+  }, []);
+
+  return {
+    isSupported,
+    isListening,
+    speechError,
+    startListening,
+    stopListening,
+  };
+};
+
+const getCommunicationThread = (booking: Booking): BookingCommunicationMessage[] => {
+  const raw = getBookingNegotiationField<BookingCommunicationMessage[]>(booking, 'communicationThread');
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((message) => message && typeof message.sourceText === 'string')
+    .sort(
+      (a, b) =>
+        new Date(a.createdAt || 0).getTime() -
+        new Date(b.createdAt || 0).getTime()
+    );
+};
+
+const getLanguageDisplayName = (value?: string) => {
+  const normalized = normalizeUiLanguageCode(value);
+  const option = getSupportedUiLanguage(normalized);
+  return option.nativeLabel || option.label;
+};
+
+const buildCommunicationMessage = ({
+  actor,
+  senderId,
+  senderName,
+  sourceLanguage,
+  targetLanguage,
+  sourceText,
+  translatedText,
+  provider,
+}: {
+  actor: 'driver' | 'consumer';
+  senderId: string;
+  senderName: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  sourceText: string;
+  translatedText: string;
+  provider?: 'gemini' | 'fallback';
+}): BookingCommunicationMessage => ({
+  id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  actor,
+  senderId,
+  senderName,
+  sourceLanguage: normalizeUiLanguageCode(sourceLanguage),
+  targetLanguage: normalizeUiLanguageCode(targetLanguage),
+  sourceText: String(sourceText || '').trim(),
+  translatedText: String(translatedText || sourceText || '').trim(),
+  createdAt: new Date().toISOString(),
+  translationProvider: provider || 'fallback',
+});
+
+const getComparableFareSamples = (
+  entries: Array<Partial<Booking> | Partial<Ride> | Partial<TravelerRideRequest>>,
+  origin: string,
+  destination: string
+) => {
+  const targetOrigin = normalizeSearchText(origin);
+  const targetDestination = normalizeSearchText(destination);
+  return entries
+    .map((entry) => {
+      const entryOrigin = normalizeSearchText(String((entry as any).origin || ''));
+      const entryDestination = normalizeSearchText(String((entry as any).destination || ''));
+      const fare = Number(
+        (entry as any).price ??
+          (entry as any).fare ??
+          (entry as any).negotiatedFare ??
+          0
+      );
+      if (!Number.isFinite(fare) || fare <= 0) return null;
+      const exactMatch = entryOrigin === targetOrigin && entryDestination === targetDestination;
+      const partialMatch =
+        (!exactMatch &&
+          (entryOrigin.includes(targetOrigin) ||
+            targetOrigin.includes(entryOrigin) ||
+            entryDestination.includes(targetDestination) ||
+            targetDestination.includes(entryDestination))) ||
+        false;
+      if (!exactMatch && !partialMatch) return null;
+      return {
+        fare,
+        weight: exactMatch ? 1 : 0.65,
+      };
+    })
+    .filter((sample): sample is { fare: number; weight: number } => Boolean(sample));
+};
+
+const buildFareGuidance = (
+  entries: Array<Partial<Booking> | Partial<Ride> | Partial<TravelerRideRequest>>,
+  origin: string,
+  destination: string,
+  quotedFare?: number
+) => {
+  const samples = getComparableFareSamples(entries, origin, destination);
+  if (!samples.length) return null;
+
+  const weightedAverage =
+    samples.reduce((sum, sample) => sum + sample.fare * sample.weight, 0) /
+    samples.reduce((sum, sample) => sum + sample.weight, 0);
+  const fares = samples.map((sample) => sample.fare).sort((a, b) => a - b);
+  const low = fares[0];
+  const high = fares[fares.length - 1];
+  const variance =
+    Number.isFinite(quotedFare) && quotedFare && weightedAverage > 0
+      ? ((quotedFare - weightedAverage) / weightedAverage) * 100
+      : null;
+
+  return {
+    average: Math.round(weightedAverage),
+    low: Math.round(low),
+    high: Math.round(high),
+    sampleCount: samples.length,
+    variance: variance !== null ? Math.round(variance) : null,
+  };
+};
+
+type RouteAlertItem = {
+  id: string;
+  severity: 'info' | 'watch' | 'caution';
+  title: string;
+  body: string;
+};
+
+const MOUNTAIN_ROUTE_TOKENS = ['sikkim', 'darjeeling', 'gangtok', 'kalimpong', 'shimla', 'manali', 'kashmir', 'nilgiri', 'bhutan', 'nepal'];
+const BORDER_ROUTE_TOKENS = ['border', 'checkpoint', 'ranipool', 'rangpo', 'petrapole', 'phuentsholing', 'kakarbhitta'];
+const CONSTRUCTION_ROUTE_TOKENS = ['bypass', 'highway', 'bridge', 'flyover', 'corridor'];
+
+const buildRouteAlerts = ({
+  origin,
+  destination,
+  viewerLocation,
+  tripSession,
+  activeOverlapCount,
+  requiresDetour,
+}: {
+  origin: string;
+  destination: string;
+  viewerLocation?: { lat: number; lng: number } | null;
+  tripSession?: TripSession;
+  activeOverlapCount?: number;
+  requiresDetour?: boolean;
+}): RouteAlertItem[] => {
+  const routeText = `${origin} ${destination}`.toLowerCase();
+  const alerts: RouteAlertItem[] = [];
+
+  if (tripSession?.isStale || tripSession?.networkState === 'offline') {
+    alerts.push({
+      id: 'signal-watch',
+      severity: 'watch',
+      title: 'Signal watch',
+      body: 'Live trip telemetry is temporarily stale on this corridor. Expect short location refresh gaps until the signal stabilizes.',
+    });
+  }
+
+  if (requiresDetour) {
+    alerts.push({
+      id: 'detour-risk',
+      severity: 'caution',
+      title: 'Detour in play',
+      body: 'Pickup or drop differs from the listed corridor. Review negotiation terms carefully before locking the fare.',
+    });
+  }
+
+  if (MOUNTAIN_ROUTE_TOKENS.some((token) => routeText.includes(token))) {
+    alerts.push({
+      id: 'mountain-traffic',
+      severity: 'caution',
+      title: 'Mountain corridor caution',
+      body: 'Hill roads on this route can see slow-moving traffic, weather disruption, or landslide checks. Keep departure buffers flexible.',
+    });
+  }
+
+  if (BORDER_ROUTE_TOKENS.some((token) => routeText.includes(token))) {
+    alerts.push({
+      id: 'border-watch',
+      severity: 'watch',
+      title: 'Border checkpoint watch',
+      body: 'This route may pass through a permit or checkpoint corridor. Expect document checks and variable hold times during peak movement windows.',
+    });
+  }
+
+  if (CONSTRUCTION_ROUTE_TOKENS.some((token) => routeText.includes(token)) || (activeOverlapCount || 0) >= 4) {
+    alerts.push({
+      id: 'corridor-load',
+      severity: 'info',
+      title: 'Busy corridor',
+      body: 'This route currently shows elevated ride activity. Construction diversions or urban choke points can push fares and ETAs upward.',
+    });
+  }
+
+  if (viewerLocation && alerts.length === 0) {
+    alerts.push({
+      id: 'geo-watch',
+      severity: 'info',
+      title: 'Route watch active',
+      body: 'mAIRide is tracking this corridor against your live location so only route-relevant alerts appear here.',
+    });
+  }
+
+  return alerts.slice(0, 3);
+};
 
 const primaryActionButtonClass =
   "rounded-xl font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 active:shadow-sm";
@@ -9113,17 +9520,458 @@ const RideReviewModal = ({
   );
 };
 
+const FareGuidanceHint = ({
+  guidance,
+  quotedFare,
+  mode = 'soft',
+}: {
+  guidance: ReturnType<typeof buildFareGuidance> | null;
+  quotedFare?: number;
+  mode?: 'soft' | 'compact';
+}) => {
+  if (!guidance) return null;
+
+  const varianceCopy =
+    Number.isFinite(guidance.variance) && guidance.variance !== null
+      ? guidance.variance > 12
+        ? `This quote is ${guidance.variance}% above the current corridor average.`
+        : guidance.variance < -12
+          ? `This quote is ${Math.abs(guidance.variance)}% below the current corridor average.`
+          : 'This quote is broadly in line with the current corridor average.'
+      : 'Use this live range as a guide while negotiating.';
+
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border border-orange-200 bg-orange-50/70 text-orange-900",
+        mode === 'compact' ? "mt-3 px-3 py-2" : "mt-4 px-4 py-3"
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-mairide-accent" />
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-accent">Smart Fare Guide</p>
+          <p className="mt-1 text-sm font-semibold text-mairide-primary">
+            Typical live range: {formatCurrency(guidance.low)} to {formatCurrency(guidance.high)} • Avg {formatCurrency(guidance.average)}
+          </p>
+          <p className="mt-1 text-xs text-mairide-secondary">
+            {varianceCopy} Based on {guidance.sampleCount} comparable live fares.
+            {Number.isFinite(quotedFare) && quotedFare ? ` Your current quote: ${formatCurrency(Number(quotedFare))}.` : ''}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RouteAlertsTicker = ({
+  alerts,
+  title,
+}: {
+  alerts: RouteAlertItem[];
+  title: string;
+}) => {
+  const effectiveAlerts = alerts.length
+    ? alerts
+    : [
+        {
+          id: 'route-watch-standby',
+          severity: 'info' as const,
+          title: 'Route watch on standby',
+          body: 'No active corridor alert right now. As soon as a live route, detour, or traffic-sensitive match is detected, updates will appear here automatically.',
+        },
+      ];
+
+  const repeatedAlerts = [...effectiveAlerts, ...effectiveAlerts];
+
+  return (
+    <div className="mb-6 overflow-hidden rounded-[24px] border border-mairide-secondary bg-white shadow-sm">
+      <div className="flex items-center gap-3 border-b border-mairide-secondary/60 px-4 py-3">
+        <AlertTriangle className="h-4 w-4 text-mairide-accent" />
+        <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">{title}</p>
+      </div>
+      <div className="overflow-hidden px-4 py-3">
+        <motion.div
+          className="flex min-w-max gap-3"
+          animate={{ x: ['0%', '-50%'] }}
+          transition={{ duration: Math.max(18, effectiveAlerts.length * 8), repeat: Infinity, ease: 'linear' }}
+        >
+          {repeatedAlerts.map((alert, index) => (
+            <div
+              key={`${alert.id}-${index}`}
+              className={cn(
+                "flex min-w-[320px] max-w-[420px] items-start gap-3 rounded-2xl border px-4 py-3",
+                alert.severity === 'caution'
+                  ? "border-red-200 bg-red-50"
+                  : alert.severity === 'watch'
+                    ? "border-orange-200 bg-orange-50"
+                    : "border-blue-200 bg-blue-50"
+              )}
+            >
+              <AlertCircle
+                className={cn(
+                  "mt-0.5 h-4 w-4 shrink-0",
+                  alert.severity === 'caution'
+                    ? "text-red-500"
+                    : alert.severity === 'watch'
+                      ? "text-orange-500"
+                      : "text-blue-500"
+                )}
+              />
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-mairide-primary">{alert.title}</p>
+                <p className="mt-1 text-xs leading-relaxed text-mairide-secondary">{alert.body}</p>
+              </div>
+            </div>
+          ))}
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
+const DashboardTranslatorCard = ({
+  title,
+  description,
+  defaultTargetLanguage,
+}: {
+  title: string;
+  description: string;
+  defaultTargetLanguage?: string;
+}) => {
+  const [sourceLanguage, setSourceLanguage] = useState(getRuntimeLanguageCode());
+  const [targetLanguage, setTargetLanguage] = useState(defaultTargetLanguage || (getRuntimeLanguageCode() === 'en' ? 'hi' : 'en'));
+  const [sourceText, setSourceText] = useState('');
+  const [translatedText, setTranslatedText] = useState('');
+  const [isTranslating, setIsTranslating] = useState(false);
+  const {
+    isSupported: isSpeechSupported,
+    isListening,
+    speechError,
+    startListening,
+    stopListening,
+  } = useSpeechToText(sourceLanguage, (transcript) => {
+    setSourceText((previous) => (previous.trim() ? `${previous.trim()} ${transcript}` : transcript));
+  });
+
+  useEffect(() => {
+    const runtimeLanguage = getRuntimeLanguageCode();
+    setSourceLanguage(runtimeLanguage);
+    if (!defaultTargetLanguage) {
+      setTargetLanguage(runtimeLanguage === 'en' ? 'hi' : 'en');
+    }
+  }, [defaultTargetLanguage]);
+
+  const handleTranslate = async () => {
+    if (!sourceText.trim()) return;
+    setIsTranslating(true);
+    try {
+      const response = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: sourceText.trim(),
+          sourceLanguage,
+          targetLanguage,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to translate message.');
+      }
+
+      const result = await response.json();
+      setTranslatedText(String(result.translatedText || sourceText.trim()));
+    } catch (error) {
+      console.error('Quick translator failed:', error);
+      setTranslatedText(sourceText.trim());
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  return (
+    <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">Quick translator</p>
+          <h3 className="mt-2 text-xl font-black tracking-tight text-mairide-primary">{title}</h3>
+          <p className="mt-2 text-sm leading-relaxed text-mairide-secondary">{description}</p>
+        </div>
+        <Bot className="h-6 w-6 shrink-0 text-mairide-accent" />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">From</span>
+          <select
+            value={sourceLanguage}
+            onChange={(e) => setSourceLanguage(e.target.value)}
+            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+          >
+            {SUPPORTED_UI_LANGUAGES.map((language) => (
+              <option key={`source-${language.code}`} value={language.code}>
+                {language.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">To</span>
+          <select
+            value={targetLanguage}
+            onChange={(e) => setTargetLanguage(e.target.value)}
+            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+          >
+            {SUPPORTED_UI_LANGUAGES.map((language) => (
+              <option key={`target-${language.code}`} value={language.code}>
+                {language.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_1fr]">
+        <div className="space-y-3">
+          <textarea
+            value={sourceText}
+            onChange={(e) => setSourceText(e.target.value)}
+            placeholder="Type what you want to say or tap the mic"
+            className="min-h-[120px] w-full rounded-2xl border border-mairide-secondary bg-mairide-bg p-4 text-sm text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => (isListening ? stopListening() : startListening())}
+              disabled={!isSpeechSupported}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold transition-all",
+                isListening
+                  ? "bg-red-50 text-red-600 border border-red-200"
+                  : "bg-mairide-bg text-mairide-primary border border-mairide-secondary",
+                !isSpeechSupported && "cursor-not-allowed opacity-50"
+              )}
+            >
+              {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              {isListening ? 'Stop recording' : 'Speak instead'}
+            </button>
+            <p className="text-xs text-mairide-secondary">
+              {isListening
+                ? `Listening in ${getLanguageDisplayName(sourceLanguage)}...`
+                : 'Your spoken note will be converted to text, then translated.'}
+            </p>
+          </div>
+          {speechError && <p className="text-xs text-red-600">{speechError}</p>}
+        </div>
+        <div className="flex items-center justify-center">
+          <button
+            onClick={() => void handleTranslate()}
+            disabled={isTranslating || !sourceText.trim()}
+            className="rounded-2xl bg-mairide-accent px-5 py-3 text-sm font-bold text-white transition-all hover:bg-mairide-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isTranslating ? 'Translating...' : 'Translate'}
+          </button>
+        </div>
+        <div className="min-h-[120px] rounded-2xl border border-mairide-secondary bg-white p-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Translated output</p>
+          <p className="mt-3 text-sm leading-relaxed text-mairide-primary">
+            {translatedText || 'Your translated message will appear here.'}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const NegotiationCommunicationPanel = ({
+  booking,
+  viewerRole,
+  onSend,
+}: {
+  booking: Booking;
+  viewerRole: 'consumer' | 'driver';
+  onSend: (booking: Booking, payload: { sourceLanguage: string; targetLanguage: string; text: string }) => Promise<void>;
+}) => {
+  const thread = getCommunicationThread(booking);
+  const [draft, setDraft] = useState('');
+  const [sourceLanguage, setSourceLanguage] = useState(getRuntimeLanguageCode());
+  const [targetLanguage, setTargetLanguage] = useState('en');
+  const [isSending, setIsSending] = useState(false);
+  const latestMessage = thread[thread.length - 1];
+  const {
+    isSupported: isSpeechSupported,
+    isListening,
+    speechError,
+    startListening,
+    stopListening,
+  } = useSpeechToText(sourceLanguage, (transcript) => {
+    setDraft((previous) => (previous.trim() ? `${previous.trim()} ${transcript}` : transcript));
+  });
+
+  useEffect(() => {
+    const runtimeLanguage = getRuntimeLanguageCode();
+    setSourceLanguage(runtimeLanguage);
+    const inferredTarget =
+      normalizeUiLanguageCode(latestMessage?.sourceLanguage) !== runtimeLanguage
+        ? normalizeUiLanguageCode(latestMessage?.sourceLanguage)
+        : runtimeLanguage === 'en'
+          ? 'hi'
+          : 'en';
+    setTargetLanguage(inferredTarget);
+  }, [booking.id, latestMessage?.sourceLanguage]);
+
+  const handleSend = async () => {
+    if (!draft.trim()) return;
+    setIsSending(true);
+    try {
+      await onSend(booking, {
+        sourceLanguage,
+        targetLanguage,
+        text: draft.trim(),
+      });
+      setDraft('');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-2xl border border-mairide-secondary/40 bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">In-app translator</p>
+          <p className="mt-1 text-sm font-semibold text-mairide-primary">
+            Share short negotiation notes across languages without leaving the booking thread.
+          </p>
+        </div>
+        <MessageSquare className="h-5 w-5 text-mairide-accent" />
+      </div>
+
+      {thread.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {thread.slice(-3).map((message) => {
+            const isOwnMessage = message.actor === viewerRole;
+            return (
+              <div
+                key={message.id}
+                className={cn(
+                  "rounded-2xl border px-4 py-3",
+                  isOwnMessage ? "border-mairide-primary/15 bg-mairide-bg" : "border-orange-200 bg-orange-50/50"
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">
+                    {isOwnMessage ? 'You' : message.senderName} • {getLanguageDisplayName(message.sourceLanguage)}
+                  </p>
+                  <p className="text-[10px] text-mairide-secondary">
+                    {new Date(message.createdAt).toLocaleTimeString()}
+                  </p>
+                </div>
+                <p className="mt-2 text-sm font-semibold text-mairide-primary">{message.sourceText}</p>
+                {message.translatedText && message.translatedText !== message.sourceText && (
+                  <p className="mt-2 text-sm text-mairide-secondary">
+                    <span className="font-bold text-mairide-accent">Translated:</span> {message.translatedText}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr]">
+        <div>
+          <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">I speak</label>
+          <select
+            value={sourceLanguage}
+            onChange={(event) => setSourceLanguage(normalizeUiLanguageCode(event.target.value))}
+            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+          >
+            {SUPPORTED_UI_LANGUAGES.map((option) => (
+              <option key={`source-${option.value}`} value={option.value}>
+                {option.nativeLabel}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Translate for recipient</label>
+          <select
+            value={targetLanguage}
+            onChange={(event) => setTargetLanguage(normalizeUiLanguageCode(event.target.value))}
+            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+          >
+            {SUPPORTED_UI_LANGUAGES.map((option) => (
+              <option key={`target-${option.value}`} value={option.value}>
+                {option.nativeLabel}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-3 md:flex-row">
+        <div className="flex-1 space-y-3">
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Type a short note for fare, pickup, route, or language help"
+            className="min-h-[96px] w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => (isListening ? stopListening() : startListening())}
+              disabled={!isSpeechSupported}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold transition-all",
+                isListening
+                  ? "bg-red-50 text-red-600 border border-red-200"
+                  : "bg-mairide-bg text-mairide-primary border border-mairide-secondary",
+                !isSpeechSupported && "cursor-not-allowed opacity-50"
+              )}
+            >
+              {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              {isListening ? 'Stop recording' : 'Record voice note'}
+            </button>
+            <p className="text-xs text-mairide-secondary">
+              {isListening
+                ? `Listening in ${getLanguageDisplayName(sourceLanguage)}...`
+                : 'Speak in your own language. mAIRide will convert it to text and send the translation.'}
+            </p>
+          </div>
+          {speechError && <p className="text-xs text-red-600">{speechError}</p>}
+        </div>
+        <button
+          onClick={() => void handleSend()}
+          disabled={isSending || !draft.trim()}
+          className={cn(
+            "inline-flex items-center justify-center gap-2 self-stretch rounded-2xl bg-mairide-primary px-6 py-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60 md:self-end",
+            primaryActionButtonClass
+          )}
+        >
+          <Send className="h-4 w-4" />
+          {isSending ? 'Sending…' : 'Translate & Send'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const TravelerDashboardSummary = ({
   bookings,
   tripSessions,
   rideStatusById = {},
   ridesResolved = false,
   config,
+  fareGuideSourceEntries,
   onAcceptCounter,
   onRejectCounter,
   counterFares,
   setCounterFares,
   onCounter,
+  onSendMessage,
   onPayWithCoins,
   onPayOnline,
   onOpenBooking,
@@ -9133,11 +9981,13 @@ const TravelerDashboardSummary = ({
   rideStatusById?: Record<string, Ride['status']>;
   ridesResolved?: boolean;
   config: AppConfig;
+  fareGuideSourceEntries: Array<Partial<Booking> | Partial<Ride> | Partial<TravelerRideRequest>>;
   onAcceptCounter: (booking: Booking) => void;
   onRejectCounter: (booking: Booking) => void;
   counterFares: { [key: string]: string };
   setCounterFares: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
   onCounter: (booking: Booking, fare: number) => void;
+  onSendMessage: (booking: Booking, payload: { sourceLanguage: string; targetLanguage: string; text: string }) => Promise<void>;
   onPayWithCoins: (booking: Booking) => void;
   onPayOnline: (booking: Booking) => void;
   onOpenBooking: (booking: Booking) => void;
@@ -9177,6 +10027,13 @@ const TravelerDashboardSummary = ({
           const statusLabel = getBookingStateLabel(booking);
           const travelerFeeBreakdown = getBookingPaymentBreakdown(booking as Booking, 'consumer', config);
           const tripSession = tripSessions[booking.id];
+          const currentCounterValue = Number(counterFares[booking.id] || displayFare);
+          const fareGuidance = buildFareGuidance(
+            fareGuideSourceEntries,
+            booking.origin,
+            booking.destination,
+            currentCounterValue
+          );
           const showLiveTrackingPanel =
             booking.status === 'confirmed' ||
             booking.rideLifecycleStatus === 'awaiting_start_otp' ||
@@ -9259,6 +10116,7 @@ const TravelerDashboardSummary = ({
                     Send Counter
                   </button>
                 </div>
+                <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
               </div>
             )}
             {!hasDriverCounterOffer && booking.status !== 'confirmed' && (
@@ -9292,7 +10150,15 @@ const TravelerDashboardSummary = ({
                     Send Counter Offer
                   </button>
                 </div>
+                <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
               </div>
+            )}
+            {['pending', 'negotiating', 'confirmed'].includes(String(booking.status || '')) && (
+              <NegotiationCommunicationPanel
+                booking={booking}
+                viewerRole="consumer"
+                onSend={onSendMessage}
+              />
             )}
             {booking.status === 'confirmed' && (
               <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
@@ -9549,11 +10415,13 @@ const DriverDashboardSummary = ({
   requests,
   tripSessions,
   config,
+  fareGuideSourceEntries,
   onAccept,
   onReject,
   counterFares,
   setCounterFares,
   onCounter,
+  onSendMessage,
   onPayWithCoins,
   onPayOnline,
   onStartRide,
@@ -9562,11 +10430,13 @@ const DriverDashboardSummary = ({
   requests: Booking[];
   tripSessions: Record<string, TripSession>;
   config: AppConfig;
+  fareGuideSourceEntries: Array<Partial<Booking> | Partial<Ride> | Partial<TravelerRideRequest>>;
   onAccept: (request: Booking) => void;
   onReject: (request: Booking) => void;
   counterFares: { [key: string]: string };
   setCounterFares: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
   onCounter: (request: Booking, fare: number) => void;
+  onSendMessage: (request: Booking, payload: { sourceLanguage: string; targetLanguage: string; text: string }) => Promise<void>;
   onPayWithCoins: (request: Booking) => void;
   onPayOnline: (request: Booking) => void;
   onStartRide: (request: Booking, otp: string) => void;
@@ -9604,6 +10474,13 @@ const DriverDashboardSummary = ({
           const listedFare = travelerListedFare;
           const driverFeeBreakdown = getBookingPaymentBreakdown(request as Booking, 'driver', config);
           const tripSession = tripSessions[request.id];
+          const currentCounterValue = Number(counterFares[request.id] || displayFare);
+          const fareGuidance = buildFareGuidance(
+            fareGuideSourceEntries,
+            request.origin,
+            request.destination,
+            currentCounterValue
+          );
           const requestedOrigin = request.requestedOrigin || request.origin;
           const requestedDestination = request.requestedDestination || request.destination;
           const showsDetour =
@@ -9663,6 +10540,7 @@ const DriverDashboardSummary = ({
                     Send Counter
                   </button>
                 </div>
+                <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
                 {showsDetour && (
                   <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
                     <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-mairide-accent" /><p className="text-xs font-bold uppercase tracking-widest text-mairide-accent">Traveler Detour Request</p></div>
@@ -9692,6 +10570,13 @@ const DriverDashboardSummary = ({
                   </div>
                 )}
               </div>
+            )}
+            {['pending', 'negotiating', 'confirmed'].includes(String(request.status || '')) && (
+              <NegotiationCommunicationPanel
+                booking={request}
+                viewerRole="driver"
+                onSend={onSendMessage}
+              />
             )}
             {request.status === 'confirmed' && (
               <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
@@ -12178,6 +13063,42 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     if (driverIds.size > 0) return driverIds.size;
     return Math.min(nearbyAvailableCabCount, drivers.length);
   }, [activeTravelerRequestRoutes, drivers.length, nearbyAvailableCabCount, partialRides, rides]);
+  const travelerRouteAlerts = useMemo(() => {
+    const primaryBooking = dashboardBookings.find((booking) => isBookingTrackable(booking));
+    const primaryRequest = travelerRequests.find(isUnifiedRideActive);
+    const referenceOrigin = primaryBooking?.origin || primaryRequest?.origin || search.from;
+    const referenceDestination = primaryBooking?.destination || primaryRequest?.destination || search.to;
+    if (!referenceOrigin || !referenceDestination) return [];
+    const overlapCount = [...rides, ...partialRides].filter((ride) => {
+      const rideRoute = getFeedItemRoute(ride);
+      const requestRoute = getFeedItemRoute({
+        origin: referenceOrigin,
+        destination: referenceDestination,
+        originLocation: primaryRequest?.originLocation || primaryBooking?.originLocation,
+        destinationLocation: primaryRequest?.destinationLocation || primaryBooking?.destinationLocation,
+      });
+      return isWithinAnyDashboardCorridor(rideRoute, requestRoute ? [requestRoute] : []);
+    }).length;
+
+    return buildRouteAlerts({
+      origin: referenceOrigin,
+      destination: referenceDestination,
+      viewerLocation: travelerFeedLocation,
+      tripSession: primaryBooking ? tripSessions[primaryBooking.id] : undefined,
+      activeOverlapCount: overlapCount,
+      requiresDetour: Boolean(primaryBooking?.requiresDetour),
+    });
+  }, [dashboardBookings, partialRides, rides, search.from, search.to, travelerFeedLocation, travelerRequests, tripSessions]);
+  const travelerFareGuidance = useMemo(
+    () =>
+      buildFareGuidance(
+        [...rides, ...partialRides, ...dashboardBookings],
+        newRequest.origin,
+        newRequest.destination,
+        Number(newRequest.fare || 0)
+      ),
+    [dashboardBookings, newRequest.destination, newRequest.fare, newRequest.origin, partialRides, rides]
+  );
 
   useEffect(() => {
     dashboardBookingsRef.current = dashboardBookings;
@@ -13880,6 +14801,53 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
   };
 
+  const handleTravelerCommunicationMessage = async (
+    booking: Booking,
+    payload: { sourceLanguage: string; targetLanguage: string; text: string }
+  ) => {
+    const sourceText = String(payload.text || '').trim();
+    if (!sourceText) return;
+
+    let translatedText = sourceText;
+    let provider: 'gemini' | 'fallback' = 'fallback';
+
+    try {
+      const { data } = await axios.post('/api/translate', {
+        text: sourceText,
+        sourceLanguage: payload.sourceLanguage,
+        targetLanguage: payload.targetLanguage,
+      });
+      translatedText = String(data?.translatedText || sourceText).trim() || sourceText;
+      provider = data?.provider === 'gemini' ? 'gemini' : 'fallback';
+    } catch {
+      translatedText = sourceText;
+    }
+
+    const message = buildCommunicationMessage({
+      actor: 'consumer',
+      senderId: profile.uid,
+      senderName: profile.displayName || profile.email || 'Traveler',
+      sourceLanguage: payload.sourceLanguage,
+      targetLanguage: payload.targetLanguage,
+      sourceText,
+      translatedText,
+      provider,
+    });
+
+    try {
+      const updatedAt = await persistCommunicationMessageThroughCompatStore(booking, message);
+      const updatedThread = normalizeNegotiationBooking({
+        ...booking,
+        communicationThread: [...getCommunicationThread(booking), message].slice(-12),
+        updatedAt,
+      } as Booking);
+      setDashboardBookings((prev) => mergeNegotiationThread(prev, updatedThread));
+      showAppDialog('Translated note sent to the driver.', 'success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
+    }
+  };
+
   const submitTravelerPaymentProof = async (
     booking: Booking,
     payload: { transactionId: string; receiptDataUrl: string }
@@ -14087,17 +15055,31 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </div>
           </div>
 
+          <RouteAlertsTicker
+            alerts={travelerRouteAlerts}
+            title="Geo-tagged route watch"
+          />
+
+          <div className="mb-8">
+            <DashboardTranslatorCard
+              title="Talk to drivers across languages"
+              description="Translate short ride notes instantly before or during negotiation. Your live booking thread will still carry translated notes automatically."
+            />
+          </div>
+
           <TravelerDashboardSummary
             bookings={dashboardBookings}
             tripSessions={tripSessions}
             rideStatusById={rideStatusById}
             ridesResolved={ridesResolved}
             config={config}
+            fareGuideSourceEntries={[...rides, ...partialRides, ...dashboardBookings]}
             onAcceptCounter={(booking) => handleTravelerNegotiation(booking, 'accepted')}
             onRejectCounter={(booking) => handleTravelerNegotiation(booking, 'rejected')}
             counterFares={dashboardCounterFares}
             setCounterFares={setDashboardCounterFares}
             onCounter={(booking, fare) => handleTravelerCounterOffer(booking, fare)}
+            onSendMessage={handleTravelerCommunicationMessage}
             onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
             onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
             onOpenBooking={() => setActiveTab('history')}
@@ -14513,9 +15495,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-semibold text-mairide-primary">Your Fare Offer (INR)</label>
-                      <div className="relative">
-                        <IndianRupee className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-mairide-secondary" />
-                        <input
+                    <div className="relative">
+                      <IndianRupee className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-mairide-secondary" />
+                      <input
                           type="number"
                           placeholder="e.g. 1800"
                           className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg py-4 pl-12 pr-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
@@ -14523,6 +15505,11 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                           onChange={(e) => setNewRequest((prev) => ({ ...prev, fare: e.target.value }))}
                         />
                       </div>
+                      <FareGuidanceHint
+                        guidance={travelerFareGuidance}
+                        quotedFare={Number(newRequest.fare || 0)}
+                        mode="compact"
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-semibold text-mairide-primary">Seats Needed</label>
@@ -15057,6 +16044,50 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         )
       ),
     [requests, driverBookings]
+  );
+  const driverRouteAlerts = useMemo(() => {
+    const primaryRequest = activeDashboardRequests.find((request) => ['pending', 'negotiating', 'confirmed'].includes(request.status));
+    const referenceOrigin = primaryRequest?.origin || newRide.origin;
+    const referenceDestination = primaryRequest?.destination || newRide.destination;
+    if (!referenceOrigin || !referenceDestination) return [];
+    const overlapCount = activeTravelerRideRequests.filter((request) => {
+      const requestRoute = getFeedItemRoute(request);
+      const baseRoute = getFeedItemRoute({
+        origin: referenceOrigin,
+        destination: referenceDestination,
+        originLocation: primaryRequest?.originLocation || originLocation,
+        destinationLocation: primaryRequest?.destinationLocation || destinationLocation,
+      });
+      return isWithinAnyDashboardCorridor(requestRoute, baseRoute ? [baseRoute] : []);
+    }).length;
+
+    return buildRouteAlerts({
+      origin: referenceOrigin,
+      destination: referenceDestination,
+      viewerLocation: driverFeedLocation,
+      tripSession: primaryRequest ? tripSessions[primaryRequest.id] : undefined,
+      activeOverlapCount: overlapCount,
+      requiresDetour: Boolean(primaryRequest?.requiresDetour),
+    });
+  }, [
+    activeDashboardRequests,
+    activeTravelerRideRequests,
+    destinationLocation,
+    driverFeedLocation,
+    newRide.destination,
+    newRide.origin,
+    originLocation,
+    tripSessions,
+  ]);
+  const driverFareGuidance = useMemo(
+    () =>
+      buildFareGuidance(
+        [...travelerRideRequests, ...requests, ...driverBookings],
+        newRide.origin,
+        newRide.destination,
+        Number(newRide.price || 0)
+      ),
+    [driverBookings, newRide.destination, newRide.origin, newRide.price, requests, travelerRideRequests]
   );
 
   const markDriverRideStartedInState = useCallback((rideId: string, startedAt: string) => {
@@ -16722,6 +17753,57 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
   };
 
+  const handleDriverCommunicationMessage = async (
+    request: Booking,
+    payload: { sourceLanguage: string; targetLanguage: string; text: string }
+  ) => {
+    const sourceText = String(payload.text || '').trim();
+    if (!sourceText) return;
+
+    let translatedText = sourceText;
+    let provider: 'gemini' | 'fallback' = 'fallback';
+
+    try {
+      const { data } = await axios.post('/api/translate', {
+        text: sourceText,
+        sourceLanguage: payload.sourceLanguage,
+        targetLanguage: payload.targetLanguage,
+      });
+      translatedText = String(data?.translatedText || sourceText).trim() || sourceText;
+      provider = data?.provider === 'gemini' ? 'gemini' : 'fallback';
+    } catch {
+      translatedText = sourceText;
+    }
+
+    const message = buildCommunicationMessage({
+      actor: 'driver',
+      senderId: profile.uid,
+      senderName: profile.displayName || profile.email || 'Driver',
+      sourceLanguage: payload.sourceLanguage,
+      targetLanguage: payload.targetLanguage,
+      sourceText,
+      translatedText,
+      provider,
+    });
+
+    try {
+      const updatedAt = await persistCommunicationMessageThroughCompatStore(request, message);
+      const updatedThread = normalizeNegotiationBooking({
+        ...request,
+        communicationThread: [...getCommunicationThread(request), message].slice(-12),
+        updatedAt,
+      } as Booking);
+      setRequests((prev) => mergeNegotiationThread(prev, updatedThread));
+      setDriverBookings((prev) => mergeNegotiationThread(prev, updatedThread).filter(isDriverDashboardBooking));
+      if (driverNegotiationPreview?.id === request.id) {
+        setDriverNegotiationPreview(updatedThread);
+      }
+      showAppDialog('Translated note sent to the traveler.', 'success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
+    }
+  };
+
   const submitDriverPaymentProof = async (
     booking: Booking,
     payload: { transactionId: string; receiptDataUrl: string }
@@ -17120,6 +18202,18 @@ const finalizeDriverDashboardRazorpayPayment = async (
             </div>
           </div>
 
+          <RouteAlertsTicker
+            alerts={driverRouteAlerts}
+            title="Geo-tagged route watch"
+          />
+
+          <div className="mb-8">
+            <DashboardTranslatorCard
+              title="Talk to travelers across languages"
+              description="Use the quick translator for route clarifications, fare context, or pickup notes. During live negotiations, translated messages will also stay attached to the booking thread."
+            />
+          </div>
+
           {showOfferForm && (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
@@ -17226,6 +18320,11 @@ const finalizeDriverDashboardRazorpayPayment = async (
                       onChange={e => setNewRide({ ...newRide, price: e.target.value })}
                     />
                   </div>
+                  <FareGuidanceHint
+                    guidance={driverFareGuidance}
+                    quotedFare={Number(newRide.price || 0)}
+                    mode="compact"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-mairide-primary mb-2">Seats Available</label>
@@ -17405,6 +18504,12 @@ const finalizeDriverDashboardRazorpayPayment = async (
               const driverListedFare = getDriverListedFare(driverNegotiationPreview);
               const currentFare = getNegotiationDisplayFare(driverNegotiationPreview);
               const counterValue = counterFares[driverNegotiationPreview.id] || '';
+              const negotiationFareGuidance = buildFareGuidance(
+                [...travelerRideRequests, ...requests, ...driverBookings],
+                driverNegotiationPreview.origin,
+                driverNegotiationPreview.destination,
+                Number(counterValue || currentFare)
+              );
               const isDriverCounterPending = pendingActor === 'driver';
               const isTravelerCounterPending = pendingActor === 'consumer';
 
@@ -17516,6 +18621,11 @@ const finalizeDriverDashboardRazorpayPayment = async (
                             Send Counter
                           </button>
                         </div>
+                        <FareGuidanceHint
+                          guidance={negotiationFareGuidance}
+                          quotedFare={Number(counterValue || currentFare)}
+                          mode="compact"
+                        />
                       </div>
                     </div>
 
@@ -17645,11 +18755,13 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 requests={activeDashboardRequests}
                 tripSessions={tripSessions}
                 config={config}
+                fareGuideSourceEntries={[...travelerRideRequests, ...requests, ...driverBookings]}
                 onAccept={(request) => handleDriverAction(request, 'confirmed')}
                 onReject={(request) => handleDriverAction(request, 'rejected')}
                 counterFares={counterFares}
                 setCounterFares={setCounterFares}
                 onCounter={handleDriverCounterOffer}
+                onSendMessage={handleDriverCommunicationMessage}
                 onPayWithCoins={(request) => handleDriverDashboardPayment(request, true)}
                 onPayOnline={(request) => handleDriverDashboardPayment(request, false)}
                 onStartRide={handleStartRide}
@@ -23504,10 +24616,12 @@ const App = () => {
   const [androidUpdateState, setAndroidUpdateState] = useState<{
     available: boolean;
     latestVersion: string;
+    nativeVersion: string;
     apkUrl: string;
   }>({
     available: false,
     latestVersion: '',
+    nativeVersion: '',
     apkUrl: LIVE_ANDROID_APK_URL,
   });
   const [showAndroidUpdatePrompt, setShowAndroidUpdatePrompt] = useState(false);
@@ -24411,18 +25525,21 @@ const App = () => {
         if (!response.ok) return;
         const data = await response.json();
         const latestVersion = String(data?.appVersion || '').trim();
+        const nativeVersion = String(data?.nativeVersion || '').trim();
         const apkUrl = String(data?.apkUrl || LIVE_ANDROID_APK_URL).trim() || LIVE_ANDROID_APK_URL;
-        if (!latestVersion) return;
-        const needsUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(installedAndroidVersion);
+        const targetVersion = nativeVersion || latestVersion;
+        if (!targetVersion) return;
+        const needsUpdate = normalizeVersionTag(targetVersion) !== normalizeVersionTag(installedAndroidVersion);
         if (!active) return;
         setAndroidUpdateState({
           available: needsUpdate,
           latestVersion,
+          nativeVersion: targetVersion,
           apkUrl,
         });
         if (needsUpdate) {
           const dismissedForVersion = safeStorageGet('local', 'mairide_android_update_dismissed_version');
-          setShowAndroidUpdatePrompt(dismissedForVersion !== latestVersion);
+          setShowAndroidUpdatePrompt(Boolean(targetVersion) && dismissedForVersion !== targetVersion);
         } else {
           setShowAndroidUpdatePrompt(false);
         }
@@ -24503,8 +25620,8 @@ const App = () => {
   };
 
   const handleDismissAndroidUpdatePrompt = () => {
-    if (androidUpdateState.latestVersion) {
-      safeStorageSet('local', 'mairide_android_update_dismissed_version', androidUpdateState.latestVersion);
+    if (androidUpdateState.nativeVersion) {
+      safeStorageSet('local', 'mairide_android_update_dismissed_version', androidUpdateState.nativeVersion);
     }
     setShowAndroidUpdatePrompt(false);
   };
@@ -24611,7 +25728,7 @@ const App = () => {
           <div className="flex-1">
             <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Android update available</p>
             <p className="mt-1 text-sm text-mairide-primary">
-              New build <span className="font-bold">{androidUpdateState.latestVersion}</span> is ready. Update now to stay in sync with the latest web release.
+              New native build <span className="font-bold">{androidUpdateState.nativeVersion || androidUpdateState.latestVersion}</span> is ready. Update now when you want the latest Android shell improvements.
             </p>
           </div>
         </div>

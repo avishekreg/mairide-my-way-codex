@@ -388,6 +388,19 @@ export interface PartnerBooking {
   };
 }
 
+export interface BookingCommunicationMessage {
+  id: string;
+  actor: 'driver' | 'consumer';
+  senderId: string;
+  senderName: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  sourceText: string;
+  translatedText: string;
+  createdAt: string;
+  translationProvider?: 'gemini' | 'fallback';
+}
+
 export interface Booking {
   id: string;
   rideId: string;
@@ -470,6 +483,7 @@ export interface Booking {
     consumerSubmittedAt?: string;
     driverSubmittedAt?: string;
   };
+  communicationThread?: BookingCommunicationMessage[];
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'negotiating' | 'rejected';
   createdAt: string;
 }
