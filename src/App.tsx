@@ -4107,6 +4107,38 @@ const filterRouteReportsForBooking = (
   });
 };
 
+const buildDraftRouteAlertBooking = ({
+  origin,
+  destination,
+  viewerRole,
+  profile,
+}: {
+  origin: string;
+  destination: string;
+  viewerRole: 'consumer' | 'driver';
+  profile: UserProfile;
+}) => {
+  const now = new Date().toISOString();
+  return {
+    id: `route-alert-draft-${viewerRole}-${profile.uid}-${normalizeSearchText(origin)}-${normalizeSearchText(destination)}`,
+    rideId: '',
+    consumerId: viewerRole === 'consumer' ? profile.uid : '',
+    consumerName: viewerRole === 'consumer' ? profile.displayName || profile.email || 'Traveler' : 'Open traveler corridor',
+    driverId: viewerRole === 'driver' ? profile.uid : '',
+    driverName: viewerRole === 'driver' ? profile.displayName || profile.email || 'Driver' : 'Open driver corridor',
+    origin,
+    destination,
+    fare: 0,
+    seatsBooked: 1,
+    totalPrice: 0,
+    serviceFee: 0,
+    gstAmount: 0,
+    maiCoinsUsed: 0,
+    status: 'pending',
+    createdAt: now,
+  } as Booking;
+};
+
 const primaryActionButtonClass =
   "rounded-xl font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 active:shadow-sm";
 
@@ -6230,7 +6262,7 @@ const Navbar = ({
           { id: 'profile', label: 'Profile' },
         ]
       : [
-          { id: 'search', label: 'Request Ride' },
+          { id: 'search', label: 'Dashboard' },
           { id: 'history', label: 'My Bookings' },
           { id: 'wallet', label: 'Wallet' },
           { id: 'support', label: 'Support' },
@@ -10055,6 +10087,68 @@ const RouteAlertComposer = ({
   );
 };
 
+const RouteAlertComposerModal = ({
+  booking,
+  viewerRole,
+  viewerProfile,
+  reports,
+  onSubmit,
+  onClose,
+}: {
+  booking: Booking | null;
+  viewerRole: 'consumer' | 'driver';
+  viewerProfile: UserProfile;
+  reports: RouteAlertReport[];
+  onSubmit: (
+    booking: Booking,
+    payload: { issueType: RouteAlertReport['issueType']; note: string; photoDataUrl: string }
+  ) => Promise<void>;
+  onClose: () => void;
+}) => {
+  if (!booking) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm">
+      <div className="flex min-h-full items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.96, y: 12 }}
+          className="w-full max-w-4xl"
+        >
+          <div className="rounded-[36px] border border-mairide-secondary bg-white p-4 shadow-2xl md:p-5">
+            <div className="mb-4 flex items-center justify-between gap-4 px-2">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">Geo-tagged route watch</p>
+                <h3 className="mt-2 text-2xl font-black tracking-tight text-mairide-primary">Report Route Issue</h3>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-mairide-secondary bg-mairide-bg text-mairide-primary transition hover:bg-white"
+                aria-label="Close route issue reporter"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <RouteAlertComposer
+              booking={booking}
+              viewerRole={viewerRole}
+              viewerProfile={viewerProfile}
+              reports={reports}
+              onSubmit={async (selectedBooking, payload) => {
+                await onSubmit(selectedBooking, payload);
+                onClose();
+              }}
+            />
+          </div>
+        </motion.div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 const NegotiationCommunicationPanel = ({
   booking,
   viewerRole,
@@ -13220,6 +13314,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [requestAutocompleteTo, setRequestAutocompleteTo] = useState<any | null>(null);
   const [requestOriginLocation, setRequestOriginLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [requestDestinationLocation, setRequestDestinationLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [showTravelerRouteAlertModal, setShowTravelerRouteAlertModal] = useState(false);
   const [travelerSmartMatchPrompt, setTravelerSmartMatchPrompt] = useState<{
     draft: {
       consumerId: string;
@@ -13386,6 +13481,19 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         : [],
     [activeTravelerSessionBooking, routeAlertReports]
   );
+  const travelerRouteAlertDraftBooking = useMemo(() => {
+    if (activeTravelerSessionBooking) return activeTravelerSessionBooking;
+    const primaryRequest = travelerRequests.find(isUnifiedRideActive);
+    const origin = primaryRequest?.origin || search.from || newRequest.origin;
+    const destination = primaryRequest?.destination || search.to || newRequest.destination;
+    if (!origin || !destination) return null;
+    return buildDraftRouteAlertBooking({
+      origin,
+      destination,
+      viewerRole: 'consumer',
+      profile,
+    });
+  }, [activeTravelerSessionBooking, newRequest.destination, newRequest.origin, profile, search.from, search.to, travelerRequests]);
 
   useEffect(() => {
     dashboardBookingsRef.current = dashboardBookings;
@@ -15403,6 +15511,23 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             title="Geo-tagged route watch"
           />
 
+          <div className="mb-8 mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                if (!travelerRouteAlertDraftBooking) {
+                  showAppDialog('Choose or request a route first so we know which corridor the issue belongs to.', 'warning');
+                  return;
+                }
+                setShowTravelerRouteAlertModal(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-5 py-3 text-sm font-bold text-mairide-primary transition-all hover:border-mairide-accent hover:text-mairide-accent"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Report Route Issue
+            </button>
+          </div>
+
           <div className="mb-8">
             {activeTravelerSessionBooking ? (
               <div className="space-y-5">
@@ -15422,13 +15547,22 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             ) : (
               <div className="rounded-[28px] border border-mairide-secondary bg-white p-6 shadow-sm">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Ride session tools</p>
-                <h3 className="mt-3 text-xl font-black tracking-tight text-mairide-primary">Translator and route watch unlock after a match.</h3>
+                <h3 className="mt-3 text-xl font-black tracking-tight text-mairide-primary">Private translator and route reporting unlock after a match.</h3>
                 <p className="mt-2 text-sm text-mairide-secondary">
                   Once a driver and traveler are linked to the same live booking, mAIRide opens a private translated communication thread and lets both sides post geotagged route evidence for that ride only.
                 </p>
               </div>
             )}
           </div>
+
+          <RouteAlertComposerModal
+            booking={showTravelerRouteAlertModal ? travelerRouteAlertDraftBooking : null}
+            viewerRole="consumer"
+            viewerProfile={profile}
+            reports={travelerRouteAlertDraftBooking ? filterRouteReportsForBooking(routeAlertReports, travelerRouteAlertDraftBooking) : []}
+            onSubmit={handleTravelerRouteAlertSubmit}
+            onClose={() => setShowTravelerRouteAlertModal(false)}
+          />
 
           <TravelerDashboardSummary
             bookings={dashboardBookings}
@@ -16331,6 +16465,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [dismissedReviewIds, setDismissedReviewIds] = useState<Record<string, boolean>>({});
   const [driverBookings, setDriverBookings] = useState<Booking[]>([]);
   const [routeAlertReports, setRouteAlertReports] = useState<RouteAlertReport[]>([]);
+  const [showDriverRouteAlertModal, setShowDriverRouteAlertModal] = useState(false);
   const [rideOffersRefreshKey, setRideOffersRefreshKey] = useState(0);
   const [driverAvailableRideRoutes, setDriverAvailableRideRoutes] = useState<
     Array<{ originLocation: { lat: number; lng: number }; destinationLocation: { lat: number; lng: number } }>
@@ -16469,6 +16604,21 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         : [],
     [activeDriverSessionBooking, routeAlertReports]
   );
+  const driverRouteAlertDraftBooking = useMemo(() => {
+    if (activeDriverSessionBooking) return activeDriverSessionBooking;
+    const primaryRequest = activeDashboardRequests.find((booking) =>
+      ['pending', 'negotiating', 'confirmed'].includes(String(booking.status || ''))
+    );
+    const origin = primaryRequest?.origin || newRide.origin;
+    const destination = primaryRequest?.destination || newRide.destination;
+    if (!origin || !destination) return null;
+    return buildDraftRouteAlertBooking({
+      origin,
+      destination,
+      viewerRole: 'driver',
+      profile,
+    });
+  }, [activeDashboardRequests, activeDriverSessionBooking, newRide.destination, newRide.origin, profile]);
 
   useEffect(() => {
     let isMounted = true;
@@ -18643,6 +18793,23 @@ const finalizeDriverDashboardRazorpayPayment = async (
             title="Geo-tagged route watch"
           />
 
+          <div className="mb-8 mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                if (!driverRouteAlertDraftBooking) {
+                  showAppDialog('Select a live route or start drafting an offer first so the issue is mapped to the correct corridor.', 'warning');
+                  return;
+                }
+                setShowDriverRouteAlertModal(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-5 py-3 text-sm font-bold text-mairide-primary transition-all hover:border-mairide-accent hover:text-mairide-accent"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Report Route Issue
+            </button>
+          </div>
+
           <div className="mb-8">
             {activeDriverSessionBooking ? (
               <div className="space-y-5">
@@ -18662,13 +18829,22 @@ const finalizeDriverDashboardRazorpayPayment = async (
             ) : (
               <div className="rounded-[28px] border border-mairide-secondary bg-white p-6 shadow-sm">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Ride session tools</p>
-                <h3 className="mt-3 text-xl font-black tracking-tight text-mairide-primary">Translator and route watch activate per live negotiation.</h3>
+                <h3 className="mt-3 text-xl font-black tracking-tight text-mairide-primary">Private translator and route reporting activate per live negotiation.</h3>
                 <p className="mt-2 text-sm text-mairide-secondary">
                   Once a traveler is matched to your ride, mAIRide opens a private translated session for that booking and lets both sides publish geotagged photo-backed route reports without leaking messages to any other ride.
                 </p>
               </div>
             )}
           </div>
+
+          <RouteAlertComposerModal
+            booking={showDriverRouteAlertModal ? driverRouteAlertDraftBooking : null}
+            viewerRole="driver"
+            viewerProfile={profile}
+            reports={driverRouteAlertDraftBooking ? filterRouteReportsForBooking(routeAlertReports, driverRouteAlertDraftBooking) : []}
+            onSubmit={handleDriverRouteAlertSubmit}
+            onClose={() => setShowDriverRouteAlertModal(false)}
+          />
 
           {showOfferForm && (
             <motion.div 
