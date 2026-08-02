@@ -611,7 +611,7 @@ async function generateUniqueReferralCode(supabaseAdmin: any) {
   }
 }
 
-async function handleSendOtp(req: any, res: any) {
+export async function handleSendOtp(req: any, res: any) {
   const { phoneNumber } = req.body || {};
   try {
     const data = await sendSmsOtpToPhone(phoneNumber, "login");
@@ -622,7 +622,7 @@ async function handleSendOtp(req: any, res: any) {
   }
 }
 
-async function handleSendEmailOtp(req: any, res: any) {
+export async function handleSendEmailOtp(req: any, res: any) {
   const { email } = req.body || {};
   const normalizedEmail = normalizeEmail(email);
   const emailConfig = await getEmailOtpConfig();
@@ -680,7 +680,7 @@ async function handleSendEmailOtp(req: any, res: any) {
   }
 }
 
-async function handleVerifyOtp(req: any, res: any) {
+export async function handleVerifyOtp(req: any, res: any) {
   const { sessionId, otp } = req.body || {};
   const normalizedSessionId = normalizeSessionValue(sessionId);
   const normalizedOtp = normalizeOtpValue(otp);

@@ -16,11 +16,6 @@ import locationHandler from "./api/location.ts";
 import { handleCompleteSignup } from "./api/_lib/signup.ts";
 import { handleSubmitReview } from "./api/_lib/reviews.ts";
 import {
-  handleSendEmailOtp,
-  handleSendOtp,
-  handleVerifyOtp,
-} from "./api/_lib/otp.ts";
-import {
   handleHealth,
   handleUserCancelRide,
   handleUserCreateRide,
@@ -30,7 +25,12 @@ import {
   handleUserTravelerCounterBooking,
   handleUserTravelerRespondBooking,
 } from "./api/_lib/backend.ts";
-import { handleResolvePhoneLogin } from "./api/auth.ts";
+import {
+  handleResolvePhoneLogin,
+  handleSendEmailOtp,
+  handleSendOtp,
+  handleVerifyOtp,
+} from "./api/auth.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

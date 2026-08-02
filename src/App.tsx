@@ -22445,17 +22445,32 @@ const ForcePasswordChangeModal = ({ profile }: { profile: UserProfile }) => {
   );
 };
 
-const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
+const AdminDashboard = ({
+  profile,
+  isLoaded,
+  loadError,
+  authFailure,
+  uiLanguage,
+  onChangeLanguage,
+}: {
+  profile: UserProfile,
+  isLoaded: boolean,
+  loadError?: Error,
+  authFailure?: boolean,
+  uiLanguage: string,
+  onChangeLanguage: (next: string) => void,
+}) => {
   const effectiveAdminRole = profile.adminRole || 'super_admin';
   type UsersInsightView = 'drivers' | 'travelers' | 'onlineDrivers' | 'onlineTravelers' | 'activeTrips' | 'openOffers' | null;
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b'>('revenue');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b'>('dashboard');
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
+  const [pendingPartnerCount, setPendingPartnerCount] = useState(0);
   const hasMapsIssue = Boolean(loadError || authFailure);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showAddUser, setShowAddUser] = useState(false);
@@ -22553,7 +22568,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const [ridesPageSize, setRidesPageSize] = useState<number>(10);
   const [usersInsightView, setUsersInsightView] = useState<UsersInsightView>(null);
   const [activeB2BSection, setActiveB2BSection] = useState<'hotels' | 'fleets'>('hotels');
-  const [isB2BNavOpen, setIsB2BNavOpen] = useState(true);
+  const [isB2BNavOpen, setIsB2BNavOpen] = useState(false);
   const [adminNotice, setAdminNotice] = useState<{
     title: string;
     message: string;
@@ -22700,6 +22715,24 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       active = false;
     };
   }, [activeTab, profile.email, adminTransactionsCacheKey]);
+
+  useEffect(() => {
+    let active = true;
+    const loadPendingPartners = async () => {
+      try {
+        const partners = await b2bPartnerService.listPendingPartners();
+        if (active) {
+          setPendingPartnerCount(partners.length);
+        }
+      } catch (error) {
+        console.error('Error loading pending partners:', error);
+      }
+    };
+    void loadPendingPartners();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleAdminForceCancelRide = async (booking: any) => {
     const rideId = booking.rideId || booking.ride_id || booking.data?.rideId || '';
@@ -22974,6 +23007,9 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
   const usersWithLocation = users.filter(
     u => u.location && typeof u.location.lat === 'number' && typeof u.location.lng === 'number'
   );
+  const paymentEvents = getPlatformFeePaymentEvents(bookings as Booking[]);
+  const adminRevenueTotal = paymentEvents.reduce((sum, event) => sum + event.revenue, 0);
+  const adminGstTotal = paymentEvents.reduce((sum, event) => sum + event.gst, 0);
   const userCards = [
     {
       id: 'drivers' as UsersInsightView,
@@ -23086,16 +23122,20 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
         }
       : { lat: 22.5937, lng: 78.9629 });
   const adminMapZoom = adminLocation ? 13 : usersWithLocation.length ? 5 : 4;
-  const adminTabTitle = activeTab === 'b2b'
-    ? activeB2BSection === 'hotels'
-      ? 'Hotel & Resort Partners'
-      : 'Fleet & Travel Operators'
-    : activeTab;
-  const adminTabDescription = activeTab === 'b2b'
-    ? activeB2BSection === 'hotels'
-      ? 'Review hospitality partners, control hotel commission assignments, and verify their onboarding documents.'
-      : 'Review fleet and travel operator applications, verify geo-tagged onboarding, and clear active operators.'
-    : `Manage and monitor platform ${activeTab} details.`;
+  const adminTabTitle = activeTab === 'dashboard'
+    ? 'Admin Dashboard'
+    : activeTab === 'b2b'
+      ? activeB2BSection === 'hotels'
+        ? 'Hotel & Resort Partners'
+        : 'Fleet & Travel Operators'
+      : activeTab;
+  const adminTabDescription = activeTab === 'dashboard'
+    ? 'Track live rides, approvals, revenue movement, and platform health from one clean control surface.'
+    : activeTab === 'b2b'
+      ? activeB2BSection === 'hotels'
+        ? 'Review hospitality partners, control hotel commission assignments, and verify their onboarding documents.'
+        : 'Review fleet and travel operator applications, verify geo-tagged onboarding, and clear active operators.'
+      : `Manage and monitor platform ${activeTab} details.`;
 
   const handleVerifyDriver = async (userId: string, status: 'approved' | 'rejected') => {
     if (!selectedDriver || selectedDriver.verificationStatus !== 'pending') {
@@ -23322,6 +23362,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
 
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           {[
+            { id: 'dashboard', label: 'Dashboard', icon: LineChartIcon, roles: ['super_admin', 'support', 'compliance', 'finance'] },
             { id: 'verification', label: 'Verifications', icon: ShieldCheck, roles: ['super_admin', 'support', 'compliance'] },
             { id: 'map', label: 'Live Map', icon: MapPin, roles: ['super_admin', 'support'] },
             { id: 'users', label: 'Users', icon: Users, roles: ['super_admin', 'compliance'] },
@@ -23343,7 +23384,7 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                   <button
                     onClick={() => {
                       setActiveTab('b2b');
-                      setIsB2BNavOpen((current) => !current);
+                      setIsB2BNavOpen((current) => (activeTab === 'b2b' ? !current : true));
                     }}
                     className={cn(
                       "w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all group relative",
@@ -23400,6 +23441,9 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                 key={item.id}
                 onClick={() => {
                   setActiveTab(item.id as any);
+                  if (item.id !== 'b2b') {
+                    setIsB2BNavOpen(false);
+                  }
                   if (window.innerWidth < 1024) {
                     setIsSidebarOpen(false);
                   }
@@ -23415,12 +23459,12 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
                 <span className={cn("whitespace-nowrap transition-all", isSidebarOpen ? "opacity-100" : "opacity-0 w-0")}>
                   {item.label}
                 </span>
-                {item.id === 'verification' && pendingVerificationDrivers.length > 0 && (
+                {(item.id === 'verification' || item.id === 'dashboard') && (pendingVerificationDrivers.length + pendingPartnerCount) > 0 && (
                   <span className={cn(
                     "bg-mairide-accent text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full ml-auto",
                     !isSidebarOpen && "absolute top-1 right-1"
                   )}>
-                    {pendingVerificationDrivers.length}
+                    {pendingVerificationDrivers.length + pendingPartnerCount}
                   </span>
                 )}
               </button>
@@ -23445,29 +23489,181 @@ const AdminDashboard = ({ profile, isLoaded, loadError, authFailure }: { profile
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Mobile Header */}
-        <header className="lg:hidden bg-white border-b border-mairide-secondary p-4 flex justify-between items-center">
+        <header className="lg:hidden bg-white border-b border-mairide-secondary p-4 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center">
             <img src={LOGO_URL} className="mr-2.5 h-11 w-11 shrink-0 rounded-[16px] object-contain" alt="mAIRide Logo" />
             <div className="flex min-w-0 flex-col justify-center leading-none">
               <BrandWordmark className="block truncate text-[1.28rem] font-black leading-[0.95] tracking-tighter text-mairide-primary" />
             </div>
           </div>
-          <button 
-            onClick={() => setIsSidebarOpen(true)}
-            className="p-2 bg-mairide-bg rounded-xl"
-          >
-            <Menu className="w-6 h-6 text-mairide-primary" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="max-w-[132px]">
+              <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact variant="nav" />
+            </div>
+            <button 
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-2 bg-mairide-bg rounded-xl"
+            >
+              <Menu className="w-6 h-6 text-mairide-primary" />
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12">
           <div className="max-w-7xl mx-auto">
-            <div className="mb-12">
-              <h2 className="text-4xl font-black text-mairide-primary tracking-tighter capitalize mb-2">
-                {adminTabTitle}
-              </h2>
-              <p className="text-mairide-secondary italic serif text-lg">{adminTabDescription}</p>
+            <div className="mb-12 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="text-4xl font-black text-mairide-primary tracking-tighter capitalize mb-2">
+                  {adminTabTitle}
+                </h2>
+                <p className="text-mairide-secondary italic serif text-lg">{adminTabDescription}</p>
+              </div>
+              <div className="hidden lg:block">
+                <LanguageSwitcher value={uiLanguage} onChange={onChangeLanguage} compact variant="nav" />
+              </div>
             </div>
+
+            {activeTab === 'dashboard' && (
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                  {[
+                    {
+                      label: 'Active / Live rides',
+                      value: activeTrips.length + openRideOffers.length,
+                      helper: `${activeTrips.length} active trips · ${openRideOffers.length} open offers`,
+                      icon: Car,
+                      tone: 'bg-orange-50 text-orange-600',
+                      actionLabel: 'Open rides desk',
+                      onClick: () => setActiveTab('rides' as typeof activeTab),
+                    },
+                    {
+                      label: 'Pending approvals desk',
+                      value: pendingVerificationDrivers.length + pendingPartnerCount,
+                      helper: `${pendingVerificationDrivers.length} driver verifications · ${pendingPartnerCount} partner approvals`,
+                      icon: ShieldCheck,
+                      tone: 'bg-blue-50 text-blue-600',
+                      actionLabel: 'Review approvals',
+                      onClick: () => setActiveTab('verification' as typeof activeTab),
+                    },
+                    {
+                      label: 'Total revenue',
+                      value: formatCurrency(adminRevenueTotal),
+                      helper: `GST captured ${formatCurrency(adminGstTotal)}`,
+                      icon: IndianRupee,
+                      tone: 'bg-emerald-50 text-emerald-600',
+                      actionLabel: 'Open revenue',
+                      onClick: () => setActiveTab('revenue' as typeof activeTab),
+                    },
+                    {
+                      label: 'Capacity & system health',
+                      value: `${liveTripSessions.length}`,
+                      helper: `${staleTripSessions.length} stale · ${offlineTripSessions.length} offline · ${antiSpoofAlerts} anti-spoof alerts`,
+                      icon: TrendingUp,
+                      tone: 'bg-purple-50 text-purple-600',
+                      actionLabel: 'Inspect health',
+                      onClick: () => setActiveTab('capacity' as typeof activeTab),
+                    },
+                  ].map((card) => (
+                    <button
+                      key={card.label}
+                      type="button"
+                      onClick={card.onClick}
+                      className="rounded-[32px] border border-mairide-secondary bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg"
+                    >
+                      <div className={cn("mb-4 flex h-12 w-12 items-center justify-center rounded-2xl", card.tone)}>
+                        <card.icon className="h-6 w-6" />
+                      </div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">{card.label}</p>
+                      <p className="mt-2 text-3xl font-black tracking-tighter text-mairide-primary">{card.value}</p>
+                      <p className="mt-2 text-sm text-mairide-secondary">{card.helper}</p>
+                      <p className="mt-4 text-xs font-bold uppercase tracking-widest text-mairide-accent">{card.actionLabel}</p>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_0.9fr] gap-8">
+                  <div className="rounded-[40px] border border-mairide-secondary bg-white p-8 shadow-sm">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Operations snapshot</p>
+                        <h3 className="mt-2 text-2xl font-black text-mairide-primary">Marketplace command center</h3>
+                        <p className="mt-1 text-sm text-mairide-secondary">The highest-signal controls for live rides, approvals, payments, and platform health.</p>
+                      </div>
+                      <div className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+                        {users.length} users on platform
+                      </div>
+                    </div>
+                    <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('mobile' as typeof activeTab)}
+                        className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5 text-left transition-all hover:bg-white hover:shadow-md"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-mairide-primary shadow-sm">
+                            <Smartphone className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">Mobile apps</p>
+                            <p className="mt-1 text-lg font-bold text-mairide-primary">Distribution and shell health</p>
+                          </div>
+                        </div>
+                        <p className="mt-4 text-sm text-mairide-secondary">Review Android / iOS rollout, build details, and app delivery posture.</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('transactions' as typeof activeTab)}
+                        className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5 text-left transition-all hover:bg-white hover:shadow-md"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-mairide-primary shadow-sm">
+                            <Receipt className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-widest text-mairide-secondary">Transactions</p>
+                            <p className="mt-1 text-lg font-bold text-mairide-primary">{paymentEvents.length} payment events</p>
+                          </div>
+                        </div>
+                        <p className="mt-4 text-sm text-mairide-secondary">Open fee capture history, gateway traces, and settlement-linked records.</p>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[40px] border border-mairide-secondary bg-white p-8 shadow-sm">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">System health alerts</p>
+                    <h3 className="mt-2 text-2xl font-black text-mairide-primary">Priority watchlist</h3>
+                    <div className="mt-6 space-y-4">
+                      {[
+                        {
+                          title: 'Driver verification queue',
+                          detail: pendingVerificationDrivers.length
+                            ? `${pendingVerificationDrivers.length} driver applications need review right now.`
+                            : 'No driver verification backlog right now.',
+                          tone: pendingVerificationDrivers.length ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-green-50 text-green-700 border-green-200',
+                        },
+                        {
+                          title: 'B2B approvals desk',
+                          detail: pendingPartnerCount
+                            ? `${pendingPartnerCount} hotel / fleet partner submissions are waiting for admin action.`
+                            : 'Partner approvals desk is clear.',
+                          tone: pendingPartnerCount ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-green-50 text-green-700 border-green-200',
+                        },
+                        {
+                          title: 'Route tracking integrity',
+                          detail: `${staleTripSessions.length} stale sessions, ${offlineTripSessions.length} offline links, ${antiSpoofAlerts} anti-spoof alerts.`,
+                          tone: staleTripSessions.length || offlineTripSessions.length || antiSpoofAlerts ? 'bg-red-50 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-200',
+                        },
+                      ].map((alert) => (
+                        <div key={alert.title} className={cn("rounded-[28px] border p-5", alert.tone)}>
+                          <p className="text-sm font-bold">{alert.title}</p>
+                          <p className="mt-2 text-sm leading-relaxed">{alert.detail}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {activeTab === 'verification' && (
           <div className="space-y-6">
@@ -26744,12 +26940,16 @@ const App = () => {
       <ErrorBoundary>
         {profile.forcePasswordChange && <ForcePasswordChangeModal profile={profile} />}
         <div className="min-h-screen bg-mairide-bg flex flex-col">
-          <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
-            <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact />
-          </div>
           <div id="google_translate_element" className="hidden" />
           <div className="flex-1">
-            <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} />
+            <AdminDashboard
+              profile={profile}
+              isLoaded={isLoaded}
+              loadError={loadError}
+              authFailure={authFailure}
+              uiLanguage={uiLanguage}
+              onChangeLanguage={commitUiLanguage}
+            />
           </div>
           <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
           <AppDialogHost />
@@ -26784,11 +26984,32 @@ const App = () => {
               <Route path="/business-model" element={<BusinessModelPage />} />
               <Route path="/tutorials" element={<TutorialsPage />} />
               <Route path="/" element={
-                profile?.role === 'admin' ? <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> :
+                profile?.role === 'admin' ? (
+                  <AdminDashboard
+                    profile={profile}
+                    isLoaded={isLoaded}
+                    loadError={loadError}
+                    authFailure={authFailure}
+                    uiLanguage={uiLanguage}
+                    onChangeLanguage={commitUiLanguage}
+                  />
+                ) :
                 profile?.role === 'driver' ? <DriverApp profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : 
                 profile ? <ConsumerApp profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : <LoadingScreen releaseVersion={releaseVersion} />
               } />
-              <Route path="/admin" element={profile?.role === 'admin' ? <AdminDashboard profile={profile} isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} /> : <Navigate to="/" />} />
+              <Route
+                path="/admin"
+                element={profile?.role === 'admin' ? (
+                  <AdminDashboard
+                    profile={profile}
+                    isLoaded={isLoaded}
+                    loadError={loadError}
+                    authFailure={authFailure}
+                    uiLanguage={uiLanguage}
+                    onChangeLanguage={commitUiLanguage}
+                  />
+                ) : <Navigate to="/" />}
+              />
               <Route path="/support" element={profile ? <SupportSystem profile={profile} /> : <Navigate to="/" />} />
               <Route path="/consumer/bookings" element={profile ? <MyBookings profile={profile} /> : <Navigate to="/" />} />
               <Route path="/driver/rides" element={profile ? <MyRides profile={profile} /> : <Navigate to="/" />} />
