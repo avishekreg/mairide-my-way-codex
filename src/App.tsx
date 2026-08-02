@@ -25566,6 +25566,7 @@ const App = () => {
   const androidPushRegistrationKeyRef = useRef('');
   const criticalSessionResetRef = useRef(false);
   const lastSeenBuildRef = useRef('');
+  const lastAndroidBackPressAtRef = useRef(0);
   const releaseVersion = resolveReleaseVersion(appConfigState.config?.appVersion, remoteAppVersion);
 
   useEffect(() => {
@@ -25765,26 +25766,44 @@ const App = () => {
     if (typeof window === 'undefined') return;
     if (!isMobileAppRuntime()) return;
 
-    const isRootLoginPath = () => {
+    const isRootShellPath = () => {
       const pathname = String(window.location.pathname || '/').trim() || '/';
       return pathname === '/' || pathname === '/index.html' || pathname === '/landing.html';
     };
 
+    const minimizeAppToBackground = async () => {
+      try {
+        await CapacitorApp.minimizeApp();
+      } catch {
+        await CapacitorApp.exitApp();
+      }
+    };
+
     const listenerPromise = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-      if (!canGoBack && isRootLoginPath() && !user) {
-        void CapacitorApp.exitApp();
+      if (!canGoBack && isRootShellPath()) {
+        const now = Date.now();
+        if (now - lastAndroidBackPressAtRef.current <= 1600) {
+          lastAndroidBackPressAtRef.current = 0;
+          void minimizeAppToBackground();
+          return;
+        }
+        lastAndroidBackPressAtRef.current = now;
         return;
       }
 
-      if (canGoBack && !isRootLoginPath()) {
+      if (canGoBack && !isRootShellPath()) {
+        lastAndroidBackPressAtRef.current = 0;
         window.history.back();
+        return;
       }
+
+      lastAndroidBackPressAtRef.current = 0;
     });
 
     return () => {
       void listenerPromise.then((listener) => listener.remove()).catch(() => undefined);
     };
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     if (!isMobileAppRuntime()) return;
