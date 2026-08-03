@@ -5598,7 +5598,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               ) : null}
             </div>
           ) : null}
-          <div className="flex flex-wrap items-center justify-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-3">
             <a
               href={getTrackedAndroidApkUrl()}
               target="_blank"
@@ -5615,27 +5615,27 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
             >
               Get it on iOS
             </a>
-          </div>
-          <div className="mt-2 flex flex-col items-center gap-2 rounded-3xl border border-mairide-secondary bg-white/85 px-4 py-4 shadow-sm">
             <a
               href={PUBLIC_ANDROID_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="block rounded-2xl bg-white p-2 shadow-inner"
+              className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white/85 p-2 pr-3 shadow-sm transition hover:bg-white"
               aria-label="Scan QR code to download the mAIRide Android app"
             >
-              <img
-                src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
-                alt="QR code to download the mAIRide Android app"
-                className="h-28 w-28"
-                width={112}
-                height={112}
-                loading="lazy"
-              />
+              <span className="rounded-xl bg-white p-1 shadow-inner">
+                <img
+                  src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
+                  alt="QR code to download the mAIRide Android app"
+                  className="h-14 w-14"
+                  width={56}
+                  height={56}
+                  loading="lazy"
+                />
+              </span>
+              <span className="max-w-[86px] text-left text-[9px] font-bold uppercase leading-3 tracking-widest text-mairide-secondary">
+                Scan Android
+              </span>
             </a>
-            <p className="max-w-[220px] text-center text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
-              Scan to download Android app
-            </p>
           </div>
           {isAndroidDevice && androidUpdateMessage && isAndroidUpdateAvailable ? (
             <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
