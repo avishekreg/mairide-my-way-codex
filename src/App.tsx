@@ -781,7 +781,7 @@ const listConfigValues = (value?: string[] | string | null) => {
 
 const stringifyConfigValues = (value?: string[] | string | null) => listConfigValues(value).join('\n');
 
-const STRICT_SANDBOX_EMAILS = ['ad@optinpay.com', 'ad@optininfocom.com'];
+const STRICT_SANDBOX_EMAILS = ['ad@optonpay.com', 'ad@optoninfocom.com'];
 const MAIPAY_SERVICE_CATALOG = [
   { id: 'dmt', label: 'DMT', category: 'Money Transfer', description: 'Domestic money transfer connector and beneficiary-led remittance workflow.' },
   { id: 'aeps', label: 'AEPS', category: 'Banking', description: 'Aadhaar-enabled payment service readiness and provider routing.' },

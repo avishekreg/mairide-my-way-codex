@@ -9,7 +9,7 @@ export type FeatureRequester = {
   role?: string;
 };
 
-export const STRICT_SANDBOX_EMAILS = ["ad@optinpay.com", "ad@optininfocom.com"];
+export const STRICT_SANDBOX_EMAILS = ["ad@optonpay.com", "ad@optoninfocom.com"];
 
 export function getSupabaseAdminClient() {
   const { supabaseUrl, serviceRoleKey } = getRuntimeSupabaseConfig();
