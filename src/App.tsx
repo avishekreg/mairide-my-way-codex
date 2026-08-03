@@ -1451,14 +1451,15 @@ const AdminTransactionsView = ({
 };
 
 const AdminMaiPayControlDesk = ({
-  users,
-  transactions,
+  users = [],
+  transactions = [],
   config,
 }: {
   users: UserProfile[];
   transactions: Transaction[];
   config?: AppConfig | null;
 }) => {
+  const safeConfig = config || {};
   const driverWalletUsers = users.filter((user) => user.role === 'driver' && user.liveMoneyWallet?.enabled);
   const activeWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'active');
   const pendingWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'pending');
@@ -1477,9 +1478,9 @@ const AdminMaiPayControlDesk = ({
       String(tx.metadata?.product || '').includes('driver_live_money_wallet')
     )
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  const paymentDmtPublicStatus = Boolean(config?.paymentDmtServicesEnabled);
-  const liveWalletPublicStatus = Boolean(config?.liveMoneyWalletAddOnEnabled);
-  const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(config);
+  const paymentDmtPublicStatus = Boolean(safeConfig.paymentDmtServicesEnabled);
+  const liveWalletPublicStatus = Boolean(safeConfig.liveMoneyWalletAddOnEnabled);
+  const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(safeConfig);
 
   const statCards = [
     {
@@ -1607,9 +1608,9 @@ const AdminMaiPayControlDesk = ({
             <h3 className="mt-2 text-2xl font-black text-mairide-primary">Provider readiness</h3>
             <div className="mt-5 space-y-3">
               {[
-                ['Razorpay key', config?.razorpayKeyId ? 'Configured' : 'Missing'],
-                ['Razorpay secret', config?.razorpayKeySecret ? 'Configured' : 'Missing'],
-                ['RazorpayX payouts', config?.razorpayXEnabled ? 'Enabled' : 'Staged'],
+                ['Razorpay key', safeConfig.razorpayKeyId ? 'Configured' : 'Missing'],
+                ['Razorpay secret', safeConfig.razorpayKeySecret ? 'Configured' : 'Missing'],
+                ['RazorpayX payouts', safeConfig.razorpayXEnabled ? 'Enabled' : 'Staged'],
                 ['Wallet add-on public rollout', liveWalletPublicStatus ? 'Enabled' : 'Disabled'],
               ].map(([label, value]) => (
                 <div key={label} className="flex items-center justify-between gap-4 rounded-2xl bg-mairide-bg px-4 py-3">
@@ -23088,12 +23089,19 @@ const AdminDashboard = ({
   onChangeLanguage: (next: string) => void,
 }) => {
   const effectiveAdminRole = profile.adminRole || 'super_admin';
+  const { config: adminAppConfig } = useAppConfig();
   type UsersInsightView = 'drivers' | 'travelers' | 'onlineDrivers' | 'onlineTravelers' | 'activeTrips' | 'openOffers' | null;
+  type AdminTab = 'dashboard' | 'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b' | 'maipay';
+  const adminTabIds: AdminTab[] = ['dashboard', 'users', 'support', 'verification', 'profile', 'rides', 'revenue', 'transactions', 'config', 'analytics', 'security', 'map', 'capacity', 'mobile', 'b2b', 'maipay'];
+  const resolveAdminTab = (value: unknown): AdminTab =>
+    adminTabIds.includes(value as AdminTab) ? (value as AdminTab) : 'dashboard';
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b' | 'maipay'>('dashboard');
+  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+  const adminHistoryInitializedRef = useRef(false);
+  const adminHistoryPopRef = useRef(false);
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
@@ -23208,6 +23216,62 @@ const AdminDashboard = ({
   const isPageVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const buildAdminHistoryState = (tab: AdminTab) => ({
+      ...(window.history.state || {}),
+      mairideAdminShell: true,
+      adminTab: tab,
+    });
+
+    if (!adminHistoryInitializedRef.current) {
+      window.history.replaceState(buildAdminHistoryState(activeTab), '', window.location.href);
+      adminHistoryInitializedRef.current = true;
+      return;
+    }
+
+    if (adminHistoryPopRef.current) {
+      adminHistoryPopRef.current = false;
+      return;
+    }
+
+    const currentState = window.history.state || {};
+    if (currentState.mairideAdminShell && currentState.adminTab === activeTab) return;
+    window.history.pushState(buildAdminHistoryState(activeTab), '', window.location.href);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleAdminPopState = (event: PopStateEvent) => {
+      const state = (event.state || {}) as { mairideAdminShell?: boolean; adminTab?: string };
+      adminHistoryPopRef.current = true;
+
+      if (state.mairideAdminShell) {
+        const nextTab = resolveAdminTab(state.adminTab);
+        setActiveTab(nextTab);
+        setIsB2BNavOpen(nextTab === 'b2b');
+        return;
+      }
+
+      setActiveTab('dashboard');
+      setIsB2BNavOpen(false);
+      window.history.replaceState(
+        {
+          ...(window.history.state || {}),
+          mairideAdminShell: true,
+          adminTab: 'dashboard',
+        },
+        '',
+        window.location.href
+      );
+    };
+
+    window.addEventListener('popstate', handleAdminPopState);
+    return () => window.removeEventListener('popstate', handleAdminPopState);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     const loadAdminUsers = async () => {
       if (!isPageVisible()) return;
@@ -23299,7 +23363,7 @@ const AdminDashboard = ({
   }, []);
 
   useEffect(() => {
-    if (activeTab !== 'transactions') {
+    if (activeTab !== 'transactions' && activeTab !== 'maipay') {
       return;
     }
 
@@ -24994,7 +25058,7 @@ const AdminDashboard = ({
           <AdminMaiPayControlDesk
             users={users}
             transactions={transactions}
-            config={config}
+            config={adminAppConfig}
           />
         )}
 
