@@ -769,6 +769,39 @@ const emptyAppConfigState: AppConfigState = {
 };
 
 const AppConfigContext = React.createContext<AppConfigState | null>(null);
+const listConfigValues = (value?: string[] | string | null) => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry || '').trim()).filter(Boolean);
+  }
+  return String(value || '')
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+};
+
+const stringifyConfigValues = (value?: string[] | string | null) => listConfigValues(value).join('\n');
+
+const STRICT_SANDBOX_EMAILS = ['ad@optonpay.com', 'ad@optoninfocom.com'];
+
+const isSandboxIntegrationUser = (profile?: Partial<UserProfile> | null, config?: Partial<AppConfig> | null) => {
+  if (!profile) return false;
+  const email = String(profile.email || '').trim().toLowerCase();
+  return Boolean(email && STRICT_SANDBOX_EMAILS.includes(email));
+};
+
+const canAccessPaymentDmtServices = (profile?: Partial<UserProfile> | null, config?: Partial<AppConfig> | null) =>
+  Boolean(config?.paymentDmtServicesEnabled) || isSandboxIntegrationUser(profile, config);
+
+const canAccessTravelTrackingServices = (profile?: Partial<UserProfile> | null, config?: Partial<AppConfig> | null) =>
+  Boolean(config?.trackingServicesEnabled) || isSandboxIntegrationUser(profile, config);
+
+const getLiveMoneyWalletAnnualFee = (config?: Partial<AppConfig> | null) => {
+  const minFee = Number(config?.liveMoneyWalletMinAnnualFee || 500);
+  const maxFee = Number(config?.liveMoneyWalletMaxAnnualFee || 1000);
+  const annualFee = Number(config?.liveMoneyWalletAnnualFee || 750);
+  return Math.min(Math.max(annualFee, minFee), maxFee);
+};
+
 const TRIP_AUDIT_MAX_ITEMS = 40;
 const TRIP_MAX_VALID_SPEED_KMPH = 170;
 
@@ -1412,6 +1445,200 @@ const AdminTransactionsView = ({
           onPageChange={setTransactionPage}
           onPageSizeChange={setTransactionPageSize}
         />
+      </div>
+    </div>
+  );
+};
+
+const AdminMaiPayControlDesk = ({
+  users,
+  transactions,
+  config,
+}: {
+  users: UserProfile[];
+  transactions: Transaction[];
+  config?: AppConfig | null;
+}) => {
+  const driverWalletUsers = users.filter((user) => user.role === 'driver' && user.liveMoneyWallet?.enabled);
+  const activeWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'active');
+  const pendingWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'pending');
+  const walletAvailableBalance = driverWalletUsers.reduce(
+    (sum, user) => sum + Number(user.liveMoneyWallet?.availableBalance || 0),
+    0
+  );
+  const walletPendingBalance = driverWalletUsers.reduce(
+    (sum, user) => sum + Number(user.liveMoneyWallet?.pendingBalance || 0),
+    0
+  );
+  const liveWalletTransactions = transactions
+    .filter((tx) =>
+      String(tx.type || '').includes('live_wallet') ||
+      String(tx.description || '').toLowerCase().includes('live money wallet') ||
+      String(tx.metadata?.product || '').includes('driver_live_money_wallet')
+    )
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const paymentDmtPublicStatus = Boolean(config?.paymentDmtServicesEnabled);
+  const liveWalletPublicStatus = Boolean(config?.liveMoneyWalletAddOnEnabled);
+  const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(config);
+
+  const statCards = [
+    {
+      label: 'Wallet drivers',
+      value: driverWalletUsers.length,
+      helper: `${activeWalletUsers.length} active · ${pendingWalletUsers.length} pending subscription`,
+      icon: Wallet,
+      tone: 'bg-orange-50 text-orange-600',
+    },
+    {
+      label: 'Available wallet balance',
+      value: formatCurrency(walletAvailableBalance),
+      helper: `${formatCurrency(walletPendingBalance)} pending reconciliation`,
+      icon: IndianRupee,
+      tone: 'bg-emerald-50 text-emerald-600',
+    },
+    {
+      label: 'Wallet gateway events',
+      value: liveWalletTransactions.length,
+      helper: 'Subscription, QR, and wallet collection traces only',
+      icon: Receipt,
+      tone: 'bg-blue-50 text-blue-600',
+    },
+    {
+      label: 'Annual add-on fee',
+      value: formatCurrency(liveWalletAnnualFee),
+      helper: 'Configurable in Global Configuration',
+      icon: Settings,
+      tone: 'bg-slate-100 text-mairide-primary',
+    },
+  ];
+
+  return (
+    <div className="space-y-8">
+      <div className="rounded-[40px] border border-mairide-primary bg-mairide-primary p-8 text-white shadow-xl shadow-mairide-primary/20">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-white/60">Independent fintech control desk</p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight">MaiPay</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-white/75">
+              A separated payment, wallet, QR, and settlement workspace for future banking-provider verification. This surface is intentionally isolated from live ride dispatch, negotiation, authentication, and tracking operations.
+            </p>
+          </div>
+          <div className="grid min-w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:min-w-[360px]">
+            <div className={cn(
+              "rounded-3xl border px-5 py-4",
+              paymentDmtPublicStatus ? "border-green-300 bg-green-500/15 text-green-100" : "border-white/15 bg-white/10 text-white/75"
+            )}>
+              <p className="text-[10px] font-bold uppercase tracking-widest">Payment / DMT master</p>
+              <p className="mt-2 text-lg font-black">{paymentDmtPublicStatus ? 'Active' : 'Inactive'}</p>
+            </div>
+            <div className={cn(
+              "rounded-3xl border px-5 py-4",
+              liveWalletPublicStatus ? "border-green-300 bg-green-500/15 text-green-100" : "border-white/15 bg-white/10 text-white/75"
+            )}>
+              <p className="text-[10px] font-bold uppercase tracking-widest">Driver wallet add-on</p>
+              <p className="mt-2 text-lg font-black">{liveWalletPublicStatus ? 'Available' : 'Staged'}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+        {statCards.map((card) => (
+          <div key={card.label} className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+            <div className={cn("mb-4 flex h-12 w-12 items-center justify-center rounded-2xl", card.tone)}>
+              <card.icon className="h-6 w-6" />
+            </div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">{card.label}</p>
+            <p className="mt-2 text-3xl font-black tracking-tighter text-mairide-primary">{card.value}</p>
+            <p className="mt-2 text-sm text-mairide-secondary">{card.helper}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.9fr] gap-8">
+        <div className="rounded-[40px] border border-mairide-secondary bg-white shadow-sm overflow-hidden">
+          <div className="border-b border-mairide-secondary p-7">
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Driver wallet ledger</p>
+            <h3 className="mt-2 text-2xl font-black text-mairide-primary">Live Money Wallet accounts</h3>
+            <p className="mt-1 text-sm text-mairide-secondary">Driver INR wallet posture, subscription state, and Razorpay QR readiness.</p>
+          </div>
+          <div className="divide-y divide-mairide-secondary">
+            {driverWalletUsers.slice(0, 8).map((driver) => (
+              <div key={driver.uid} className="p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-lg font-bold text-mairide-primary">{driver.displayName || driver.email}</p>
+                    <p className="text-sm text-mairide-secondary">{driver.email}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-mairide-bg px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-mairide-primary">
+                        {driver.liveMoneyWallet?.subscriptionStatus || 'inactive'}
+                      </span>
+                      <span className="rounded-full bg-mairide-bg px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-mairide-primary">
+                        Fee {formatCurrency(driver.liveMoneyWallet?.annualFee || liveWalletAnnualFee)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:min-w-[360px]">
+                    <div className="rounded-2xl bg-mairide-bg p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Available</p>
+                      <p className="mt-2 text-lg font-black text-mairide-primary">{formatCurrency(driver.liveMoneyWallet?.availableBalance || 0)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-mairide-bg p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Pending</p>
+                      <p className="mt-2 text-lg font-black text-mairide-primary">{formatCurrency(driver.liveMoneyWallet?.pendingBalance || 0)}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {!driverWalletUsers.length && (
+              <div className="p-10 text-center">
+                <Wallet className="mx-auto h-10 w-10 text-mairide-secondary opacity-40" />
+                <p className="mt-4 text-sm font-bold text-mairide-primary">No driver Live Money Wallet accounts yet.</p>
+                <p className="mt-1 text-sm text-mairide-secondary">Enable the add-on in Config, then drivers can opt in from onboarding or the driver dashboard.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="rounded-[40px] border border-mairide-secondary bg-white p-7 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Gateway configuration</p>
+            <h3 className="mt-2 text-2xl font-black text-mairide-primary">Provider readiness</h3>
+            <div className="mt-5 space-y-3">
+              {[
+                ['Razorpay key', config?.razorpayKeyId ? 'Configured' : 'Missing'],
+                ['Razorpay secret', config?.razorpayKeySecret ? 'Configured' : 'Missing'],
+                ['RazorpayX payouts', config?.razorpayXEnabled ? 'Enabled' : 'Staged'],
+                ['Wallet add-on public rollout', liveWalletPublicStatus ? 'Enabled' : 'Disabled'],
+              ].map(([label, value]) => (
+                <div key={label} className="flex items-center justify-between gap-4 rounded-2xl bg-mairide-bg px-4 py-3">
+                  <span className="text-sm font-bold text-mairide-primary">{label}</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent">{value}</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-5 text-xs leading-relaxed text-mairide-secondary">
+              Configuration edits stay in Global Config for now; MaiPay is the operations desk that can later move to a separate domain or provider-audit portal without touching ride modules.
+            </p>
+          </div>
+
+          <div className="rounded-[40px] border border-mairide-secondary bg-white p-7 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Recent wallet traces</p>
+            <div className="mt-5 space-y-3">
+              {liveWalletTransactions.slice(0, 5).map((tx) => (
+                <div key={tx.id} className="rounded-2xl border border-mairide-secondary bg-mairide-bg p-4">
+                  <p className="text-sm font-bold text-mairide-primary">{tx.description || tx.metadata?.product || 'Live wallet event'}</p>
+                  <p className="mt-1 text-xs text-mairide-secondary">{new Date(tx.createdAt).toLocaleString()}</p>
+                  <p className="mt-2 text-lg font-black text-mairide-accent">{tx.currency === 'INR' ? formatCurrency(tx.amount) : `${tx.amount} MC`}</p>
+                </div>
+              ))}
+              {!liveWalletTransactions.length && (
+                <p className="rounded-2xl bg-mairide-bg p-4 text-sm text-mairide-secondary">No wallet-specific gateway traces recorded yet.</p>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -2069,6 +2296,8 @@ const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
 const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
 const TRACKED_ANDROID_APK_URL = '/api/analytics?action=android-download';
+const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/api/analytics?action=android-download';
+const PUBLIC_ANDROID_DOWNLOAD_QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(PUBLIC_ANDROID_DOWNLOAD_URL)}`;
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v3.0.1-beta+build.248';
@@ -5385,6 +5614,27 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
             >
               Get it on iOS
             </a>
+          </div>
+          <div className="mt-2 flex flex-col items-center gap-2 rounded-3xl border border-mairide-secondary bg-white/85 px-4 py-4 shadow-sm">
+            <a
+              href={PUBLIC_ANDROID_DOWNLOAD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-2xl bg-white p-2 shadow-inner"
+              aria-label="Scan QR code to download the mAIRide Android app"
+            >
+              <img
+                src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
+                alt="QR code to download the mAIRide Android app"
+                className="h-28 w-28"
+                width={112}
+                height={112}
+                loading="lazy"
+              />
+            </a>
+            <p className="max-w-[220px] text-center text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+              Scan to download Android app
+            </p>
           </div>
           {isAndroidDevice && androidUpdateMessage && isAndroidUpdateAvailable ? (
             <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
@@ -8728,7 +8978,9 @@ const DriverOnboarding = ({
   onComplete: () => void;
   isLoaded: boolean;
 }) => {
+  const { config } = useAppConfig();
   const [step, setStep] = useState(1);
+  const [liveWalletOptIn, setLiveWalletOptIn] = useState(false);
   const [formData, setFormData] = useState({
     selfiePhoto: '',
     selfieGeoTag: null as any,
@@ -8762,6 +9014,8 @@ const DriverOnboarding = ({
   const [capturingField, setCapturingField] = useState<string | null>(null);
   const verificationMarkers = buildVerificationMarkers(formData as any);
   const aadhaarSegments = splitAadhaarDigits(formData.aadhaarNumber);
+  const liveWalletAddOnEnabled = Boolean(config?.liveMoneyWalletAddOnEnabled);
+  const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(config);
 
   useEffect(() => {
     void requestMobileRegistrationPermissions({ uid: profile.uid, role: 'driver' });
@@ -8972,6 +9226,20 @@ const DriverOnboarding = ({
         rejectionReason: null,
         verifiedBy: null as any,
         driverDetails,
+        ...(liveWalletAddOnEnabled && liveWalletOptIn
+          ? {
+              liveMoneyWallet: {
+                enabled: true,
+                subscriptionStatus: 'pending',
+                annualFee: liveWalletAnnualFee,
+                currency: 'INR',
+                availableBalance: 0,
+                pendingBalance: 0,
+                lifetimeGross: 0,
+                lastUpdated: new Date().toISOString(),
+              },
+            }
+          : {}),
       };
 
       const nowIso = new Date().toISOString();
@@ -9388,6 +9656,19 @@ const DriverOnboarding = ({
                   </>
                 )}
               </div>
+              {liveWalletAddOnEnabled && (
+                <label className="flex items-start gap-4 rounded-2xl border border-mairide-secondary bg-white px-4 py-4 text-left">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 accent-mairide-accent"
+                    checked={liveWalletOptIn}
+                    onChange={(e) => setLiveWalletOptIn(e.target.checked)}
+                  />
+                  <span className="text-[11px] leading-relaxed text-mairide-primary">
+                    <strong>Optional Live Money Wallet add-on.</strong> Enable a dedicated INR wallet for Razorpay QR/UPI collections and payout reconciliation. Annual subscription: <strong>{formatCurrency(liveWalletAnnualFee)}</strong>. Activation stays pending until the subscription payment is completed.
+                  </span>
+                </label>
+              )}
               <label className="flex items-start gap-3 rounded-2xl border border-mairide-secondary bg-white px-4 py-4 text-left">
                 <input
                   type="checkbox"
@@ -10013,6 +10294,154 @@ const DashboardTranslatorCard = ({
           )}
         </div>
       </div>
+    </div>
+  );
+};
+
+type TravelTrackingResult = {
+  status: 'active' | 'staged' | 'disabled' | 'error';
+  title: string;
+  summary: string;
+  checkedAt?: string;
+  details?: Array<{ label: string; value: string }>;
+};
+
+const PassengerTravelTrackingPanel = ({
+  profile,
+  config,
+}: {
+  profile: UserProfile;
+  config: Partial<AppConfig>;
+}) => {
+  const [mode, setMode] = useState<'train' | 'flight'>('train');
+  const [trainNumber, setTrainNumber] = useState('');
+  const [flightNumber, setFlightNumber] = useState('');
+  const [travelDate, setTravelDate] = useState(new Date().toISOString().slice(0, 10));
+  const [isChecking, setIsChecking] = useState(false);
+  const [result, setResult] = useState<TravelTrackingResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCheck = async () => {
+    const identifier = mode === 'train' ? trainNumber.trim() : flightNumber.trim();
+    if (!identifier) {
+      setError(mode === 'train' ? 'Enter a train number to track.' : 'Enter a flight number to track.');
+      return;
+    }
+
+    setIsChecking(true);
+    setError(null);
+    setResult(null);
+    try {
+      const { data } = await axios.post(apiPath(`/api/travel-intel?action=${mode === 'train' ? 'track-train' : 'track-flight'}`), {
+        profile: {
+          uid: profile.uid,
+          email: profile.email,
+          displayName: profile.displayName,
+          role: profile.role,
+        },
+        identifier,
+        travelDate,
+      });
+      setResult(data as TravelTrackingResult);
+    } catch (requestError: any) {
+      setError(getApiErrorMessage(requestError, 'Travel tracking is not available right now.'));
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  const isSandbox = isSandboxIntegrationUser(profile, config);
+
+  return (
+    <div className="mb-8 rounded-[28px] border border-mairide-secondary bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">Travel utilities</p>
+          <h3 className="mt-2 text-2xl font-black tracking-tight text-mairide-primary">Live train and flight tracking</h3>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-mairide-secondary">
+            Track incoming trains or flights before starting an intercity ride plan. This stays separate from ride matching and appears only when Admin enables the rollout or your account is in sandbox.
+          </p>
+        </div>
+        {isSandbox && (
+          <span className="w-fit rounded-full border border-orange-200 bg-orange-50 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+            Sandbox access
+          </span>
+        )}
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-2 rounded-2xl bg-mairide-bg p-1">
+        {(['train', 'flight'] as const).map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => {
+              setMode(option);
+              setResult(null);
+              setError(null);
+            }}
+            className={cn(
+              "flex-1 rounded-xl px-4 py-3 text-sm font-bold capitalize transition-all",
+              mode === option ? "bg-white text-mairide-accent shadow-sm" : "text-mairide-primary hover:text-mairide-accent"
+            )}
+          >
+            {option === 'train' ? 'Train status' : 'Flight status'}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-[1fr_180px_auto]">
+        <input
+          type="text"
+          value={mode === 'train' ? trainNumber : flightNumber}
+          onChange={(event) => (mode === 'train' ? setTrainNumber(event.target.value) : setFlightNumber(event.target.value))}
+          placeholder={mode === 'train' ? 'Train number, e.g. 12345' : 'Flight number, e.g. AI 101'}
+          className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-5 py-4 font-bold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+        />
+        <input
+          type="date"
+          value={travelDate}
+          onChange={(event) => setTravelDate(event.target.value)}
+          className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-5 py-4 font-bold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+        />
+        <button
+          type="button"
+          onClick={() => void handleCheck()}
+          disabled={isChecking}
+          className="rounded-2xl bg-mairide-primary px-6 py-4 text-sm font-bold text-white transition-all hover:bg-mairide-primary/90 disabled:opacity-50"
+        >
+          {isChecking ? 'Checking...' : 'Track now'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-4 rounded-2xl border border-mairide-secondary bg-mairide-bg p-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-sm font-black text-mairide-primary">{result.title}</p>
+              <p className="mt-1 text-sm text-mairide-secondary">{result.summary}</p>
+            </div>
+            <span className="w-fit rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+              {result.status}
+            </span>
+          </div>
+          {Array.isArray(result.details) && result.details.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+              {result.details.map((detail) => (
+                <div key={`${detail.label}-${detail.value}`} className="rounded-xl bg-white p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{detail.label}</p>
+                  <p className="mt-1 text-sm font-bold text-mairide-primary">{detail.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -13356,6 +13785,7 @@ const finalizeDriverRazorpayPayment = async (
 
 const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
+  const travelTrackingAccessAllowed = canAccessTravelTrackingServices(profile, config || {});
   const firstName = String(profile.displayName || profile.email || 'Traveler').split(' ')[0] || 'Traveler';
   const [search, setSearch] = useState({ from: '', to: '' });
   const [rides, setRides] = useState<any[]>([]);
@@ -15615,6 +16045,10 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             onAction={() => setShowTravelerRouteAlertModal(true)}
           />
 
+          {travelTrackingAccessAllowed && (
+            <PassengerTravelTrackingPanel profile={profile} config={config || {}} />
+          )}
+
           <div className="mb-8">
             {activeTravelerSessionBooking ? (
               <div className="space-y-5">
@@ -16689,6 +17123,37 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       ),
     [destinationLocation, driverBookings, newRide.destination, newRide.origin, newRide.price, originLocation, requests, travelerRideRequests]
   );
+  const liveWalletAddOnEnabled = Boolean(config?.liveMoneyWalletAddOnEnabled);
+  const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(config);
+  const handleEnableLiveMoneyWallet = useCallback(async () => {
+    if (!auth.currentUser?.uid) {
+      showAppDialog('Please sign in again before enabling Live Money Wallet.', 'error');
+      return;
+    }
+    if (!liveWalletAddOnEnabled) {
+      showAppDialog('Live Money Wallet add-on is not available yet.', 'warning');
+      return;
+    }
+    try {
+      const nowIso = new Date().toISOString();
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        liveMoneyWallet: {
+          enabled: true,
+          subscriptionStatus: 'pending',
+          annualFee: liveWalletAnnualFee,
+          currency: 'INR',
+          availableBalance: 0,
+          pendingBalance: 0,
+          lifetimeGross: 0,
+          lastUpdated: nowIso,
+        },
+        updatedAt: nowIso,
+      });
+      showAppDialog('Live Money Wallet add-on requested. Complete the subscription payment when the Razorpay activation prompt appears.', 'success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${auth.currentUser.uid}`);
+    }
+  }, [liveWalletAddOnEnabled, liveWalletAnnualFee]);
   const activeDriverSessionBooking = useMemo(
     () =>
       activeDashboardRequests.find((booking) =>
@@ -19532,6 +19997,35 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 Use Maicoins to offset platform fees and keep your route economics stronger on every confirmed trip.
               </p>
             </div>
+            {liveWalletAddOnEnabled && (
+              <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Live Money Wallet</p>
+                <div className="mt-3 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-3xl font-black tracking-tight text-mairide-primary">
+                      {formatCurrency(profile.liveMoneyWallet?.availableBalance || 0)}
+                    </p>
+                    <p className="text-sm font-bold text-mairide-accent capitalize">
+                      {profile.liveMoneyWallet?.enabled
+                        ? `${profile.liveMoneyWallet.subscriptionStatus} subscription`
+                        : 'Optional paid add-on'}
+                    </p>
+                  </div>
+                  <IndianRupee className="w-10 h-10 text-mairide-accent" />
+                </div>
+                <p className="mt-3 text-sm text-mairide-secondary">
+                  Dedicated INR wallet for Razorpay QR/UPI collections. Annual activation fee: {formatCurrency(liveWalletAnnualFee)}.
+                </p>
+                {!profile.liveMoneyWallet?.enabled && (
+                  <button
+                    onClick={() => void handleEnableLiveMoneyWallet()}
+                    className="mt-4 w-full rounded-2xl bg-mairide-primary px-5 py-3 text-sm font-bold text-white hover:bg-mairide-accent transition-colors"
+                  >
+                    Enable Live Money Wallet
+                  </button>
+                )}
+              </div>
+            )}
             <div className="bg-mairide-primary rounded-[32px] border border-mairide-primary p-6 shadow-lg shadow-mairide-primary/20 text-white">
               <p className="text-[10px] font-bold uppercase tracking-widest text-white/70">Driver Advantage</p>
               <p className="mt-3 text-2xl font-black tracking-tight">MaiCoins turn every completed journey into future margin.</p>
@@ -20966,6 +21460,17 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     referralRewardTier2: 5,
     paymentGatewayUrl: 'https://api.razorpay.com/v1',
     razorpayKeyId: RAZORPAY_KEY_ID || '',
+    paymentDmtServicesEnabled: false,
+    trackingServicesEnabled: false,
+    integrationSandboxUserIds: [],
+    integrationSandboxEmails: STRICT_SANDBOX_EMAILS,
+    liveMoneyWalletAddOnEnabled: false,
+    liveMoneyWalletAnnualFee: 750,
+    liveMoneyWalletMinAnnualFee: 500,
+    liveMoneyWalletMaxAnnualFee: 1000,
+    trainTrackingApiBaseUrl: '',
+    flightTrackingApiBaseUrl: '',
+    travelTrackingApiKey: '',
     smsOtpProvider: '2factor',
     smsApiUrl: 'https://2factor.in/API/V1',
     smsLoginTemplateName: 'Login_otp',
@@ -21055,6 +21560,11 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     try {
       await saveConfig({
         ...formData,
+        integrationSandboxUserIds: [],
+        integrationSandboxEmails: STRICT_SANDBOX_EMAILS,
+        liveMoneyWalletAnnualFee: getLiveMoneyWalletAnnualFee(formData),
+        liveMoneyWalletMinAnnualFee: 500,
+        liveMoneyWalletMaxAnnualFee: 1000,
         updatedAt: new Date().toISOString(),
         updatedBy: auth.currentUser?.email || 'admin'
       });
@@ -21175,6 +21685,123 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
                   onChange={e => setFormData({ ...formData, referralRewardTier2: Number(e.target.value) })}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                   required
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <h3 className="text-sm font-bold text-mairide-secondary uppercase tracking-widest border-b border-mairide-bg pb-2">Controlled Rollouts & Sandbox</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Payment & DMT Services</label>
+                <select
+                  value={formData.paymentDmtServicesEnabled ? 'enabled' : 'disabled'}
+                  onChange={e => setFormData({ ...formData, paymentDmtServicesEnabled: e.target.value === 'enabled' })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="disabled">Inactive for public users</option>
+                  <option value="enabled">Active for production users</option>
+                </select>
+                <p className="text-[10px] text-mairide-secondary ml-1">
+                  Existing ride platform-fee payments remain untouched. This controls new payment/DMT service surfaces and endpoints.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Train & Flight Tracking</label>
+                <select
+                  value={formData.trackingServicesEnabled ? 'enabled' : 'disabled'}
+                  onChange={e => setFormData({ ...formData, trackingServicesEnabled: e.target.value === 'enabled' })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="disabled">Inactive for public users</option>
+                  <option value="enabled">Active for passenger users</option>
+                </select>
+                <p className="text-[10px] text-mairide-secondary ml-1">
+                  Passenger dashboards show the utility only when this is active or the account is in sandbox.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Sandbox User IDs</label>
+                <input
+                  type="text"
+                  value="UID and display-name bypass disabled"
+                  disabled
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-secondary"
+                />
+                <p className="text-[10px] text-mairide-secondary ml-1">
+                  Sandbox bypass is locked to exact email addresses only.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Strict Sandbox Emails</label>
+                <textarea
+                  rows={4}
+                  value={STRICT_SANDBOX_EMAILS.join('\n')}
+                  disabled
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary resize-y"
+                />
+                <p className="text-[10px] text-mairide-secondary ml-1">
+                  Only these accounts can test gated services while global rollout is inactive.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Driver Live Money Wallet Add-on</label>
+                <select
+                  value={formData.liveMoneyWalletAddOnEnabled ? 'enabled' : 'disabled'}
+                  onChange={e => setFormData({ ...formData, liveMoneyWalletAddOnEnabled: e.target.value === 'enabled' })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                >
+                  <option value="disabled">Inactive for public drivers</option>
+                  <option value="enabled">Available as paid driver add-on</option>
+                </select>
+                <p className="text-[10px] text-mairide-secondary ml-1">
+                  Drivers opt in voluntarily. Existing ride payment and platform-fee flows are not changed.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Live Wallet Annual Fee (₹500-₹1000)</label>
+                <input
+                  type="number"
+                  min={500}
+                  max={1000}
+                  step={50}
+                  value={formData.liveMoneyWalletAnnualFee || 750}
+                  onChange={e => setFormData({ ...formData, liveMoneyWalletAnnualFee: Number(e.target.value) })}
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+                <p className="text-[10px] text-mairide-secondary ml-1">
+                  Saved value is clamped by the app between ₹500 and ₹1000.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Train Tracking API URL</label>
+                <input
+                  type="url"
+                  value={formData.trainTrackingApiBaseUrl || ''}
+                  onChange={e => setFormData({ ...formData, trainTrackingApiBaseUrl: e.target.value })}
+                  placeholder="Provider endpoint, optional until launch"
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Flight Tracking API URL</label>
+                <input
+                  type="url"
+                  value={formData.flightTrackingApiBaseUrl || ''}
+                  onChange={e => setFormData({ ...formData, flightTrackingApiBaseUrl: e.target.value })}
+                  placeholder="Provider endpoint, optional until launch"
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Travel Tracking API Key</label>
+                <input
+                  type="password"
+                  value={formData.travelTrackingApiKey || ''}
+                  onChange={e => setFormData({ ...formData, travelTrackingApiKey: e.target.value })}
+                  placeholder="Shared key for configured train/flight provider"
+                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 />
               </div>
             </div>
@@ -22466,7 +23093,7 @@ const AdminDashboard = ({
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b' | 'maipay'>('dashboard');
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [tripSessions, setTripSessions] = useState<TripSession[]>([]);
@@ -23124,6 +23751,8 @@ const AdminDashboard = ({
   const adminMapZoom = adminLocation ? 13 : usersWithLocation.length ? 5 : 4;
   const adminTabTitle = activeTab === 'dashboard'
     ? 'Admin Dashboard'
+    : activeTab === 'maipay'
+      ? 'MaiPay'
     : activeTab === 'b2b'
       ? activeB2BSection === 'hotels'
         ? 'Hotel & Resort Partners'
@@ -23131,6 +23760,8 @@ const AdminDashboard = ({
       : activeTab;
   const adminTabDescription = activeTab === 'dashboard'
     ? 'Track live rides, approvals, revenue movement, and platform health from one clean control surface.'
+    : activeTab === 'maipay'
+      ? 'Manage driver live wallets, gateway traces, QR collections, and future settlement controls in an isolated fintech desk.'
     : activeTab === 'b2b'
       ? activeB2BSection === 'hotels'
         ? 'Review hospitality partners, control hotel commission assignments, and verify their onboarding documents.'
@@ -23369,6 +24000,7 @@ const AdminDashboard = ({
             { id: 'rides', label: 'Rides', icon: Car, roles: ['super_admin', 'compliance'] },
             { id: 'b2b', label: 'B2B Partner Hub', icon: Building2, roles: ['super_admin', 'support', 'compliance', 'finance'] },
             { id: 'revenue', label: 'Revenue', icon: IndianRupee, roles: ['super_admin', 'finance'] },
+            { id: 'maipay', label: 'MaiPay', icon: Wallet, roles: ['super_admin'] },
             { id: 'capacity', label: 'Capacity', icon: TrendingUp, roles: ['super_admin', 'finance', 'support'] },
             { id: 'mobile', label: 'Mobile App', icon: Smartphone, roles: ['super_admin', 'finance', 'support'] },
             { id: 'analytics', label: 'Analytics', icon: LineChartIcon, roles: ['super_admin', 'finance'] },
@@ -24355,6 +24987,14 @@ const AdminDashboard = ({
             transactions={transactions}
             bookings={bookings as Booking[]}
             users={users}
+          />
+        )}
+
+        {activeTab === 'maipay' && effectiveAdminRole === 'super_admin' && (
+          <AdminMaiPayControlDesk
+            users={users}
+            transactions={transactions}
+            config={config}
           />
         )}
 

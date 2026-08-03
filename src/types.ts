@@ -42,6 +42,22 @@ export interface UserProfile {
     lastUpdated?: string;
     lastPartnerBookingId?: string;
   };
+  liveMoneyWallet?: {
+    enabled: boolean;
+    subscriptionStatus: 'inactive' | 'pending' | 'active' | 'expired';
+    annualFee: number;
+    currency: 'INR';
+    availableBalance: number;
+    pendingBalance: number;
+    lifetimeGross: number;
+    razorpayCustomerId?: string;
+    razorpayVirtualAccountId?: string;
+    upiQrCodeUrl?: string;
+    upiVpa?: string;
+    subscribedAt?: string;
+    expiresAt?: string;
+    lastUpdated?: string;
+  };
   reviewStats?: {
     averageRating: number;
     ratingCount: number;
@@ -223,6 +239,17 @@ export interface AppConfig {
   razorpayXKeySecret?: string;
   razorpayXPayoutSourceAccount?: string;
   razorpayXPayoutWebhookSecret?: string;
+  paymentDmtServicesEnabled?: boolean;
+  trackingServicesEnabled?: boolean;
+  integrationSandboxUserIds?: string[];
+  integrationSandboxEmails?: string[];
+  liveMoneyWalletAddOnEnabled?: boolean;
+  liveMoneyWalletAnnualFee?: number;
+  liveMoneyWalletMinAnnualFee?: number;
+  liveMoneyWalletMaxAnnualFee?: number;
+  trainTrackingApiBaseUrl?: string;
+  flightTrackingApiBaseUrl?: string;
+  travelTrackingApiKey?: string;
   smsApiUrl?: string;
   smsApiKey?: string;
   twoFactorApiKey?: string;

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
+import { canUseControlledFeature, getGlobalAppConfig, isSandboxRequester } from "./_lib/featureAccess.js";
 
 function getAction(req: any) {
   const fromQuery = req.query?.action;
@@ -69,6 +70,151 @@ async function getRazorpayConfig() {
   }
 
   return { keyId, keySecret };
+}
+
+const controlledPaymentDmtActions = new Set([
+  "create-dmt-transfer",
+  "verify-dmt-transfer",
+  "dmt-status",
+  "initiate-dmt",
+  "create-controlled-payment",
+]);
+
+async function guardPaymentDmtAccess(req: any, res: any) {
+  const config = await getGlobalAppConfig();
+  const requester = req.body?.profile || req.body?.requester || {
+    uid: req.body?.userId,
+    email: req.body?.email,
+    displayName: req.body?.displayName,
+    role: req.body?.role,
+  };
+
+  if (!canUseControlledFeature(config.paymentDmtServicesEnabled, requester, config)) {
+    return res.status(403).json({
+      error: "Payment and DMT services are inactive for this account.",
+    });
+  }
+
+  return res.status(501).json({
+    error: "Payment and DMT connector is gated and not configured for live execution yet.",
+    sandbox: true,
+  });
+}
+
+function getLiveMoneyWalletAnnualFee(config: Record<string, any>) {
+  const minFee = Number(config.liveMoneyWalletMinAnnualFee || 500);
+  const maxFee = Number(config.liveMoneyWalletMaxAnnualFee || 1000);
+  const annualFee = Number(config.liveMoneyWalletAnnualFee || 750);
+  return Math.min(Math.max(annualFee, minFee), maxFee);
+}
+
+function canUseLiveMoneyWallet(config: Record<string, any>, requester: Record<string, any>) {
+  return Boolean(config.paymentDmtServicesEnabled && config.liveMoneyWalletAddOnEnabled) || isSandboxRequester(requester, config);
+}
+
+async function createLiveMoneyWalletSubscriptionOrder(req: any, res: any) {
+  try {
+    const user = await verifyTokenFromHeader(req);
+    const config = await getGlobalAppConfig();
+    const requester = {
+      uid: user.id,
+      email: user.email,
+      role: req.body?.role || req.body?.profile?.role,
+      displayName: req.body?.displayName || req.body?.profile?.displayName,
+    };
+
+    if (!canUseLiveMoneyWallet(config, requester)) {
+      return res.status(403).json({ error: "Live Money Wallet add-on is inactive for this account." });
+    }
+
+    const annualFee = getLiveMoneyWalletAnnualFee(config);
+    const { keyId, keySecret } = await getRazorpayConfig();
+    const receipt = `lmw_sub_${String(user.id).replace(/[^a-zA-Z0-9]/g, "").slice(0, 18)}_${Date.now().toString().slice(-8)}`.slice(0, 40);
+    const response = await fetch("https://api.razorpay.com/v1/orders", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`,
+      },
+      body: JSON.stringify({
+        amount: Math.round(annualFee * 100),
+        currency: "INR",
+        receipt,
+        notes: {
+          userId: user.id,
+          userEmail: user.email || "",
+          product: "driver_live_money_wallet_subscription",
+          annualFee,
+        },
+      }),
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: payload?.error?.description || payload?.description || "Failed to create Live Money Wallet subscription order.",
+      });
+    }
+
+    return res.status(200).json({ ...payload, annualFee, keyId });
+  } catch (error: any) {
+    return res.status(error?.status || 500).json({ error: error?.message || "Failed to create Live Money Wallet subscription order." });
+  }
+}
+
+async function createLiveMoneyWalletQrCode(req: any, res: any) {
+  try {
+    const user = await verifyTokenFromHeader(req);
+    const config = await getGlobalAppConfig();
+    const requester = {
+      uid: user.id,
+      email: user.email,
+      role: req.body?.role || req.body?.profile?.role,
+      displayName: req.body?.displayName || req.body?.profile?.displayName,
+    };
+
+    if (!canUseLiveMoneyWallet(config, requester)) {
+      return res.status(403).json({ error: "Live Money Wallet collections are inactive for this account." });
+    }
+
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "A valid collection amount is required." });
+    }
+
+    const { keyId, keySecret } = await getRazorpayConfig();
+    const response = await fetch("https://api.razorpay.com/v1/payments/qr_codes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`,
+      },
+      body: JSON.stringify({
+        type: "upi_qr",
+        name: "mAIRide Live Money Wallet",
+        usage: "single_use",
+        fixed_amount: true,
+        payment_amount: Math.round(amount * 100),
+        description: "Driver Live Money Wallet collection",
+        notes: {
+          driverId: user.id,
+          driverEmail: user.email || "",
+          product: "driver_live_money_wallet_collection",
+        },
+      }),
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: payload?.error?.description || payload?.description || "Failed to generate Live Money Wallet QR.",
+      });
+    }
+
+    return res.status(200).json(payload);
+  } catch (error: any) {
+    return res.status(error?.status || 500).json({ error: error?.message || "Failed to generate Live Money Wallet QR." });
+  }
 }
 
 async function createRazorpayOrder(req: any, res: any) {
@@ -309,6 +455,18 @@ async function recordPlatformFee(req: any, res: any) {
 
 export default async function handler(req: any, res: any) {
   const action = getAction(req);
+
+  if (controlledPaymentDmtActions.has(action)) {
+    return guardPaymentDmtAccess(req, res);
+  }
+
+  if (action === "create-live-wallet-subscription-order") {
+    return createLiveMoneyWalletSubscriptionOrder(req, res);
+  }
+
+  if (action === "create-live-wallet-qr-code") {
+    return createLiveMoneyWalletQrCode(req, res);
+  }
 
   if (action === "create-razorpay-order") {
     return createRazorpayOrder(req, res);
