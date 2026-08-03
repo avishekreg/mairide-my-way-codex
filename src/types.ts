@@ -241,6 +241,19 @@ export interface AppConfig {
   razorpayXPayoutWebhookSecret?: string;
   maipayEnabled?: boolean;
   maipayServiceCatalog?: Record<string, boolean>;
+  maipayServiceSettings?: Record<string, {
+    providerName?: string;
+    integrationType?: 'rest' | 'sdk' | 'webhook' | 'hosted' | 'manual';
+    environment?: 'sandbox' | 'production';
+    apiBaseUrl?: string;
+    webhookUrl?: string;
+    callbackUrl?: string;
+    publicKeyEnvRef?: string;
+    secretKeyEnvRef?: string;
+    notes?: string;
+    updatedAt?: string;
+    updatedBy?: string;
+  }>;
   paymentDmtServicesEnabled?: boolean;
   trackingServicesEnabled?: boolean;
   integrationSandboxUserIds?: string[];

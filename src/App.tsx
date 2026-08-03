@@ -797,6 +797,22 @@ const MAIPAY_SERVICE_CATALOG = [
 ] as const;
 type MaiPayServiceId = typeof MAIPAY_SERVICE_CATALOG[number]['id'];
 type MaiPayServiceCatalogState = Record<MaiPayServiceId, boolean>;
+type MaiPayIntegrationType = 'rest' | 'sdk' | 'webhook' | 'hosted' | 'manual';
+type MaiPayServiceEnvironment = 'sandbox' | 'production';
+type MaiPayServiceSetting = {
+  providerName: string;
+  integrationType: MaiPayIntegrationType;
+  environment: MaiPayServiceEnvironment;
+  apiBaseUrl: string;
+  webhookUrl: string;
+  callbackUrl: string;
+  publicKeyEnvRef: string;
+  secretKeyEnvRef: string;
+  notes: string;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+type MaiPayServiceSettingsState = Record<string, MaiPayServiceSetting>;
 
 const getDefaultMaiPayServiceCatalog = (): MaiPayServiceCatalogState =>
   MAIPAY_SERVICE_CATALOG.reduce((acc, service) => {
@@ -807,6 +823,22 @@ const getDefaultMaiPayServiceCatalog = (): MaiPayServiceCatalogState =>
 const getMaiPayServiceCatalog = (config?: Partial<AppConfig> | null): MaiPayServiceCatalogState => ({
   ...getDefaultMaiPayServiceCatalog(),
   ...(config?.maipayServiceCatalog || {}),
+});
+
+const getDefaultMaiPayServiceSetting = (): MaiPayServiceSetting => ({
+  providerName: '',
+  integrationType: 'rest',
+  environment: 'sandbox',
+  apiBaseUrl: '',
+  webhookUrl: '',
+  callbackUrl: '',
+  publicKeyEnvRef: '',
+  secretKeyEnvRef: '',
+  notes: '',
+});
+
+const getMaiPayServiceSettings = (config?: Partial<AppConfig> | null): MaiPayServiceSettingsState => ({
+  ...(config?.maipayServiceSettings || {}),
 });
 
 const isMaiPayMasterEnabled = (config?: Partial<AppConfig> | null) =>
@@ -1494,6 +1526,9 @@ const AdminMaiPayControlDesk = ({
   const safeConfig = config || {};
   const [maiPayMasterEnabled, setMaiPayMasterEnabled] = useState(isMaiPayMasterEnabled(safeConfig));
   const [serviceCatalog, setServiceCatalog] = useState<MaiPayServiceCatalogState>(getMaiPayServiceCatalog(safeConfig));
+  const [serviceSettings, setServiceSettings] = useState<MaiPayServiceSettingsState>(getMaiPayServiceSettings(safeConfig));
+  const [configuringServiceId, setConfiguringServiceId] = useState<MaiPayServiceId | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<MaiPayServiceSetting>(getDefaultMaiPayServiceSetting());
   const [isSavingMaiPayConfig, setIsSavingMaiPayConfig] = useState(false);
   const driverWalletUsers = users.filter((user) => user.role === 'driver' && user.liveMoneyWallet?.enabled);
   const activeWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'active');
@@ -1521,9 +1556,14 @@ const AdminMaiPayControlDesk = ({
   useEffect(() => {
     setMaiPayMasterEnabled(isMaiPayMasterEnabled(config));
     setServiceCatalog(getMaiPayServiceCatalog(config));
+    setServiceSettings(getMaiPayServiceSettings(config));
   }, [config]);
 
-  const saveMaiPayConfig = async (nextMaster: boolean, nextCatalog: MaiPayServiceCatalogState) => {
+  const saveMaiPayConfig = async (
+    nextMaster: boolean,
+    nextCatalog: MaiPayServiceCatalogState,
+    nextSettings: MaiPayServiceSettingsState = serviceSettings
+  ) => {
     setIsSavingMaiPayConfig(true);
     try {
       const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
@@ -1532,6 +1572,7 @@ const AdminMaiPayControlDesk = ({
         maipayEnabled: nextMaster,
         paymentDmtServicesEnabled: nextMaster,
         maipayServiceCatalog: nextCatalog,
+        maipayServiceSettings: nextSettings,
         liveMoneyWalletAddOnEnabled: Boolean(safeConfig.liveMoneyWalletAddOnEnabled),
         integrationSandboxUserIds: [],
         integrationSandboxEmails: STRICT_SANDBOX_EMAILS,
@@ -1540,6 +1581,7 @@ const AdminMaiPayControlDesk = ({
       }, { headers });
       setMaiPayMasterEnabled(nextMaster);
       setServiceCatalog(nextCatalog);
+      setServiceSettings(nextSettings);
     } catch (error) {
       showAppDialog(getApiErrorMessage(error, 'We could not save MaiPay controls right now.'), 'error', 'MaiPay save failed');
     } finally {
@@ -1558,6 +1600,38 @@ const AdminMaiPayControlDesk = ({
       [serviceId]: !serviceCatalog[serviceId],
     };
     void saveMaiPayConfig(maiPayMasterEnabled, nextCatalog);
+  };
+
+  const openServiceSettings = (serviceId: MaiPayServiceId) => {
+    setConfiguringServiceId(serviceId);
+    setSettingsDraft({
+      ...getDefaultMaiPayServiceSetting(),
+      ...(serviceSettings[serviceId] || {}),
+    });
+  };
+
+  const handleSaveServiceSettings = () => {
+    if (!configuringServiceId) return;
+    const nextSettings = {
+      ...serviceSettings,
+      [configuringServiceId]: {
+        ...settingsDraft,
+        updatedAt: new Date().toISOString(),
+        updatedBy: auth.currentUser?.email || 'admin',
+      },
+    };
+    void saveMaiPayConfig(maiPayMasterEnabled, serviceCatalog, nextSettings).then(() => {
+      setConfiguringServiceId(null);
+    });
+  };
+
+  const handleTestServiceConnection = () => {
+    const service = MAIPAY_SERVICE_CATALOG.find((item) => item.id === configuringServiceId);
+    showAppDialog(
+      `Test connection placeholder ready for ${service?.label || 'this service'}. Backend connector execution will use server-side env references only; raw secrets are never stored here.`,
+      'info',
+      'MaiPay provider test'
+    );
   };
 
   const statCards = [
@@ -1590,6 +1664,7 @@ const AdminMaiPayControlDesk = ({
       tone: 'bg-slate-100 text-mairide-primary',
     },
   ];
+  const configuringService = MAIPAY_SERVICE_CATALOG.find((service) => service.id === configuringServiceId);
 
   return (
     <div className="space-y-8">
@@ -1657,6 +1732,7 @@ const AdminMaiPayControlDesk = ({
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {MAIPAY_SERVICE_CATALOG.map((service) => {
             const isEnabled = serviceCatalog[service.id];
+            const currentSetting = serviceSettings[service.id];
             return (
               <div key={service.id} className="rounded-3xl border border-mairide-secondary bg-mairide-bg/50 p-5">
                 <div className="flex items-start justify-between gap-4">
@@ -1677,11 +1753,182 @@ const AdminMaiPayControlDesk = ({
                   </button>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-mairide-secondary">{service.description}</p>
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+                    {currentSetting?.providerName
+                      ? `${currentSetting.providerName} · ${currentSetting.environment || 'sandbox'}`
+                      : 'Provider not configured'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openServiceSettings(service.id)}
+                    className="rounded-2xl border border-mairide-secondary bg-white px-4 py-2 text-xs font-black text-mairide-primary transition hover:border-mairide-accent hover:text-mairide-accent"
+                  >
+                    Configure
+                  </button>
+                </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      <AnimatePresence>
+        {configuringService ? (
+          <div className="fixed inset-0 z-[80] flex items-center justify-end bg-black/50 p-4 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, x: 48 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 48 }}
+              className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-[36px] border border-mairide-secondary bg-white shadow-2xl"
+            >
+              <div className="border-b border-mairide-secondary p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">Provider configuration</p>
+                    <h3 className="mt-2 text-2xl font-black text-mairide-primary">{configuringService.label}</h3>
+                    <p className="mt-2 text-sm leading-6 text-mairide-secondary">
+                      Store connector metadata and server environment reference names only. Never paste raw API secrets, private keys, bearer tokens, or SDK secrets into this screen.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setConfiguringServiceId(null)}
+                    className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition hover:text-mairide-primary"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-5 overflow-y-auto p-6">
+                <div className="rounded-3xl border border-orange-200 bg-orange-50 p-4 text-sm leading-6 text-orange-800">
+                  <strong>Security rule:</strong> actual provider secrets must live only in Vercel/Supabase server-side environment variables. This drawer stores non-secret metadata and env var reference names for backend connectors.
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Provider name</span>
+                    <input
+                      value={settingsDraft.providerName}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, providerName: event.target.value })}
+                      placeholder="RazorpayX, BBPS provider, travel API..."
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Integration type</span>
+                    <select
+                      value={settingsDraft.integrationType}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, integrationType: event.target.value as MaiPayIntegrationType })}
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    >
+                      <option value="rest">REST API</option>
+                      <option value="sdk">SDK</option>
+                      <option value="webhook">Webhook</option>
+                      <option value="hosted">Hosted Checkout / Redirect</option>
+                      <option value="manual">Manual / Back-office</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Environment</span>
+                    <select
+                      value={settingsDraft.environment}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, environment: event.target.value as MaiPayServiceEnvironment })}
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    >
+                      <option value="sandbox">Sandbox</option>
+                      <option value="production">Production</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">API base URL</span>
+                    <input
+                      value={settingsDraft.apiBaseUrl}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, apiBaseUrl: event.target.value })}
+                      placeholder="https://api.provider.com"
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Webhook URL</span>
+                    <input
+                      value={settingsDraft.webhookUrl}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, webhookUrl: event.target.value })}
+                      placeholder="https://rides.mairide.in/api/..."
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Callback URL</span>
+                    <input
+                      value={settingsDraft.callbackUrl}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, callbackUrl: event.target.value })}
+                      placeholder="https://rides.mairide.in/payment/callback"
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Public key env ref</span>
+                    <input
+                      value={settingsDraft.publicKeyEnvRef}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, publicKeyEnvRef: event.target.value })}
+                      placeholder="RAZORPAY_KEY_ID"
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Secret key env ref</span>
+                    <input
+                      value={settingsDraft.secretKeyEnvRef}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, secretKeyEnvRef: event.target.value })}
+                      placeholder="RAZORPAY_KEY_SECRET"
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    />
+                  </label>
+                </div>
+
+                <label className="block space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Connector notes</span>
+                  <textarea
+                    value={settingsDraft.notes}
+                    onChange={(event) => setSettingsDraft({ ...settingsDraft, notes: event.target.value })}
+                    placeholder="Provider onboarding status, required documents, sandbox credentials owner, webhook events to map..."
+                    className="min-h-[110px] w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                  />
+                </label>
+              </div>
+
+              <div className="flex flex-col gap-3 border-t border-mairide-secondary p-6 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  type="button"
+                  onClick={handleTestServiceConnection}
+                  className="rounded-2xl border border-mairide-secondary px-5 py-3 text-sm font-black text-mairide-primary transition hover:border-mairide-accent hover:text-mairide-accent"
+                >
+                  Test Connection
+                </button>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setConfiguringServiceId(null)}
+                    className="rounded-2xl bg-mairide-bg px-5 py-3 text-sm font-black text-mairide-primary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveServiceSettings}
+                    disabled={isSavingMaiPayConfig}
+                    className="rounded-2xl bg-mairide-accent px-6 py-3 text-sm font-black text-white transition hover:bg-mairide-primary disabled:opacity-60"
+                  >
+                    {isSavingMaiPayConfig ? 'Saving...' : 'Save Settings'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        ) : null}
+      </AnimatePresence>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
         {statCards.map((card) => (
@@ -21732,6 +21979,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     razorpayKeyId: RAZORPAY_KEY_ID || '',
     maipayEnabled: false,
     maipayServiceCatalog: getDefaultMaiPayServiceCatalog(),
+    maipayServiceSettings: {},
     paymentDmtServicesEnabled: false,
     trackingServicesEnabled: false,
     integrationSandboxUserIds: [],
@@ -21840,6 +22088,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
           ...getDefaultMaiPayServiceCatalog(),
           ...(formData.maipayServiceCatalog || {}),
         },
+        maipayServiceSettings: formData.maipayServiceSettings || {},
         liveMoneyWalletAnnualFee: getLiveMoneyWalletAnnualFee(formData),
         liveMoneyWalletMinAnnualFee: 500,
         liveMoneyWalletMaxAnnualFee: 1000,
