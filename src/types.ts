@@ -242,15 +242,29 @@ export interface AppConfig {
   maipayEnabled?: boolean;
   maipayServiceCatalog?: Record<string, boolean>;
   maipayServiceSettings?: Record<string, {
-    providerName?: string;
-    integrationType?: 'rest' | 'sdk' | 'webhook' | 'hosted' | 'manual';
-    environment?: 'sandbox' | 'production';
-    apiBaseUrl?: string;
-    webhookUrl?: string;
-    callbackUrl?: string;
-    publicKeyEnvRef?: string;
-    secretKeyEnvRef?: string;
-    notes?: string;
+    routeStrategy?: 'priority_fallback' | 'manual_primary';
+    providers?: Array<{
+      id?: string;
+      providerName?: string;
+      providerIdentifier?: string;
+      integrationType?: 'rest' | 'sdk' | 'webhook' | 'hosted' | 'manual';
+      environment?: 'sandbox' | 'production';
+      status?: 'active' | 'inactive';
+      priority?: number;
+      timeoutMs?: number;
+      apiBaseUrl?: string;
+      webhookUrl?: string;
+      callbackUrl?: string;
+      publicKeyEnvRef?: string;
+      secretKeyEnvRef?: string;
+      commissionTag?: string;
+      marginTag?: string;
+      healthStatus?: 'unknown' | 'healthy' | 'degraded' | 'down';
+      lastResponseMs?: string;
+      notes?: string;
+      updatedAt?: string;
+      updatedBy?: string;
+    }>;
     updatedAt?: string;
     updatedBy?: string;
   }>;

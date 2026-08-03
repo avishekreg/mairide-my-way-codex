@@ -799,16 +799,34 @@ type MaiPayServiceId = typeof MAIPAY_SERVICE_CATALOG[number]['id'];
 type MaiPayServiceCatalogState = Record<MaiPayServiceId, boolean>;
 type MaiPayIntegrationType = 'rest' | 'sdk' | 'webhook' | 'hosted' | 'manual';
 type MaiPayServiceEnvironment = 'sandbox' | 'production';
-type MaiPayServiceSetting = {
+type MaiPayProviderHealth = 'unknown' | 'healthy' | 'degraded' | 'down';
+type MaiPayProviderStatus = 'active' | 'inactive';
+type MaiPayRouteStrategy = 'priority_fallback' | 'manual_primary';
+type MaiPayServiceProviderSetting = {
+  id: string;
   providerName: string;
+  providerIdentifier: string;
   integrationType: MaiPayIntegrationType;
   environment: MaiPayServiceEnvironment;
+  status: MaiPayProviderStatus;
+  priority: number;
+  timeoutMs: number;
   apiBaseUrl: string;
   webhookUrl: string;
   callbackUrl: string;
   publicKeyEnvRef: string;
   secretKeyEnvRef: string;
+  commissionTag: string;
+  marginTag: string;
+  healthStatus: MaiPayProviderHealth;
+  lastResponseMs: string;
   notes: string;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+type MaiPayServiceSetting = {
+  routeStrategy: MaiPayRouteStrategy;
+  providers: MaiPayServiceProviderSetting[];
   updatedAt?: string;
   updatedBy?: string;
 };
@@ -825,21 +843,101 @@ const getMaiPayServiceCatalog = (config?: Partial<AppConfig> | null): MaiPayServ
   ...(config?.maipayServiceCatalog || {}),
 });
 
-const getDefaultMaiPayServiceSetting = (): MaiPayServiceSetting => ({
+const createMaiPayProviderId = () => `provider_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const slugifyProviderIdentifier = (value?: string) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+const getDefaultMaiPayProviderSetting = (priority = 1): MaiPayServiceProviderSetting => ({
+  id: createMaiPayProviderId(),
   providerName: '',
+  providerIdentifier: '',
   integrationType: 'rest',
   environment: 'sandbox',
+  status: 'inactive',
+  priority,
+  timeoutMs: 12000,
   apiBaseUrl: '',
   webhookUrl: '',
   callbackUrl: '',
   publicKeyEnvRef: '',
   secretKeyEnvRef: '',
+  commissionTag: '',
+  marginTag: '',
+  healthStatus: 'unknown',
+  lastResponseMs: '',
   notes: '',
 });
 
-const getMaiPayServiceSettings = (config?: Partial<AppConfig> | null): MaiPayServiceSettingsState => ({
-  ...(config?.maipayServiceSettings || {}),
-});
+const normalizeMaiPayProviderSetting = (provider: Partial<MaiPayServiceProviderSetting> | any, index: number): MaiPayServiceProviderSetting => {
+  const fallback = getDefaultMaiPayProviderSetting(index + 1);
+  const providerName = String(provider?.providerName || '').trim();
+  return {
+    ...fallback,
+    ...provider,
+    id: String(provider?.id || fallback.id),
+    providerName,
+    providerIdentifier: String(provider?.providerIdentifier || slugifyProviderIdentifier(providerName) || fallback.providerIdentifier),
+    integrationType: (provider?.integrationType || fallback.integrationType) as MaiPayIntegrationType,
+    environment: (provider?.environment || fallback.environment) as MaiPayServiceEnvironment,
+    status: (provider?.status || fallback.status) as MaiPayProviderStatus,
+    priority: Number(provider?.priority || index + 1),
+    timeoutMs: Number(provider?.timeoutMs || fallback.timeoutMs),
+    publicKeyEnvRef: String(provider?.publicKeyEnvRef || '').trim().toUpperCase(),
+    secretKeyEnvRef: String(provider?.secretKeyEnvRef || '').trim().toUpperCase(),
+    commissionTag: String(provider?.commissionTag || ''),
+    marginTag: String(provider?.marginTag || ''),
+    healthStatus: (provider?.healthStatus || fallback.healthStatus) as MaiPayProviderHealth,
+    lastResponseMs: String(provider?.lastResponseMs || ''),
+  };
+};
+
+const normalizeMaiPayServiceSetting = (value?: Partial<MaiPayServiceSetting> | any): MaiPayServiceSetting => {
+  if (Array.isArray(value?.providers)) {
+    const providers = value.providers.length
+      ? value.providers.map((provider: any, index: number) => normalizeMaiPayProviderSetting(provider, index))
+      : [getDefaultMaiPayProviderSetting(1)];
+    return {
+      routeStrategy: (value.routeStrategy || 'priority_fallback') as MaiPayRouteStrategy,
+      providers,
+      updatedAt: value.updatedAt,
+      updatedBy: value.updatedBy,
+    };
+  }
+
+  if (value && (value.providerName || value.apiBaseUrl || value.publicKeyEnvRef || value.secretKeyEnvRef)) {
+    return {
+      routeStrategy: 'priority_fallback',
+      providers: [
+        normalizeMaiPayProviderSetting({
+          ...value,
+          id: 'legacy_primary',
+          status: 'active',
+          priority: 1,
+        }, 0),
+      ],
+      updatedAt: value.updatedAt,
+      updatedBy: value.updatedBy,
+    };
+  }
+
+  return {
+    routeStrategy: 'priority_fallback',
+    providers: [getDefaultMaiPayProviderSetting(1)],
+  };
+};
+
+const getDefaultMaiPayServiceSetting = (): MaiPayServiceSetting => normalizeMaiPayServiceSetting();
+
+const getMaiPayServiceSettings = (config?: Partial<AppConfig> | null): MaiPayServiceSettingsState =>
+  Object.entries(config?.maipayServiceSettings || {}).reduce((acc, [serviceId, setting]) => {
+    acc[serviceId] = normalizeMaiPayServiceSetting(setting);
+    return acc;
+  }, {} as MaiPayServiceSettingsState);
 
 const isMaiPayMasterEnabled = (config?: Partial<AppConfig> | null) =>
   Boolean(config?.maipayEnabled ?? config?.paymentDmtServicesEnabled);
@@ -1602,23 +1700,65 @@ const AdminMaiPayControlDesk = ({
     void saveMaiPayConfig(maiPayMasterEnabled, nextCatalog);
   };
 
+  const updateProviderDraft = (providerId: string, updates: Partial<MaiPayServiceProviderSetting>) => {
+    setSettingsDraft((current) => ({
+      ...current,
+      providers: current.providers.map((provider) =>
+        provider.id === providerId ? { ...provider, ...updates } : provider
+      ),
+    }));
+  };
+
+  const addProviderDraft = () => {
+    setSettingsDraft((current) => ({
+      ...current,
+      providers: [
+        ...current.providers,
+        getDefaultMaiPayProviderSetting(current.providers.length + 1),
+      ],
+    }));
+  };
+
+  const removeProviderDraft = (providerId: string) => {
+    setSettingsDraft((current) => ({
+      ...current,
+      providers: current.providers.length > 1
+        ? current.providers.filter((provider) => provider.id !== providerId)
+        : current.providers,
+    }));
+  };
+
   const openServiceSettings = (serviceId: MaiPayServiceId) => {
     setConfiguringServiceId(serviceId);
-    setSettingsDraft({
-      ...getDefaultMaiPayServiceSetting(),
-      ...(serviceSettings[serviceId] || {}),
-    });
+    setSettingsDraft(normalizeMaiPayServiceSetting(serviceSettings[serviceId]));
   };
 
   const handleSaveServiceSettings = () => {
     if (!configuringServiceId) return;
+    const envRefPattern = /^[A-Z][A-Z0-9_]*$/;
+    const invalidEnvRef = settingsDraft.providers.some((provider) =>
+      Boolean(provider.publicKeyEnvRef && !envRefPattern.test(provider.publicKeyEnvRef)) ||
+      Boolean(provider.secretKeyEnvRef && !envRefPattern.test(provider.secretKeyEnvRef))
+    );
+    if (invalidEnvRef) {
+      showAppDialog(
+        'Use environment variable reference names only, such as RAZORPAY_KEY_SECRET. Do not paste raw API keys, tokens, or secrets here.',
+        'error',
+        'Invalid provider secret reference'
+      );
+      return;
+    }
+    const normalizedDraft: MaiPayServiceSetting = {
+      ...settingsDraft,
+      providers: settingsDraft.providers
+        .map((provider, index) => normalizeMaiPayProviderSetting(provider, index))
+        .sort((a, b) => a.priority - b.priority),
+      updatedAt: new Date().toISOString(),
+      updatedBy: auth.currentUser?.email || 'admin',
+    };
     const nextSettings = {
       ...serviceSettings,
-      [configuringServiceId]: {
-        ...settingsDraft,
-        updatedAt: new Date().toISOString(),
-        updatedBy: auth.currentUser?.email || 'admin',
-      },
+      [configuringServiceId]: normalizedDraft,
     };
     void saveMaiPayConfig(maiPayMasterEnabled, serviceCatalog, nextSettings).then(() => {
       setConfiguringServiceId(null);
@@ -1627,8 +1767,11 @@ const AdminMaiPayControlDesk = ({
 
   const handleTestServiceConnection = () => {
     const service = MAIPAY_SERVICE_CATALOG.find((item) => item.id === configuringServiceId);
+    const providers = [...settingsDraft.providers].sort((a, b) => a.priority - b.priority);
+    const primary = providers.find((provider) => provider.status === 'active') || providers[0];
+    const fallbackCount = providers.filter((provider) => provider.id !== primary?.id && provider.status === 'active').length;
     showAppDialog(
-      `Test connection placeholder ready for ${service?.label || 'this service'}. Backend connector execution will use server-side env references only; raw secrets are never stored here.`,
+      `Test connection placeholder ready for ${service?.label || 'this service'}. Backend routing will try ${primary?.providerName || 'the primary provider'} first and then ${fallbackCount} active fallback provider${fallbackCount === 1 ? '' : 's'}. Raw secrets remain server-side only.`,
       'info',
       'MaiPay provider test'
     );
@@ -1733,6 +1876,9 @@ const AdminMaiPayControlDesk = ({
           {MAIPAY_SERVICE_CATALOG.map((service) => {
             const isEnabled = serviceCatalog[service.id];
             const currentSetting = serviceSettings[service.id];
+            const configuredProviders = [...(currentSetting?.providers || [])].sort((a, b) => a.priority - b.priority);
+            const activeProviders = configuredProviders.filter((provider) => provider.status === 'active');
+            const primaryProvider = activeProviders[0] || configuredProviders[0];
             return (
               <div key={service.id} className="rounded-3xl border border-mairide-secondary bg-mairide-bg/50 p-5">
                 <div className="flex items-start justify-between gap-4">
@@ -1755,9 +1901,9 @@ const AdminMaiPayControlDesk = ({
                 <p className="mt-3 text-sm leading-6 text-mairide-secondary">{service.description}</p>
                 <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
-                    {currentSetting?.providerName
-                      ? `${currentSetting.providerName} · ${currentSetting.environment || 'sandbox'}`
-                      : 'Provider not configured'}
+                    {primaryProvider?.providerName
+                      ? `${primaryProvider.providerName} · P${primaryProvider.priority} · ${activeProviders.length} active route${activeProviders.length === 1 ? '' : 's'}`
+                      : 'Provider routes not configured'}
                   </div>
                   <button
                     type="button"
@@ -1806,97 +1952,236 @@ const AdminMaiPayControlDesk = ({
                   <strong>Security rule:</strong> actual provider secrets must live only in Vercel/Supabase server-side environment variables. This drawer stores non-secret metadata and env var reference names for backend connectors.
                 </div>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <label className="space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Provider name</span>
-                    <input
-                      value={settingsDraft.providerName}
-                      onChange={(event) => setSettingsDraft({ ...settingsDraft, providerName: event.target.value })}
-                      placeholder="RazorpayX, BBPS provider, travel API..."
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Integration type</span>
+                <div className="rounded-3xl border border-mairide-secondary bg-mairide-bg p-4">
+                  <label className="block space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Routing strategy</span>
                     <select
-                      value={settingsDraft.integrationType}
-                      onChange={(event) => setSettingsDraft({ ...settingsDraft, integrationType: event.target.value as MaiPayIntegrationType })}
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                      value={settingsDraft.routeStrategy}
+                      onChange={(event) => setSettingsDraft({ ...settingsDraft, routeStrategy: event.target.value as MaiPayRouteStrategy })}
+                      className="w-full rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
                     >
-                      <option value="rest">REST API</option>
-                      <option value="sdk">SDK</option>
-                      <option value="webhook">Webhook</option>
-                      <option value="hosted">Hosted Checkout / Redirect</option>
-                      <option value="manual">Manual / Back-office</option>
+                      <option value="priority_fallback">Priority routing with automatic fallback</option>
+                      <option value="manual_primary">Manual primary only</option>
                     </select>
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Environment</span>
-                    <select
-                      value={settingsDraft.environment}
-                      onChange={(event) => setSettingsDraft({ ...settingsDraft, environment: event.target.value as MaiPayServiceEnvironment })}
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
-                    >
-                      <option value="sandbox">Sandbox</option>
-                      <option value="production">Production</option>
-                    </select>
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">API base URL</span>
-                    <input
-                      value={settingsDraft.apiBaseUrl}
-                      onChange={(event) => setSettingsDraft({ ...settingsDraft, apiBaseUrl: event.target.value })}
-                      placeholder="https://api.provider.com"
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Webhook URL</span>
-                    <input
-                      value={settingsDraft.webhookUrl}
-                      onChange={(event) => setSettingsDraft({ ...settingsDraft, webhookUrl: event.target.value })}
-                      placeholder="https://rides.mairide.in/api/..."
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Callback URL</span>
-                    <input
-                      value={settingsDraft.callbackUrl}
-                      onChange={(event) => setSettingsDraft({ ...settingsDraft, callbackUrl: event.target.value })}
-                      placeholder="https://rides.mairide.in/payment/callback"
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Public key env ref</span>
-                    <input
-                      value={settingsDraft.publicKeyEnvRef}
-                      onChange={(event) => setSettingsDraft({ ...settingsDraft, publicKeyEnvRef: event.target.value })}
-                      placeholder="RAZORPAY_KEY_ID"
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Secret key env ref</span>
-                    <input
-                      value={settingsDraft.secretKeyEnvRef}
-                      onChange={(event) => setSettingsDraft({ ...settingsDraft, secretKeyEnvRef: event.target.value })}
-                      placeholder="RAZORPAY_KEY_SECRET"
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
-                    />
                   </label>
                 </div>
 
-                <label className="block space-y-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Connector notes</span>
-                  <textarea
-                    value={settingsDraft.notes}
-                    onChange={(event) => setSettingsDraft({ ...settingsDraft, notes: event.target.value })}
-                    placeholder="Provider onboarding status, required documents, sandbox credentials owner, webhook events to map..."
-                    className="min-h-[110px] w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
-                  />
-                </label>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Provider routes</p>
+                    <p className="text-xs text-mairide-secondary">Lower priority number is attempted first. Failed or timed-out calls roll to the next active provider.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addProviderDraft}
+                    className="rounded-2xl bg-mairide-primary px-4 py-2 text-xs font-black text-white transition hover:bg-mairide-accent"
+                  >
+                    Add Provider
+                  </button>
+                </div>
+
+                {settingsDraft.providers
+                  .slice()
+                  .sort((a, b) => a.priority - b.priority)
+                  .map((provider, index) => (
+                    <div key={provider.id} className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
+                      <div className="mb-5 flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+                            {index === 0 ? 'Primary provider' : `Fallback provider ${index}`}
+                          </p>
+                          <h4 className="mt-1 text-lg font-black text-mairide-primary">
+                            {provider.providerName || 'Unnamed provider'}
+                          </h4>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeProviderDraft(provider.id)}
+                          disabled={settingsDraft.providers.length <= 1}
+                          className="rounded-full border border-mairide-secondary px-3 py-1 text-[10px] font-black uppercase tracking-widest text-mairide-secondary transition hover:border-red-200 hover:text-red-600 disabled:opacity-40"
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Provider name</span>
+                          <input
+                            value={provider.providerName}
+                            onChange={(event) => updateProviderDraft(provider.id, {
+                              providerName: event.target.value,
+                              providerIdentifier: provider.providerIdentifier || slugifyProviderIdentifier(event.target.value),
+                            })}
+                            placeholder="PaySprint, Cashfree, RazorpayX..."
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Provider identifier</span>
+                          <input
+                            value={provider.providerIdentifier}
+                            onChange={(event) => updateProviderDraft(provider.id, { providerIdentifier: slugifyProviderIdentifier(event.target.value) })}
+                            placeholder="paysprint_primary"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Status</span>
+                          <select
+                            value={provider.status}
+                            onChange={(event) => updateProviderDraft(provider.id, { status: event.target.value as MaiPayProviderStatus })}
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          >
+                            <option value="active">Active route</option>
+                            <option value="inactive">Inactive route</option>
+                          </select>
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Priority</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={provider.priority}
+                            onChange={(event) => updateProviderDraft(provider.id, { priority: Number(event.target.value || 1) })}
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Integration type</span>
+                          <select
+                            value={provider.integrationType}
+                            onChange={(event) => updateProviderDraft(provider.id, { integrationType: event.target.value as MaiPayIntegrationType })}
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          >
+                            <option value="rest">REST API</option>
+                            <option value="sdk">SDK</option>
+                            <option value="webhook">Webhook</option>
+                            <option value="hosted">Hosted Checkout / Redirect</option>
+                            <option value="manual">Manual / Back-office</option>
+                          </select>
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Environment</span>
+                          <select
+                            value={provider.environment}
+                            onChange={(event) => updateProviderDraft(provider.id, { environment: event.target.value as MaiPayServiceEnvironment })}
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          >
+                            <option value="sandbox">Sandbox</option>
+                            <option value="production">Production</option>
+                          </select>
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Timeout</span>
+                          <input
+                            type="number"
+                            min={1000}
+                            step={500}
+                            value={provider.timeoutMs}
+                            onChange={(event) => updateProviderDraft(provider.id, { timeoutMs: Number(event.target.value || 12000) })}
+                            placeholder="12000"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Health status</span>
+                          <select
+                            value={provider.healthStatus}
+                            onChange={(event) => updateProviderDraft(provider.id, { healthStatus: event.target.value as MaiPayProviderHealth })}
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          >
+                            <option value="unknown">Unknown</option>
+                            <option value="healthy">Healthy</option>
+                            <option value="degraded">Degraded</option>
+                            <option value="down">Down</option>
+                          </select>
+                        </label>
+                        <label className="space-y-2 md:col-span-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">API base URL</span>
+                          <input
+                            value={provider.apiBaseUrl}
+                            onChange={(event) => updateProviderDraft(provider.id, { apiBaseUrl: event.target.value })}
+                            placeholder="https://api.provider.com"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Webhook URL</span>
+                          <input
+                            value={provider.webhookUrl}
+                            onChange={(event) => updateProviderDraft(provider.id, { webhookUrl: event.target.value })}
+                            placeholder="https://rides.mairide.in/api/..."
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Callback URL</span>
+                          <input
+                            value={provider.callbackUrl}
+                            onChange={(event) => updateProviderDraft(provider.id, { callbackUrl: event.target.value })}
+                            placeholder="https://rides.mairide.in/payment/callback"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Public key env ref</span>
+                          <input
+                            value={provider.publicKeyEnvRef}
+                            onChange={(event) => updateProviderDraft(provider.id, { publicKeyEnvRef: event.target.value.toUpperCase() })}
+                            placeholder="PAYSPRINT_KEY_ID"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Secret key env ref</span>
+                          <input
+                            value={provider.secretKeyEnvRef}
+                            onChange={(event) => updateProviderDraft(provider.id, { secretKeyEnvRef: event.target.value.toUpperCase() })}
+                            placeholder="PAYSPRINT_KEY_SECRET"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Commission tag</span>
+                          <input
+                            value={provider.commissionTag}
+                            onChange={(event) => updateProviderDraft(provider.id, { commissionTag: event.target.value })}
+                            placeholder="high-margin, low-cost, slab-a"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Margin preference</span>
+                          <input
+                            value={provider.marginTag}
+                            onChange={(event) => updateProviderDraft(provider.id, { marginTag: event.target.value })}
+                            placeholder="preferred, fallback-only, test"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Last response time</span>
+                          <input
+                            value={provider.lastResponseMs}
+                            onChange={(event) => updateProviderDraft(provider.id, { lastResponseMs: event.target.value })}
+                            placeholder="320 ms"
+                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                          />
+                        </label>
+                      </div>
+
+                      <label className="mt-4 block space-y-2">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Provider notes</span>
+                        <textarea
+                          value={provider.notes}
+                          onChange={(event) => updateProviderDraft(provider.id, { notes: event.target.value })}
+                          placeholder="Provider onboarding status, required documents, webhook events to map, sandbox owner..."
+                          className="min-h-[92px] w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                        />
+                      </label>
+                    </div>
+                  ))}
               </div>
 
               <div className="flex flex-col gap-3 border-t border-mairide-secondary p-6 sm:flex-row sm:items-center sm:justify-between">

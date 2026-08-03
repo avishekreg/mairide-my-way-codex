@@ -116,6 +116,99 @@ function isMaiPayServiceEnabled(config: Record<string, any>, serviceId: string) 
   return Boolean(isMaiPayMasterEnabled(config) && config.maipayServiceCatalog?.[serviceId]);
 }
 
+type MaiPayProviderRoute = {
+  id: string;
+  providerName: string;
+  providerIdentifier: string;
+  environment: "sandbox" | "production";
+  status: "active" | "inactive";
+  priority: number;
+  timeoutMs: number;
+  integrationType: string;
+  apiBaseUrl: string;
+  webhookUrl: string;
+  callbackUrl: string;
+  publicKeyEnvRef: string;
+  secretKeyEnvRef: string;
+  commissionTag: string;
+  marginTag: string;
+  healthStatus: string;
+  lastResponseMs: string;
+};
+
+function slugifyProviderIdentifier(value: string) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeMaiPayProviderRoute(provider: Record<string, any>, index: number): MaiPayProviderRoute {
+  const providerName = String(provider?.providerName || "").trim();
+  return {
+    id: String(provider?.id || `provider_${index + 1}`),
+    providerName,
+    providerIdentifier: String(provider?.providerIdentifier || slugifyProviderIdentifier(providerName) || `provider_${index + 1}`),
+    environment: provider?.environment === "production" ? "production" : "sandbox",
+    status: provider?.status === "active" ? "active" : "inactive",
+    priority: Number(provider?.priority || index + 1),
+    timeoutMs: Number(provider?.timeoutMs || 12000),
+    integrationType: String(provider?.integrationType || "rest"),
+    apiBaseUrl: String(provider?.apiBaseUrl || "").trim(),
+    webhookUrl: String(provider?.webhookUrl || "").trim(),
+    callbackUrl: String(provider?.callbackUrl || "").trim(),
+    publicKeyEnvRef: String(provider?.publicKeyEnvRef || "").trim().toUpperCase(),
+    secretKeyEnvRef: String(provider?.secretKeyEnvRef || "").trim().toUpperCase(),
+    commissionTag: String(provider?.commissionTag || ""),
+    marginTag: String(provider?.marginTag || ""),
+    healthStatus: String(provider?.healthStatus || "unknown"),
+    lastResponseMs: String(provider?.lastResponseMs || ""),
+  };
+}
+
+function getMaiPayServiceRouting(config: Record<string, any>, serviceId: string) {
+  const rawSetting = config.maipayServiceSettings?.[serviceId] || {};
+  const rawProviders = Array.isArray(rawSetting.providers)
+    ? rawSetting.providers
+    : (rawSetting.providerName || rawSetting.apiBaseUrl || rawSetting.publicKeyEnvRef || rawSetting.secretKeyEnvRef)
+      ? [{ ...rawSetting, id: "legacy_primary", status: "active", priority: 1 }]
+      : [];
+  const providers = rawProviders
+    .map((provider: Record<string, any>, index: number) => normalizeMaiPayProviderRoute(provider, index))
+    .filter((provider: MaiPayProviderRoute) =>
+      provider.status === "active" &&
+      provider.healthStatus !== "down" &&
+      Boolean(provider.providerName || provider.providerIdentifier || provider.apiBaseUrl)
+    )
+    .sort((a: MaiPayProviderRoute, b: MaiPayProviderRoute) => a.priority - b.priority);
+
+  return {
+    routeStrategy: rawSetting.routeStrategy || "priority_fallback",
+    primaryProvider: providers[0] || null,
+    fallbackProviders: providers.slice(1),
+  };
+}
+
+function getSafeProviderRouteMeta(provider: MaiPayProviderRoute | null) {
+  if (!provider) return null;
+  return {
+    providerName: provider.providerName,
+    providerIdentifier: provider.providerIdentifier,
+    environment: provider.environment,
+    priority: provider.priority,
+    timeoutMs: provider.timeoutMs,
+    integrationType: provider.integrationType,
+    apiBaseUrlConfigured: Boolean(provider.apiBaseUrl),
+    publicKeyEnvRef: provider.publicKeyEnvRef,
+    secretKeyEnvRef: provider.secretKeyEnvRef,
+    commissionTag: provider.commissionTag,
+    marginTag: provider.marginTag,
+    healthStatus: provider.healthStatus,
+    lastResponseMs: provider.lastResponseMs,
+  };
+}
+
 async function guardPaymentDmtAccess(req: any, res: any) {
   const config = await getGlobalAppConfig();
   const action = getAction(req);
@@ -134,10 +227,23 @@ async function guardPaymentDmtAccess(req: any, res: any) {
     });
   }
 
+  const routing = getMaiPayServiceRouting(config, serviceId);
+  if (!routing.primaryProvider) {
+    return res.status(501).json({
+      error: "This MaiPay service is active, but no active provider route is configured.",
+      serviceId,
+      providerRoutingRequired: true,
+    });
+  }
+
   return res.status(501).json({
-    error: "MaiPay connector is gated and not configured for live execution yet.",
+    error: "MaiPay provider route is configured, but live vendor execution is not enabled in this build.",
     serviceId,
     sandbox: true,
+    routeStrategy: routing.routeStrategy,
+    selectedProvider: getSafeProviderRouteMeta(routing.primaryProvider),
+    fallbackProviders: routing.fallbackProviders.map(getSafeProviderRouteMeta),
+    fallbackReady: routing.fallbackProviders.length > 0,
   });
 }
 
