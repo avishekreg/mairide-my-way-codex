@@ -2018,9 +2018,29 @@ const AdminMaiPayControlDesk = ({
                       Configure Vendors
                     </button>
                   ) : (
-                    <span className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-2 text-xs font-black text-orange-700">
-                      Toggle controls rollout
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleServiceToggle(service.id)}
+                      disabled={isSavingMaiPayConfig}
+                      aria-pressed={Boolean(isEnabled)}
+                      className="group inline-flex items-center gap-3 rounded-2xl border border-mairide-secondary bg-white px-4 py-2 text-xs font-black text-mairide-primary transition hover:border-mairide-accent disabled:opacity-60"
+                    >
+                      <span className={cn(
+                        "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                        isEnabled ? "bg-green-500" : "bg-mairide-secondary"
+                      )}>
+                        <span className={cn(
+                          "inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                          isEnabled ? "translate-x-5" : "translate-x-1"
+                        )} />
+                      </span>
+                      <span className={cn(
+                        "uppercase tracking-widest",
+                        isEnabled ? "text-green-700" : "text-mairide-secondary group-hover:text-mairide-accent"
+                      )}>
+                        {isEnabled ? 'Active' : 'Inactive'}
+                      </span>
+                    </button>
                   )}
                 </div>
               </div>
