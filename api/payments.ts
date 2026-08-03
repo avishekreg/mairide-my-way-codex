@@ -78,10 +78,48 @@ const controlledPaymentDmtActions = new Set([
   "dmt-status",
   "initiate-dmt",
   "create-controlled-payment",
+  "create-aeps-transaction",
+  "aeps-status",
+  "create-bill-payment",
+  "bill-payment-status",
+  "create-rail-booking",
+  "create-flight-booking",
+  "create-bus-booking",
+  "create-hotel-booking",
+  "create-loan-application",
+  "create-credit-card-application",
 ]);
+
+const actionServiceMap: Record<string, string> = {
+  "create-dmt-transfer": "dmt",
+  "verify-dmt-transfer": "dmt",
+  "dmt-status": "dmt",
+  "initiate-dmt": "dmt",
+  "create-controlled-payment": "dmt",
+  "create-aeps-transaction": "aeps",
+  "aeps-status": "aeps",
+  "create-bill-payment": "bill_payments",
+  "bill-payment-status": "bill_payments",
+  "create-rail-booking": "rail_bookings",
+  "create-flight-booking": "flight_bookings",
+  "create-bus-booking": "bus_bookings",
+  "create-hotel-booking": "hotel_bookings",
+  "create-loan-application": "loan_applications",
+  "create-credit-card-application": "credit_card_services",
+};
+
+function isMaiPayMasterEnabled(config: Record<string, any>) {
+  return Boolean(config.maipayEnabled ?? config.paymentDmtServicesEnabled);
+}
+
+function isMaiPayServiceEnabled(config: Record<string, any>, serviceId: string) {
+  return Boolean(isMaiPayMasterEnabled(config) && config.maipayServiceCatalog?.[serviceId]);
+}
 
 async function guardPaymentDmtAccess(req: any, res: any) {
   const config = await getGlobalAppConfig();
+  const action = getAction(req);
+  const serviceId = actionServiceMap[action] || "dmt";
   const requester = req.body?.profile || req.body?.requester || {
     uid: req.body?.userId,
     email: req.body?.email,
@@ -89,14 +127,16 @@ async function guardPaymentDmtAccess(req: any, res: any) {
     role: req.body?.role,
   };
 
-  if (!canUseControlledFeature(config.paymentDmtServicesEnabled, requester, config)) {
+  if (!canUseControlledFeature(isMaiPayServiceEnabled(config, serviceId), requester, config)) {
     return res.status(403).json({
-      error: "Payment and DMT services are inactive for this account.",
+      error: "This MaiPay service is inactive for this account.",
+      serviceId,
     });
   }
 
   return res.status(501).json({
-    error: "Payment and DMT connector is gated and not configured for live execution yet.",
+    error: "MaiPay connector is gated and not configured for live execution yet.",
+    serviceId,
     sandbox: true,
   });
 }
@@ -109,7 +149,7 @@ function getLiveMoneyWalletAnnualFee(config: Record<string, any>) {
 }
 
 function canUseLiveMoneyWallet(config: Record<string, any>, requester: Record<string, any>) {
-  return Boolean(config.paymentDmtServicesEnabled && config.liveMoneyWalletAddOnEnabled) || isSandboxRequester(requester, config);
+  return Boolean(isMaiPayServiceEnabled(config, "driver_live_wallet") && config.liveMoneyWalletAddOnEnabled) || isSandboxRequester(requester, config);
 }
 
 async function createLiveMoneyWalletSubscriptionOrder(req: any, res: any) {
@@ -173,7 +213,8 @@ async function createLiveMoneyWalletQrCode(req: any, res: any) {
       displayName: req.body?.displayName || req.body?.profile?.displayName,
     };
 
-    if (!canUseLiveMoneyWallet(config, requester)) {
+    const qrCollectionAllowed = isMaiPayServiceEnabled(config, "qr_collections") || isSandboxRequester(requester, config);
+    if (!canUseLiveMoneyWallet(config, requester) && !qrCollectionAllowed) {
       return res.status(403).json({ error: "Live Money Wallet collections are inactive for this account." });
     }
 

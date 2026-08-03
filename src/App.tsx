@@ -781,7 +781,39 @@ const listConfigValues = (value?: string[] | string | null) => {
 
 const stringifyConfigValues = (value?: string[] | string | null) => listConfigValues(value).join('\n');
 
-const STRICT_SANDBOX_EMAILS = ['ad@optonpay.com', 'ad@optoninfocom.com'];
+const STRICT_SANDBOX_EMAILS = ['ad@optinpay.com', 'ad@optininfocom.com'];
+const MAIPAY_SERVICE_CATALOG = [
+  { id: 'dmt', label: 'DMT', category: 'Money Transfer', description: 'Domestic money transfer connector and beneficiary-led remittance workflow.' },
+  { id: 'aeps', label: 'AEPS', category: 'Banking', description: 'Aadhaar-enabled payment service readiness and provider routing.' },
+  { id: 'bill_payments', label: 'Bill Payments', category: 'Utility', description: 'Electricity, mobile, DTH, broadband, FASTag, and utility bill payment rail.' },
+  { id: 'rail_bookings', label: 'Rail Bookings', category: 'Travel Utility', description: 'Rail search, booking, status, and assisted passenger utility workflow.' },
+  { id: 'flight_bookings', label: 'Flight Bookings', category: 'Travel Utility', description: 'Flight search, booking, arrival, and departure utility integrations.' },
+  { id: 'bus_bookings', label: 'Bus Bookings', category: 'Travel Utility', description: 'Bus inventory, booking, and cancellation partner connector.' },
+  { id: 'hotel_bookings', label: 'Hotel Bookings', category: 'Travel Utility', description: 'Hotel room search and booking partner connector.' },
+  { id: 'loan_applications', label: 'Loan Applications', category: 'Credit', description: 'Loan lead, eligibility, and application routing desk.' },
+  { id: 'credit_card_services', label: 'Credit Card Services', category: 'Credit', description: 'Credit card lead, application, and partner product routing.' },
+  { id: 'driver_live_wallet', label: 'Driver Live Wallet', category: 'Driver Finance', description: 'Driver INR wallet subscription, QR collection, and settlement posture.' },
+  { id: 'qr_collections', label: 'QR Collections', category: 'Payments', description: 'Razorpay QR/UPI collection tools for controlled driver receipts.' },
+] as const;
+type MaiPayServiceId = typeof MAIPAY_SERVICE_CATALOG[number]['id'];
+type MaiPayServiceCatalogState = Record<MaiPayServiceId, boolean>;
+
+const getDefaultMaiPayServiceCatalog = (): MaiPayServiceCatalogState =>
+  MAIPAY_SERVICE_CATALOG.reduce((acc, service) => {
+    acc[service.id] = false;
+    return acc;
+  }, {} as MaiPayServiceCatalogState);
+
+const getMaiPayServiceCatalog = (config?: Partial<AppConfig> | null): MaiPayServiceCatalogState => ({
+  ...getDefaultMaiPayServiceCatalog(),
+  ...(config?.maipayServiceCatalog || {}),
+});
+
+const isMaiPayMasterEnabled = (config?: Partial<AppConfig> | null) =>
+  Boolean(config?.maipayEnabled ?? config?.paymentDmtServicesEnabled);
+
+const isMaiPayServiceEnabled = (config: Partial<AppConfig> | null | undefined, serviceId: MaiPayServiceId) =>
+  Boolean(isMaiPayMasterEnabled(config) && getMaiPayServiceCatalog(config)[serviceId]);
 
 const isSandboxIntegrationUser = (profile?: Partial<UserProfile> | null, config?: Partial<AppConfig> | null) => {
   if (!profile) return false;
@@ -790,7 +822,7 @@ const isSandboxIntegrationUser = (profile?: Partial<UserProfile> | null, config?
 };
 
 const canAccessPaymentDmtServices = (profile?: Partial<UserProfile> | null, config?: Partial<AppConfig> | null) =>
-  Boolean(config?.paymentDmtServicesEnabled) || isSandboxIntegrationUser(profile, config);
+  isMaiPayMasterEnabled(config) || isSandboxIntegrationUser(profile, config);
 
 const canAccessTravelTrackingServices = (profile?: Partial<UserProfile> | null, config?: Partial<AppConfig> | null) =>
   Boolean(config?.trackingServicesEnabled) || isSandboxIntegrationUser(profile, config);
@@ -1460,6 +1492,9 @@ const AdminMaiPayControlDesk = ({
   config?: AppConfig | null;
 }) => {
   const safeConfig = config || {};
+  const [maiPayMasterEnabled, setMaiPayMasterEnabled] = useState(isMaiPayMasterEnabled(safeConfig));
+  const [serviceCatalog, setServiceCatalog] = useState<MaiPayServiceCatalogState>(getMaiPayServiceCatalog(safeConfig));
+  const [isSavingMaiPayConfig, setIsSavingMaiPayConfig] = useState(false);
   const driverWalletUsers = users.filter((user) => user.role === 'driver' && user.liveMoneyWallet?.enabled);
   const activeWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'active');
   const pendingWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'pending');
@@ -1478,9 +1513,52 @@ const AdminMaiPayControlDesk = ({
       String(tx.metadata?.product || '').includes('driver_live_money_wallet')
     )
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  const paymentDmtPublicStatus = Boolean(safeConfig.paymentDmtServicesEnabled);
-  const liveWalletPublicStatus = Boolean(safeConfig.liveMoneyWalletAddOnEnabled);
+  const paymentDmtPublicStatus = maiPayMasterEnabled;
+  const liveWalletPublicStatus = Boolean(maiPayMasterEnabled && serviceCatalog.driver_live_wallet && safeConfig.liveMoneyWalletAddOnEnabled);
   const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(safeConfig);
+  const activeServiceCount = MAIPAY_SERVICE_CATALOG.filter((service) => serviceCatalog[service.id]).length;
+
+  useEffect(() => {
+    setMaiPayMasterEnabled(isMaiPayMasterEnabled(config));
+    setServiceCatalog(getMaiPayServiceCatalog(config));
+  }, [config]);
+
+  const saveMaiPayConfig = async (nextMaster: boolean, nextCatalog: MaiPayServiceCatalogState) => {
+    setIsSavingMaiPayConfig(true);
+    try {
+      const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
+      await axios.post(adminSaveConfigPath, {
+        ...(safeConfig || {}),
+        maipayEnabled: nextMaster,
+        paymentDmtServicesEnabled: nextMaster,
+        maipayServiceCatalog: nextCatalog,
+        liveMoneyWalletAddOnEnabled: Boolean(safeConfig.liveMoneyWalletAddOnEnabled),
+        integrationSandboxUserIds: [],
+        integrationSandboxEmails: STRICT_SANDBOX_EMAILS,
+        updatedAt: new Date().toISOString(),
+        updatedBy: auth.currentUser?.email || 'admin',
+      }, { headers });
+      setMaiPayMasterEnabled(nextMaster);
+      setServiceCatalog(nextCatalog);
+    } catch (error) {
+      showAppDialog(getApiErrorMessage(error, 'We could not save MaiPay controls right now.'), 'error', 'MaiPay save failed');
+    } finally {
+      setIsSavingMaiPayConfig(false);
+    }
+  };
+
+  const handleMasterToggle = () => {
+    const nextMaster = !maiPayMasterEnabled;
+    void saveMaiPayConfig(nextMaster, serviceCatalog);
+  };
+
+  const handleServiceToggle = (serviceId: MaiPayServiceId) => {
+    const nextCatalog = {
+      ...serviceCatalog,
+      [serviceId]: !serviceCatalog[serviceId],
+    };
+    void saveMaiPayConfig(maiPayMasterEnabled, nextCatalog);
+  };
 
   const statCards = [
     {
@@ -1523,8 +1601,12 @@ const AdminMaiPayControlDesk = ({
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-white/75">
               A separated payment, wallet, QR, and settlement workspace for future banking-provider verification. This surface is intentionally isolated from live ride dispatch, negotiation, authentication, and tracking operations.
             </p>
+            <div className="mt-5 inline-flex flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-white/80">
+              <span>Sandbox emails</span>
+              <span className="text-white">{STRICT_SANDBOX_EMAILS.join(' · ')}</span>
+            </div>
           </div>
-          <div className="grid min-w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:min-w-[360px]">
+          <div className="grid min-w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:min-w-[420px]">
             <div className={cn(
               "rounded-3xl border px-5 py-4",
               paymentDmtPublicStatus ? "border-green-300 bg-green-500/15 text-green-100" : "border-white/15 bg-white/10 text-white/75"
@@ -1539,7 +1621,65 @@ const AdminMaiPayControlDesk = ({
               <p className="text-[10px] font-bold uppercase tracking-widest">Driver wallet add-on</p>
               <p className="mt-2 text-lg font-black">{liveWalletPublicStatus ? 'Available' : 'Staged'}</p>
             </div>
+            <button
+              type="button"
+              onClick={handleMasterToggle}
+              disabled={isSavingMaiPayConfig}
+              className={cn(
+                "sm:col-span-2 rounded-3xl px-5 py-4 text-left text-sm font-black transition disabled:opacity-60",
+                maiPayMasterEnabled
+                  ? "bg-white text-mairide-primary hover:bg-white/90"
+                  : "bg-mairide-accent text-white hover:bg-mairide-accent/90"
+              )}
+            >
+              {isSavingMaiPayConfig ? 'Saving MaiPay controls...' : maiPayMasterEnabled ? 'Turn MaiPay Ecosystem Off' : 'Turn MaiPay Ecosystem On'}
+              <span className="mt-1 block text-[10px] font-bold uppercase tracking-widest opacity-70">
+                {activeServiceCount} service{activeServiceCount === 1 ? '' : 's'} enabled in catalog
+              </span>
+            </button>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-[40px] border border-mairide-secondary bg-white p-7 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Service registry</p>
+            <h3 className="mt-2 text-2xl font-black text-mairide-primary">MaiPay service catalog</h3>
+            <p className="mt-1 text-sm text-mairide-secondary">
+              Toggle each fintech or utility service independently. Public access requires the global MaiPay master switch plus the individual service flag; sandbox emails bypass staged rollout.
+            </p>
+          </div>
+          <p className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+            {activeServiceCount}/{MAIPAY_SERVICE_CATALOG.length} active
+          </p>
+        </div>
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {MAIPAY_SERVICE_CATALOG.map((service) => {
+            const isEnabled = serviceCatalog[service.id];
+            return (
+              <div key={service.id} className="rounded-3xl border border-mairide-secondary bg-mairide-bg/50 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{service.category}</p>
+                    <h4 className="mt-2 text-lg font-black text-mairide-primary">{service.label}</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleServiceToggle(service.id)}
+                    disabled={isSavingMaiPayConfig}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest transition disabled:opacity-60",
+                      isEnabled ? "bg-green-100 text-green-700" : "bg-white text-mairide-secondary border border-mairide-secondary"
+                    )}
+                  >
+                    {isEnabled ? 'Active' : 'Inactive'}
+                  </button>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-mairide-secondary">{service.description}</p>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -6511,6 +6651,7 @@ const LocationPermissionPrompt = ({
 const Navbar = ({
   user,
   profile,
+  config,
   onLogout,
   uiLanguage,
   onChangeLanguage,
@@ -6519,6 +6660,7 @@ const Navbar = ({
 }: {
   user: User,
   profile: UserProfile | null,
+  config?: AppConfig | null,
   onLogout: () => void,
   uiLanguage: string,
   onChangeLanguage: (next: string) => void,
@@ -6549,6 +6691,15 @@ const Navbar = ({
     navigate('/');
   };
 
+  const driverMaiPayVisible = Boolean(
+    profile?.role === 'driver' &&
+    (
+      isSandboxIntegrationUser(profile, config) ||
+      isMaiPayMasterEnabled(config) ||
+      MAIPAY_SERVICE_CATALOG.some((service) => isMaiPayServiceEnabled(config, service.id))
+    )
+  );
+
   const roleTabs =
     profile?.role === 'driver'
       ? [
@@ -6556,6 +6707,7 @@ const Navbar = ({
           { id: 'requests', label: 'Booking Requests' },
           { id: 'history', label: 'Ride History' },
           { id: 'wallet', label: 'Wallet' },
+          ...(driverMaiPayVisible ? [{ id: 'maipay', label: 'MaiPay' }] : []),
           { id: 'support', label: 'Support' },
           { id: 'profile', label: 'Profile' },
         ]
@@ -9015,7 +9167,11 @@ const DriverOnboarding = ({
   const [capturingField, setCapturingField] = useState<string | null>(null);
   const verificationMarkers = buildVerificationMarkers(formData as any);
   const aadhaarSegments = splitAadhaarDigits(formData.aadhaarNumber);
-  const liveWalletAddOnEnabled = Boolean(config?.liveMoneyWalletAddOnEnabled);
+  const driverMaiPaySandboxAccess = isSandboxIntegrationUser(profile, config);
+  const liveWalletAddOnEnabled = Boolean(
+    driverMaiPaySandboxAccess ||
+    (config?.liveMoneyWalletAddOnEnabled && isMaiPayServiceEnabled(config, 'driver_live_wallet'))
+  );
   const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(config);
 
   useEffect(() => {
@@ -16922,8 +17078,114 @@ const finalizeTravelerDashboardRazorpayPayment = async (
   );
 };
 
+const DriverMaiPayPanel = ({
+  profile,
+  config,
+  onEnableLiveWallet,
+}: {
+  profile: UserProfile;
+  config?: AppConfig | null;
+  onEnableLiveWallet: () => void;
+}) => {
+  const sandboxAccess = isSandboxIntegrationUser(profile, config);
+  const serviceCatalog = getMaiPayServiceCatalog(config);
+  const accessibleServices = MAIPAY_SERVICE_CATALOG.filter(
+    (service) => sandboxAccess || isMaiPayServiceEnabled(config, service.id)
+  );
+  const wallet = profile.liveMoneyWallet;
+  const annualFee = getLiveMoneyWalletAnnualFee(config);
+
+  return (
+    <div className="space-y-8">
+      <div className="rounded-[40px] border border-mairide-primary bg-mairide-primary p-8 text-white shadow-xl shadow-mairide-primary/20">
+        <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/60">Driver finance workspace</p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight">MaiPay</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-white/75">
+              View your live wallet, QR collection posture, and admin-enabled financial tools. Public services appear only after Super Admin activation; sandbox testers can preview the full catalog.
+            </p>
+          </div>
+          <div className="rounded-3xl border border-white/15 bg-white/10 px-5 py-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">Access mode</p>
+            <p className="mt-2 text-lg font-black">{sandboxAccess ? 'Sandbox Preview' : isMaiPayMasterEnabled(config) ? 'Live Controlled' : 'Staged'}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Available INR</p>
+          <p className="mt-3 text-3xl font-black text-mairide-primary">{formatCurrency(wallet?.availableBalance || 0)}</p>
+          <p className="mt-2 text-sm text-mairide-secondary">Ready wallet balance from controlled collections.</p>
+        </div>
+        <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Pending INR</p>
+          <p className="mt-3 text-3xl font-black text-mairide-primary">{formatCurrency(wallet?.pendingBalance || 0)}</p>
+          <p className="mt-2 text-sm text-mairide-secondary">Collections awaiting reconciliation or settlement.</p>
+        </div>
+        <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Subscription</p>
+          <p className="mt-3 text-2xl font-black capitalize text-mairide-primary">{wallet?.subscriptionStatus || 'inactive'}</p>
+          <p className="mt-2 text-sm text-mairide-secondary">Annual activation fee: {formatCurrency(annualFee)}.</p>
+        </div>
+      </div>
+
+      {!wallet?.enabled && (sandboxAccess || isMaiPayServiceEnabled(config, 'driver_live_wallet')) ? (
+        <div className="rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="text-xl font-black text-mairide-primary">Enable Live Money Wallet</h3>
+              <p className="mt-1 text-sm text-mairide-secondary">Opt in when you are ready to use QR/UPI collections through the controlled mAIRide finance rail.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onEnableLiveWallet}
+              className="rounded-2xl bg-mairide-accent px-6 py-4 text-sm font-black text-white transition hover:bg-mairide-primary"
+            >
+              Enable Add-on
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="rounded-[40px] border border-mairide-secondary bg-white p-7 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Enabled tools</p>
+            <h3 className="mt-2 text-2xl font-black text-mairide-primary">Your MaiPay service access</h3>
+          </div>
+          <p className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+            {accessibleServices.length} available
+          </p>
+        </div>
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {accessibleServices.map((service) => (
+            <div key={service.id} className="rounded-3xl border border-mairide-secondary bg-mairide-bg/60 p-5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{service.category}</p>
+              <h4 className="mt-2 text-lg font-black text-mairide-primary">{service.label}</h4>
+              <p className="mt-2 text-sm leading-6 text-mairide-secondary">{service.description}</p>
+              <span className="mt-4 inline-flex rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-mairide-accent">
+                {sandboxAccess && !serviceCatalog[service.id] ? 'Sandbox' : 'Active'}
+              </span>
+            </div>
+          ))}
+          {!accessibleServices.length && (
+            <div className="md:col-span-2 rounded-3xl border border-dashed border-mairide-secondary bg-mairide-bg p-8 text-center">
+              <Wallet className="mx-auto h-10 w-10 text-mairide-secondary opacity-50" />
+              <p className="mt-4 text-sm font-bold text-mairide-primary">MaiPay services are not active for your account yet.</p>
+              <p className="mt-1 text-sm text-mairide-secondary">You will see tools here after Super Admin enables the ecosystem and individual service catalog entries.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
+  type DriverTab = 'dashboard' | 'requests' | 'history' | 'wallet' | 'maipay' | 'support' | 'profile';
   const showDashboardHeroLogo = !isAppDisplayMode();
   const firstName = String(profile.displayName || profile.email || 'Driver').split(' ')[0] || 'Driver';
   const [isOnline, setIsOnline] = useState(profile.driverDetails?.isOnline || false);
@@ -16936,8 +17198,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       const customEvent = event as CustomEvent<{ role?: string; tab?: string }>;
       const targetTab = customEvent.detail?.tab;
       if (!targetTab) return;
-      if (['dashboard', 'requests', 'history', 'wallet', 'support', 'profile'].includes(targetTab)) {
-        setActiveTab(targetTab as 'dashboard' | 'requests' | 'history' | 'wallet' | 'support' | 'profile');
+      if (['dashboard', 'requests', 'history', 'wallet', 'maipay', 'support', 'profile'].includes(targetTab)) {
+        setActiveTab(targetTab as DriverTab);
       }
     };
     window.addEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
@@ -16948,7 +17210,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     };
   }, []);
   const [isPostingRide, setIsPostingRide] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'requests' | 'history' | 'wallet' | 'support' | 'profile'>('dashboard');
+  const [activeTab, setActiveTab] = useState<DriverTab>('dashboard');
   const hasMapsIssue = Boolean(loadError || authFailure);
   const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(() => {
     if (isAppWebViewRuntime() || isAndroidWebViewLikeRuntime()) return null;
@@ -20136,6 +20398,13 @@ const finalizeDriverDashboardRazorpayPayment = async (
       {activeTab === 'requests' && <BookingRequests profile={profile} />}
       {activeTab === 'history' && <DriverHistory profile={profile} />}
       {activeTab === 'wallet' && <WalletDashboard profile={profile} />}
+      {activeTab === 'maipay' && (
+        <DriverMaiPayPanel
+          profile={profile}
+          config={config}
+          onEnableLiveWallet={() => void handleEnableLiveMoneyWallet()}
+        />
+      )}
       {activeTab === 'support' && <SupportSystem profile={profile} />}
       {activeTab === 'profile' && <UserSelfProfilePanel profile={profile} />}
       {paymentRequest && (
@@ -21461,6 +21730,8 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     referralRewardTier2: 5,
     paymentGatewayUrl: 'https://api.razorpay.com/v1',
     razorpayKeyId: RAZORPAY_KEY_ID || '',
+    maipayEnabled: false,
+    maipayServiceCatalog: getDefaultMaiPayServiceCatalog(),
     paymentDmtServicesEnabled: false,
     trackingServicesEnabled: false,
     integrationSandboxUserIds: [],
@@ -21563,6 +21834,12 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
         ...formData,
         integrationSandboxUserIds: [],
         integrationSandboxEmails: STRICT_SANDBOX_EMAILS,
+        maipayEnabled: Boolean(formData.maipayEnabled ?? formData.paymentDmtServicesEnabled),
+        paymentDmtServicesEnabled: Boolean(formData.maipayEnabled ?? formData.paymentDmtServicesEnabled),
+        maipayServiceCatalog: {
+          ...getDefaultMaiPayServiceCatalog(),
+          ...(formData.maipayServiceCatalog || {}),
+        },
         liveMoneyWalletAnnualFee: getLiveMoneyWalletAnnualFee(formData),
         liveMoneyWalletMinAnnualFee: 500,
         liveMoneyWalletMaxAnnualFee: 1000,
@@ -21697,8 +21974,11 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Payment & DMT Services</label>
                 <select
-                  value={formData.paymentDmtServicesEnabled ? 'enabled' : 'disabled'}
-                  onChange={e => setFormData({ ...formData, paymentDmtServicesEnabled: e.target.value === 'enabled' })}
+                  value={(formData.maipayEnabled ?? formData.paymentDmtServicesEnabled) ? 'enabled' : 'disabled'}
+                  onChange={e => {
+                    const enabled = e.target.value === 'enabled';
+                    setFormData({ ...formData, maipayEnabled: enabled, paymentDmtServicesEnabled: enabled });
+                  }}
                   className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="disabled">Inactive for public users</option>
@@ -27451,6 +27731,7 @@ const App = () => {
       <Navbar
         user={user}
         profile={profile}
+        config={appConfigState.config}
         onLogout={handleLogout}
         uiLanguage={uiLanguage}
         onChangeLanguage={commitUiLanguage}
@@ -27691,6 +27972,7 @@ const App = () => {
           <Navbar
             user={user}
             profile={profile}
+            config={appConfigState.config}
             onLogout={handleLogout}
             uiLanguage={uiLanguage}
             onChangeLanguage={commitUiLanguage}

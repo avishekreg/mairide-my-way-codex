@@ -239,6 +239,8 @@ export interface AppConfig {
   razorpayXKeySecret?: string;
   razorpayXPayoutSourceAccount?: string;
   razorpayXPayoutWebhookSecret?: string;
+  maipayEnabled?: boolean;
+  maipayServiceCatalog?: Record<string, boolean>;
   paymentDmtServicesEnabled?: boolean;
   trackingServicesEnabled?: boolean;
   integrationSandboxUserIds?: string[];
