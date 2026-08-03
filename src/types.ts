@@ -241,6 +241,14 @@ export interface AppConfig {
   razorpayXPayoutWebhookSecret?: string;
   maipayEnabled?: boolean;
   maipayServiceCatalog?: Record<string, boolean>;
+  maipayCustomServices?: Array<{
+    id?: string;
+    label?: string;
+    category?: string;
+    description?: string;
+    kind?: 'internal' | 'external';
+    builtIn?: boolean;
+  }>;
   maipayServiceSettings?: Record<string, {
     routeStrategy?: 'priority_fallback' | 'manual_primary';
     providers?: Array<{

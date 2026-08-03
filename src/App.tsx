@@ -782,21 +782,30 @@ const listConfigValues = (value?: string[] | string | null) => {
 const stringifyConfigValues = (value?: string[] | string | null) => listConfigValues(value).join('\n');
 
 const STRICT_SANDBOX_EMAILS = ['ad@optonpay.com', 'ad@optoninfocom.com'];
-const MAIPAY_SERVICE_CATALOG = [
-  { id: 'dmt', label: 'DMT', category: 'Money Transfer', description: 'Domestic money transfer connector and beneficiary-led remittance workflow.' },
-  { id: 'aeps', label: 'AEPS', category: 'Banking', description: 'Aadhaar-enabled payment service readiness and provider routing.' },
-  { id: 'bill_payments', label: 'Bill Payments', category: 'Utility', description: 'Electricity, mobile, DTH, broadband, FASTag, and utility bill payment rail.' },
-  { id: 'rail_bookings', label: 'Rail Bookings', category: 'Travel Utility', description: 'Rail search, booking, status, and assisted passenger utility workflow.' },
-  { id: 'flight_bookings', label: 'Flight Bookings', category: 'Travel Utility', description: 'Flight search, booking, arrival, and departure utility integrations.' },
-  { id: 'bus_bookings', label: 'Bus Bookings', category: 'Travel Utility', description: 'Bus inventory, booking, and cancellation partner connector.' },
-  { id: 'hotel_bookings', label: 'Hotel Bookings', category: 'Travel Utility', description: 'Hotel room search and booking partner connector.' },
-  { id: 'loan_applications', label: 'Loan Applications', category: 'Credit', description: 'Loan lead, eligibility, and application routing desk.' },
-  { id: 'credit_card_services', label: 'Credit Card Services', category: 'Credit', description: 'Credit card lead, application, and partner product routing.' },
-  { id: 'driver_live_wallet', label: 'Driver Live Wallet', category: 'Driver Finance', description: 'Driver INR wallet subscription, QR collection, and settlement posture.' },
-  { id: 'qr_collections', label: 'QR Collections', category: 'Payments', description: 'Razorpay QR/UPI collection tools for controlled driver receipts.' },
-] as const;
-type MaiPayServiceId = typeof MAIPAY_SERVICE_CATALOG[number]['id'];
-type MaiPayServiceCatalogState = Record<MaiPayServiceId, boolean>;
+type MaiPayServiceKind = 'internal' | 'external';
+type MaiPayServiceDefinition = {
+  id: string;
+  label: string;
+  category: string;
+  description: string;
+  kind: MaiPayServiceKind;
+  builtIn?: boolean;
+};
+const BUILT_IN_MAIPAY_SERVICE_CATALOG: MaiPayServiceDefinition[] = [
+  { id: 'dmt', label: 'DMT', category: 'Money Transfer', kind: 'external', builtIn: true, description: 'Domestic money transfer connector and beneficiary-led remittance workflow.' },
+  { id: 'aeps', label: 'AEPS', category: 'Banking', kind: 'external', builtIn: true, description: 'Aadhaar-enabled payment service readiness and provider routing.' },
+  { id: 'bill_payments', label: 'Bill Payments', category: 'Utility', kind: 'external', builtIn: true, description: 'Electricity, mobile, DTH, broadband, FASTag, and utility bill payment rail.' },
+  { id: 'rail_bookings', label: 'Rail Bookings', category: 'Travel Utility', kind: 'external', builtIn: true, description: 'Rail search, booking, status, and assisted passenger utility workflow.' },
+  { id: 'flight_bookings', label: 'Flight Bookings', category: 'Travel Utility', kind: 'external', builtIn: true, description: 'Flight search, booking, arrival, and departure utility integrations.' },
+  { id: 'bus_bookings', label: 'Bus Bookings', category: 'Travel Utility', kind: 'external', builtIn: true, description: 'Bus inventory, booking, and cancellation partner connector.' },
+  { id: 'hotel_bookings', label: 'Hotel Bookings', category: 'Travel Utility', kind: 'external', builtIn: true, description: 'Hotel room search and booking partner connector.' },
+  { id: 'loan_applications', label: 'Loan Applications', category: 'Credit', kind: 'external', builtIn: true, description: 'Loan lead, eligibility, and application routing desk.' },
+  { id: 'credit_card_services', label: 'Credit Card Services', category: 'Credit', kind: 'external', builtIn: true, description: 'Credit card lead, application, and partner product routing.' },
+  { id: 'driver_live_wallet', label: 'Driver Live Wallet', category: 'Driver Finance', kind: 'internal', builtIn: true, description: 'Internal driver INR wallet onboarding, subscription, and ledger controls.' },
+  { id: 'qr_collections', label: 'QR Collections', category: 'Payments', kind: 'internal', builtIn: true, description: 'Internal Razorpay QR/UPI collection tools tied to approved driver wallet accounts.' },
+];
+type MaiPayServiceId = string;
+type MaiPayServiceCatalogState = Record<string, boolean>;
 type MaiPayIntegrationType = 'rest' | 'sdk' | 'webhook' | 'hosted' | 'manual';
 type MaiPayServiceEnvironment = 'sandbox' | 'production';
 type MaiPayProviderHealth = 'unknown' | 'healthy' | 'degraded' | 'down';
@@ -833,10 +842,32 @@ type MaiPayServiceSetting = {
 type MaiPayServiceSettingsState = Record<string, MaiPayServiceSetting>;
 
 const getDefaultMaiPayServiceCatalog = (): MaiPayServiceCatalogState =>
-  MAIPAY_SERVICE_CATALOG.reduce((acc, service) => {
+  BUILT_IN_MAIPAY_SERVICE_CATALOG.reduce((acc, service) => {
     acc[service.id] = false;
     return acc;
   }, {} as MaiPayServiceCatalogState);
+
+const normalizeMaiPayCustomServices = (config?: Partial<AppConfig> | null): MaiPayServiceDefinition[] =>
+  (config?.maipayCustomServices || [])
+    .map((service: any) => ({
+      id: slugifyProviderIdentifier(service?.id || service?.label || service?.name),
+      label: String(service?.label || service?.name || '').trim(),
+      category: String(service?.category || (service?.kind === 'internal' ? 'Internal Feature' : 'External API')).trim(),
+      description: String(service?.description || '').trim(),
+      kind: service?.kind === 'internal' ? 'internal' : 'external',
+      builtIn: false,
+    }))
+    .filter((service) => service.id && service.label);
+
+const getMaiPayServices = (config?: Partial<AppConfig> | null): MaiPayServiceDefinition[] => {
+  const seen = new Set(BUILT_IN_MAIPAY_SERVICE_CATALOG.map((service) => service.id));
+  const custom = normalizeMaiPayCustomServices(config).filter((service) => {
+    if (seen.has(service.id)) return false;
+    seen.add(service.id);
+    return true;
+  });
+  return [...BUILT_IN_MAIPAY_SERVICE_CATALOG, ...custom];
+};
 
 const getMaiPayServiceCatalog = (config?: Partial<AppConfig> | null): MaiPayServiceCatalogState => ({
   ...getDefaultMaiPayServiceCatalog(),
@@ -1627,7 +1658,16 @@ const AdminMaiPayControlDesk = ({
   const [serviceSettings, setServiceSettings] = useState<MaiPayServiceSettingsState>(getMaiPayServiceSettings(safeConfig));
   const [configuringServiceId, setConfiguringServiceId] = useState<MaiPayServiceId | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<MaiPayServiceSetting>(getDefaultMaiPayServiceSetting());
+  const [customServices, setCustomServices] = useState<MaiPayServiceDefinition[]>(normalizeMaiPayCustomServices(safeConfig));
+  const [showAddServiceModal, setShowAddServiceModal] = useState(false);
+  const [newServiceDraft, setNewServiceDraft] = useState({
+    label: '',
+    category: '',
+    kind: 'external' as MaiPayServiceKind,
+    description: '',
+  });
   const [isSavingMaiPayConfig, setIsSavingMaiPayConfig] = useState(false);
+  const maiPayServices = getMaiPayServices({ ...safeConfig, maipayCustomServices: customServices });
   const driverWalletUsers = users.filter((user) => user.role === 'driver' && user.liveMoneyWallet?.enabled);
   const activeWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'active');
   const pendingWalletUsers = driverWalletUsers.filter((user) => user.liveMoneyWallet?.subscriptionStatus === 'pending');
@@ -1649,18 +1689,22 @@ const AdminMaiPayControlDesk = ({
   const paymentDmtPublicStatus = maiPayMasterEnabled;
   const liveWalletPublicStatus = Boolean(maiPayMasterEnabled && serviceCatalog.driver_live_wallet && safeConfig.liveMoneyWalletAddOnEnabled);
   const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(safeConfig);
-  const activeServiceCount = MAIPAY_SERVICE_CATALOG.filter((service) => serviceCatalog[service.id]).length;
+  const activeServiceCount = maiPayServices.filter((service) => serviceCatalog[service.id]).length;
+  const externalServiceCount = maiPayServices.filter((service) => service.kind === 'external').length;
+  const internalServiceCount = maiPayServices.filter((service) => service.kind === 'internal').length;
 
   useEffect(() => {
     setMaiPayMasterEnabled(isMaiPayMasterEnabled(config));
     setServiceCatalog(getMaiPayServiceCatalog(config));
     setServiceSettings(getMaiPayServiceSettings(config));
+    setCustomServices(normalizeMaiPayCustomServices(config));
   }, [config]);
 
   const saveMaiPayConfig = async (
     nextMaster: boolean,
     nextCatalog: MaiPayServiceCatalogState,
-    nextSettings: MaiPayServiceSettingsState = serviceSettings
+    nextSettings: MaiPayServiceSettingsState = serviceSettings,
+    nextCustomServices: MaiPayServiceDefinition[] = customServices
   ) => {
     setIsSavingMaiPayConfig(true);
     try {
@@ -1671,6 +1715,7 @@ const AdminMaiPayControlDesk = ({
         paymentDmtServicesEnabled: nextMaster,
         maipayServiceCatalog: nextCatalog,
         maipayServiceSettings: nextSettings,
+        maipayCustomServices: nextCustomServices,
         liveMoneyWalletAddOnEnabled: Boolean(safeConfig.liveMoneyWalletAddOnEnabled),
         integrationSandboxUserIds: [],
         integrationSandboxEmails: STRICT_SANDBOX_EMAILS,
@@ -1680,6 +1725,7 @@ const AdminMaiPayControlDesk = ({
       setMaiPayMasterEnabled(nextMaster);
       setServiceCatalog(nextCatalog);
       setServiceSettings(nextSettings);
+      setCustomServices(nextCustomServices);
     } catch (error) {
       showAppDialog(getApiErrorMessage(error, 'We could not save MaiPay controls right now.'), 'error', 'MaiPay save failed');
     } finally {
@@ -1698,6 +1744,39 @@ const AdminMaiPayControlDesk = ({
       [serviceId]: !serviceCatalog[serviceId],
     };
     void saveMaiPayConfig(maiPayMasterEnabled, nextCatalog);
+  };
+
+  const handleAddCustomService = () => {
+    const label = newServiceDraft.label.trim();
+    const id = slugifyProviderIdentifier(label);
+    if (!label || !id) {
+      showAppDialog('Enter a clear service name before adding a MaiPay service.', 'error', 'Service name required');
+      return;
+    }
+    if (maiPayServices.some((service) => service.id === id)) {
+      showAppDialog('A service with this name or identifier already exists in MaiPay.', 'error', 'Duplicate service');
+      return;
+    }
+    const nextCustomServices = [
+      ...customServices,
+      {
+        id,
+        label,
+        category: newServiceDraft.category.trim() || (newServiceDraft.kind === 'internal' ? 'Internal Feature' : 'External API'),
+        kind: newServiceDraft.kind,
+        description: newServiceDraft.description.trim() || 'Custom MaiPay service configured from the Super Admin control desk.',
+        builtIn: false,
+      },
+    ];
+    const nextCatalog = { ...serviceCatalog, [id]: false };
+    const nextSettings = {
+      ...serviceSettings,
+      [id]: getDefaultMaiPayServiceSetting(),
+    };
+    void saveMaiPayConfig(maiPayMasterEnabled, nextCatalog, nextSettings, nextCustomServices).then(() => {
+      setNewServiceDraft({ label: '', category: '', kind: 'external', description: '' });
+      setShowAddServiceModal(false);
+    });
   };
 
   const updateProviderDraft = (providerId: string, updates: Partial<MaiPayServiceProviderSetting>) => {
@@ -1766,7 +1845,7 @@ const AdminMaiPayControlDesk = ({
   };
 
   const handleTestServiceConnection = () => {
-    const service = MAIPAY_SERVICE_CATALOG.find((item) => item.id === configuringServiceId);
+    const service = maiPayServices.find((item) => item.id === configuringServiceId);
     const providers = [...settingsDraft.providers].sort((a, b) => a.priority - b.priority);
     const primary = providers.find((provider) => provider.status === 'active') || providers[0];
     const fallbackCount = providers.filter((provider) => provider.id !== primary?.id && provider.status === 'active').length;
@@ -1807,7 +1886,7 @@ const AdminMaiPayControlDesk = ({
       tone: 'bg-slate-100 text-mairide-primary',
     },
   ];
-  const configuringService = MAIPAY_SERVICE_CATALOG.find((service) => service.id === configuringServiceId);
+  const configuringService = maiPayServices.find((service) => service.id === configuringServiceId);
 
   return (
     <div className="space-y-8">
@@ -1817,7 +1896,7 @@ const AdminMaiPayControlDesk = ({
             <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-white/60">Independent fintech control desk</p>
             <h2 className="mt-3 text-3xl font-black tracking-tight">MaiPay</h2>
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-white/75">
-              A separated payment, wallet, QR, and settlement workspace for future banking-provider verification. This surface is intentionally isolated from live ride dispatch, negotiation, authentication, and tracking operations.
+              A separated payment, wallet, QR, settlement, and vendor-routing workspace. Internal capabilities control mAIRide-owned driver wallet and QR onboarding, while external API services support no-code provider priority and fallback routing.
             </p>
             <div className="mt-5 inline-flex flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-white/80">
               <span>Sandbox emails</span>
@@ -1852,7 +1931,7 @@ const AdminMaiPayControlDesk = ({
             >
               {isSavingMaiPayConfig ? 'Saving MaiPay controls...' : maiPayMasterEnabled ? 'Turn MaiPay Ecosystem Off' : 'Turn MaiPay Ecosystem On'}
               <span className="mt-1 block text-[10px] font-bold uppercase tracking-widest opacity-70">
-                {activeServiceCount} service{activeServiceCount === 1 ? '' : 's'} enabled in catalog
+                {activeServiceCount} active · {internalServiceCount} internal · {externalServiceCount} external
               </span>
             </button>
           </div>
@@ -1865,15 +1944,24 @@ const AdminMaiPayControlDesk = ({
             <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Service registry</p>
             <h3 className="mt-2 text-2xl font-black text-mairide-primary">MaiPay service catalog</h3>
             <p className="mt-1 text-sm text-mairide-secondary">
-              Toggle each fintech or utility service independently. Public access requires the global MaiPay master switch plus the individual service flag; sandbox emails bypass staged rollout.
+              Internal capabilities enable mAIRide wallet/QR onboarding. External API services carry multiple provider routes, priority, timeout, health, and automatic fallback configuration.
             </p>
           </div>
-          <p className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
-            {activeServiceCount}/{MAIPAY_SERVICE_CATALOG.length} active
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+              {activeServiceCount}/{maiPayServices.length} active
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowAddServiceModal(true)}
+              className="rounded-2xl bg-mairide-primary px-4 py-3 text-xs font-black text-white transition hover:bg-mairide-accent"
+            >
+              + Add New Service
+            </button>
+          </div>
         </div>
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {MAIPAY_SERVICE_CATALOG.map((service) => {
+          {maiPayServices.map((service) => {
             const isEnabled = serviceCatalog[service.id];
             const currentSetting = serviceSettings[service.id];
             const configuredProviders = [...(currentSetting?.providers || [])].sort((a, b) => a.priority - b.priority);
@@ -1885,6 +1973,12 @@ const AdminMaiPayControlDesk = ({
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{service.category}</p>
                     <h4 className="mt-2 text-lg font-black text-mairide-primary">{service.label}</h4>
+                    <p className={cn(
+                      "mt-2 inline-flex rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-widest",
+                      service.kind === 'internal' ? "bg-orange-100 text-orange-700" : "bg-blue-50 text-blue-700"
+                    )}>
+                      {service.kind === 'internal' ? 'Internal capability' : 'External API service'}
+                    </p>
                   </div>
                   <button
                     type="button"
@@ -1901,23 +1995,120 @@ const AdminMaiPayControlDesk = ({
                 <p className="mt-3 text-sm leading-6 text-mairide-secondary">{service.description}</p>
                 <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
-                    {primaryProvider?.providerName
-                      ? `${primaryProvider.providerName} · P${primaryProvider.priority} · ${activeProviders.length} active route${activeProviders.length === 1 ? '' : 's'}`
-                      : 'Provider routes not configured'}
+                    {service.kind === 'internal'
+                      ? (isEnabled ? 'Driver onboarding surface available' : 'Driver onboarding surface hidden')
+                      : primaryProvider?.providerName
+                        ? `${primaryProvider.providerName} · P${primaryProvider.priority} · ${activeProviders.length} active route${activeProviders.length === 1 ? '' : 's'}`
+                        : 'Provider routes not configured'}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => openServiceSettings(service.id)}
-                    className="rounded-2xl border border-mairide-secondary bg-white px-4 py-2 text-xs font-black text-mairide-primary transition hover:border-mairide-accent hover:text-mairide-accent"
-                  >
-                    Configure
-                  </button>
+                  {service.kind === 'external' ? (
+                    <button
+                      type="button"
+                      onClick={() => openServiceSettings(service.id)}
+                      className="rounded-2xl border border-mairide-secondary bg-white px-4 py-2 text-xs font-black text-mairide-primary transition hover:border-mairide-accent hover:text-mairide-accent"
+                    >
+                      Configure Vendors
+                    </button>
+                  ) : (
+                    <span className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-2 text-xs font-black text-orange-700">
+                      Toggle controls rollout
+                    </span>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      <AnimatePresence>
+        {showAddServiceModal ? (
+          <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="w-full max-w-xl rounded-[36px] border border-mairide-secondary bg-white p-7 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-secondary">No-code service creation</p>
+                  <h3 className="mt-2 text-2xl font-black text-mairide-primary">Add new MaiPay service</h3>
+                  <p className="mt-2 text-sm leading-6 text-mairide-secondary">
+                    Create future fintech or utility verticals without a code deployment. External services can receive multi-provider routes immediately after creation.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddServiceModal(false)}
+                  className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition hover:text-mairide-primary"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Service name</span>
+                  <input
+                    value={newServiceDraft.label}
+                    onChange={(event) => setNewServiceDraft({ ...newServiceDraft, label: event.target.value })}
+                    placeholder="Insurance, FASTag Recharge, Forex Card..."
+                    className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Service type</span>
+                  <select
+                    value={newServiceDraft.kind}
+                    onChange={(event) => setNewServiceDraft({ ...newServiceDraft, kind: event.target.value as MaiPayServiceKind })}
+                    className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                  >
+                    <option value="external">External API service</option>
+                    <option value="internal">Internal capability</option>
+                  </select>
+                </label>
+                <label className="space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Category</span>
+                  <input
+                    value={newServiceDraft.category}
+                    onChange={(event) => setNewServiceDraft({ ...newServiceDraft, category: event.target.value })}
+                    placeholder="Travel Utility, Banking, Credit..."
+                    className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                  />
+                </label>
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Description</span>
+                  <textarea
+                    value={newServiceDraft.description}
+                    onChange={(event) => setNewServiceDraft({ ...newServiceDraft, description: event.target.value })}
+                    placeholder="What this service unlocks, who can use it, and what provider rails will power it..."
+                    className="min-h-[100px] w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowAddServiceModal(false)}
+                  className="rounded-2xl bg-mairide-bg px-5 py-3 text-sm font-black text-mairide-primary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddCustomService}
+                  disabled={isSavingMaiPayConfig}
+                  className="rounded-2xl bg-mairide-accent px-6 py-3 text-sm font-black text-white transition hover:bg-mairide-primary disabled:opacity-60"
+                >
+                  {isSavingMaiPayConfig ? 'Adding...' : 'Add Service'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        ) : null}
+      </AnimatePresence>
 
       <AnimatePresence>
         {configuringService ? (
@@ -7228,7 +7419,7 @@ const Navbar = ({
     (
       isSandboxIntegrationUser(profile, config) ||
       isMaiPayMasterEnabled(config) ||
-      MAIPAY_SERVICE_CATALOG.some((service) => isMaiPayServiceEnabled(config, service.id))
+      getMaiPayServices(config).some((service) => isMaiPayServiceEnabled(config, service.id))
     )
   );
 
@@ -17621,7 +17812,7 @@ const DriverMaiPayPanel = ({
 }) => {
   const sandboxAccess = isSandboxIntegrationUser(profile, config);
   const serviceCatalog = getMaiPayServiceCatalog(config);
-  const accessibleServices = MAIPAY_SERVICE_CATALOG.filter(
+  const accessibleServices = getMaiPayServices(config).filter(
     (service) => sandboxAccess || isMaiPayServiceEnabled(config, service.id)
   );
   const wallet = profile.liveMoneyWallet;
@@ -22264,6 +22455,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     razorpayKeyId: RAZORPAY_KEY_ID || '',
     maipayEnabled: false,
     maipayServiceCatalog: getDefaultMaiPayServiceCatalog(),
+    maipayCustomServices: [],
     maipayServiceSettings: {},
     paymentDmtServicesEnabled: false,
     trackingServicesEnabled: false,
@@ -22373,6 +22565,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
           ...getDefaultMaiPayServiceCatalog(),
           ...(formData.maipayServiceCatalog || {}),
         },
+        maipayCustomServices: normalizeMaiPayCustomServices(formData),
         maipayServiceSettings: formData.maipayServiceSettings || {},
         liveMoneyWalletAnnualFee: getLiveMoneyWalletAnnualFee(formData),
         liveMoneyWalletMinAnnualFee: 500,

@@ -116,6 +116,14 @@ function isMaiPayServiceEnabled(config: Record<string, any>, serviceId: string) 
   return Boolean(isMaiPayMasterEnabled(config) && config.maipayServiceCatalog?.[serviceId]);
 }
 
+function getMaiPayServiceKind(config: Record<string, any>, serviceId: string) {
+  if (serviceId === "driver_live_wallet" || serviceId === "qr_collections") return "internal";
+  const customService = Array.isArray(config.maipayCustomServices)
+    ? config.maipayCustomServices.find((service: Record<string, any>) => String(service?.id || "") === serviceId)
+    : null;
+  return customService?.kind === "internal" ? "internal" : "external";
+}
+
 type MaiPayProviderRoute = {
   id: string;
   providerName: string;
@@ -228,6 +236,14 @@ async function guardPaymentDmtAccess(req: any, res: any) {
   }
 
   const routing = getMaiPayServiceRouting(config, serviceId);
+  if (getMaiPayServiceKind(config, serviceId) === "internal") {
+    return res.status(501).json({
+      error: "This MaiPay internal capability is enabled, but live execution is handled by the dedicated mAIRide wallet or QR workflow.",
+      serviceId,
+      internalCapability: true,
+    });
+  }
+
   if (!routing.primaryProvider) {
     return res.status(501).json({
       error: "This MaiPay service is active, but no active provider route is configured.",
