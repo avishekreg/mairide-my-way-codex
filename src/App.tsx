@@ -1679,6 +1679,7 @@ const AdminMaiPayControlDesk = ({
     (sum, user) => sum + Number(user.liveMoneyWallet?.pendingBalance || 0),
     0
   );
+  const totalDriverWalletFloat = walletAvailableBalance + walletPendingBalance;
   const liveWalletTransactions = transactions
     .filter((tx) =>
       String(tx.type || '').includes('live_wallet') ||
@@ -1857,6 +1858,13 @@ const AdminMaiPayControlDesk = ({
   };
 
   const statCards = [
+    {
+      label: 'Market liability',
+      value: formatCurrency(totalDriverWalletFloat),
+      helper: `${formatCurrency(walletAvailableBalance)} available pool · ${formatCurrency(walletPendingBalance)} pending payouts`,
+      icon: AlertTriangle,
+      tone: 'bg-red-50 text-red-600',
+    },
     {
       label: 'Wallet drivers',
       value: driverWalletUsers.length,
@@ -2405,6 +2413,32 @@ const AdminMaiPayControlDesk = ({
           </div>
         ) : null}
       </AnimatePresence>
+
+      <div className="rounded-[40px] border border-red-200 bg-red-50 p-7 shadow-sm">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-red-500">Total driver wallet float / market liability</p>
+            <h3 className="mt-2 text-3xl font-black tracking-tight text-mairide-primary">{formatCurrency(totalDriverWalletFloat)}</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-mairide-secondary">
+              Aggregated driver capital currently represented inside enabled MaiPay live wallets. This is the amount the platform must reconcile against gateway/master-pool balances before payout batching.
+            </p>
+          </div>
+          <div className="grid min-w-full grid-cols-1 gap-3 sm:grid-cols-3 lg:min-w-[560px]">
+            <div className="rounded-3xl border border-red-100 bg-white p-5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Active wallet balances</p>
+              <p className="mt-2 text-xl font-black text-mairide-primary">{formatCurrency(walletAvailableBalance)}</p>
+            </div>
+            <div className="rounded-3xl border border-red-100 bg-white p-5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Pending payouts</p>
+              <p className="mt-2 text-xl font-black text-mairide-primary">{formatCurrency(walletPendingBalance)}</p>
+            </div>
+            <div className="rounded-3xl border border-red-100 bg-white p-5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Pool liquidity</p>
+              <p className="mt-2 text-xl font-black text-mairide-primary">{formatCurrency(walletAvailableBalance)}</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
         {statCards.map((card) => (
@@ -24708,6 +24742,16 @@ const AdminDashboard = ({
   const paymentEvents = getPlatformFeePaymentEvents(bookings as Booking[]);
   const adminRevenueTotal = paymentEvents.reduce((sum, event) => sum + event.revenue, 0);
   const adminGstTotal = paymentEvents.reduce((sum, event) => sum + event.gst, 0);
+  const liveMoneyWalletDrivers = users.filter((user) => user.role === 'driver' && user.liveMoneyWallet?.enabled);
+  const adminWalletAvailableFloat = liveMoneyWalletDrivers.reduce(
+    (sum, user) => sum + Number(user.liveMoneyWallet?.availableBalance || 0),
+    0
+  );
+  const adminWalletPendingPayouts = liveMoneyWalletDrivers.reduce(
+    (sum, user) => sum + Number(user.liveMoneyWallet?.pendingBalance || 0),
+    0
+  );
+  const adminDriverWalletMarketLiability = adminWalletAvailableFloat + adminWalletPendingPayouts;
   const userCards = [
     {
       id: 'drivers' as UsersInsightView,
@@ -25230,6 +25274,15 @@ const AdminDashboard = ({
               <div className="space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                   {[
+                    {
+                      label: 'Driver wallet float',
+                      value: formatCurrency(adminDriverWalletMarketLiability),
+                      helper: `${formatCurrency(adminWalletAvailableFloat)} active · ${formatCurrency(adminWalletPendingPayouts)} pending payouts`,
+                      icon: Wallet,
+                      tone: 'bg-red-50 text-red-600',
+                      actionLabel: 'Open MaiPay desk',
+                      onClick: () => setActiveTab('maipay' as typeof activeTab),
+                    },
                     {
                       label: 'Active / Live rides',
                       value: activeTrips.length + openRideOffers.length,
