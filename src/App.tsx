@@ -20618,23 +20618,33 @@ const finalizeDriverDashboardRazorpayPayment = async (
           />
 
           {showOfferForm && (
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white p-8 rounded-[32px] border border-mairide-accent shadow-xl relative overflow-hidden mb-10"
-            >
-              <div className="absolute top-0 right-0 p-4">
-                <button onClick={() => setShowOfferForm(false)} className="text-mairide-secondary hover:text-mairide-primary">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              <h3 className="text-2xl font-bold text-mairide-primary mb-6">Create New Offer</h3>
-              {linkedTravelerRequestId && (
-                <div className="mb-4 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-700">
-                  Prefilled from a traveler request. Review details and post your ride offer.
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+              <motion.div 
+                initial={{ opacity: 0, y: 20, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.96 }}
+                className="relative w-full max-w-4xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-white p-6 md:p-8 rounded-[32px] border border-mairide-accent shadow-2xl"
+              >
+                <div className="mb-6 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-accent">Driver Ride Offer</p>
+                    <h3 className="mt-2 text-2xl font-black tracking-tight text-mairide-primary">Create New Offer</h3>
+                    <p className="mt-1 text-sm text-mairide-secondary">Post your empty-leg route, fare, seats, and likely start time.</p>
+                  </div>
+                  <button
+                    onClick={() => setShowOfferForm(false)}
+                    className="rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+                    aria-label="Close offer form"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
                 </div>
-              )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                {linkedTravelerRequestId && (
+                  <div className="mb-4 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-700">
+                    Prefilled from a traveler request. Review details and post your ride offer.
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 <div>
                   <label className="block text-sm font-semibold text-mairide-primary mb-2">Origin</label>
                   {isLoaded ? (
@@ -20783,7 +20793,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
               >
                 {isPostingRide ? 'Posting Offer...' : 'Post Ride Offer'}
               </button>
-            </motion.div>
+              </motion.div>
+            </div>
           )}
 
           <AnimatePresence>
