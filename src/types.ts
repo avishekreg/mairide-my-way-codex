@@ -276,6 +276,7 @@ export interface AppConfig {
     updatedAt?: string;
     updatedBy?: string;
   }>;
+  sandboxFeatureCatalog?: Record<string, boolean>;
   paymentDmtServicesEnabled?: boolean;
   trackingServicesEnabled?: boolean;
   integrationSandboxUserIds?: string[];

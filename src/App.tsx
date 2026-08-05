@@ -840,6 +840,70 @@ type MaiPayServiceSetting = {
   updatedBy?: string;
 };
 type MaiPayServiceSettingsState = Record<string, MaiPayServiceSetting>;
+type SandboxFeatureDefinition = {
+  id: string;
+  label: string;
+  category: string;
+  statusLabel: string;
+  description: string;
+  controlNote: string;
+};
+
+const SANDBOX_FEATURE_CATALOG: SandboxFeatureDefinition[] = [
+  {
+    id: 'social_ride_matching',
+    label: 'Social Ride-Matching',
+    category: 'Professional Trust Layer',
+    statusLabel: 'Profile trust badges',
+    description: 'Optional professional profile tags and verified trust signals for long-distance driver-traveler matching.',
+    controlNote: 'Sandbox only: badges can be previewed by approved test accounts before appearing in public ride cards.',
+  },
+  {
+    id: 'mairide_local_vault',
+    label: 'mAIRide Local Vault',
+    category: 'P2P Intercity Logistics',
+    statusLabel: 'Parcel escrow workflow',
+    description: 'Empty-leg drivers can accept parcel delivery requests while parcel payments remain held in the MaiPay ledger until delivery confirmation.',
+    controlNote: 'Sandbox only: creates the micro-logistics control surface without changing live ride dispatch.',
+  },
+  {
+    id: 'driver_sos_micro_credit',
+    label: 'Driver SOS Micro-Credit',
+    category: 'MaiPay Emergency Advance',
+    statusLabel: 'Zero-interest advances',
+    description: 'Admin-controlled emergency advances tied to active wallet float, ride history, repayment status, and driver eligibility.',
+    controlNote: 'Sandbox only: ledger controls are staged for review before any real credit rail activation.',
+  },
+  {
+    id: 'dynamic_ai_price_freedom',
+    label: 'AI Fare Range + Driver Freedom',
+    category: 'Pricing Intelligence',
+    statusLabel: 'Non-blocking guidance',
+    description: 'AI suggests route-aware fare ranges from corridor data while final fare setting remains fully with the driver.',
+    controlNote: 'Sandbox only: reinforces price transparency copy and can power future route-market calibration.',
+  },
+  {
+    id: 'insured_rides_protection',
+    label: 'Insured Rides & Protection Badges',
+    category: 'Safety & Financial Protection',
+    statusLabel: 'Coverage metadata',
+    description: 'Prominent insured ride and driver protection badges for booking, trip, and dashboard surfaces.',
+    controlNote: 'Sandbox only: coverage badges remain gated until policy and insurer metadata are approved.',
+  },
+];
+
+type SandboxFeatureCatalogState = Record<string, boolean>;
+
+const getDefaultSandboxFeatureCatalog = (): SandboxFeatureCatalogState =>
+  SANDBOX_FEATURE_CATALOG.reduce((acc, feature) => {
+    acc[feature.id] = false;
+    return acc;
+  }, {} as SandboxFeatureCatalogState);
+
+const getSandboxFeatureCatalog = (config?: Partial<AppConfig> | null): SandboxFeatureCatalogState => ({
+  ...getDefaultSandboxFeatureCatalog(),
+  ...(config?.sandboxFeatureCatalog || {}),
+});
 
 const getDefaultMaiPayServiceCatalog = (): MaiPayServiceCatalogState =>
   BUILT_IN_MAIPAY_SERVICE_CATALOG.reduce((acc, service) => {
@@ -987,6 +1051,12 @@ const canAccessPaymentDmtServices = (profile?: Partial<UserProfile> | null, conf
 
 const canAccessTravelTrackingServices = (profile?: Partial<UserProfile> | null, config?: Partial<AppConfig> | null) =>
   Boolean(config?.trackingServicesEnabled) || isSandboxIntegrationUser(profile, config);
+
+const isSandboxFeatureEnabled = (
+  config: Partial<AppConfig> | null | undefined,
+  profile: Partial<UserProfile> | null | undefined,
+  featureId: string
+) => Boolean(getSandboxFeatureCatalog(config)[featureId]) || isSandboxIntegrationUser(profile, config);
 
 const getLiveMoneyWalletAnnualFee = (config?: Partial<AppConfig> | null) => {
   const minFee = Number(config?.liveMoneyWalletMinAnnualFee || 500);
@@ -1655,6 +1725,7 @@ const AdminMaiPayControlDesk = ({
   const safeConfig = config || {};
   const [maiPayMasterEnabled, setMaiPayMasterEnabled] = useState(isMaiPayMasterEnabled(safeConfig));
   const [serviceCatalog, setServiceCatalog] = useState<MaiPayServiceCatalogState>(getMaiPayServiceCatalog(safeConfig));
+  const [sandboxFeatureCatalog, setSandboxFeatureCatalog] = useState<SandboxFeatureCatalogState>(getSandboxFeatureCatalog(safeConfig));
   const [serviceSettings, setServiceSettings] = useState<MaiPayServiceSettingsState>(getMaiPayServiceSettings(safeConfig));
   const [configuringServiceId, setConfiguringServiceId] = useState<MaiPayServiceId | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<MaiPayServiceSetting>(getDefaultMaiPayServiceSetting());
@@ -1691,12 +1762,14 @@ const AdminMaiPayControlDesk = ({
   const liveWalletPublicStatus = Boolean(maiPayMasterEnabled && serviceCatalog.driver_live_wallet && safeConfig.liveMoneyWalletAddOnEnabled);
   const liveWalletAnnualFee = getLiveMoneyWalletAnnualFee(safeConfig);
   const activeServiceCount = maiPayServices.filter((service) => serviceCatalog[service.id]).length;
+  const activeSandboxFeatureCount = SANDBOX_FEATURE_CATALOG.filter((feature) => sandboxFeatureCatalog[feature.id]).length;
   const externalServiceCount = maiPayServices.filter((service) => service.kind === 'external').length;
   const internalServiceCount = maiPayServices.filter((service) => service.kind === 'internal').length;
 
   useEffect(() => {
     setMaiPayMasterEnabled(isMaiPayMasterEnabled(config));
     setServiceCatalog(getMaiPayServiceCatalog(config));
+    setSandboxFeatureCatalog(getSandboxFeatureCatalog(config));
     setServiceSettings(getMaiPayServiceSettings(config));
     setCustomServices(normalizeMaiPayCustomServices(config));
   }, [config]);
@@ -1705,7 +1778,8 @@ const AdminMaiPayControlDesk = ({
     nextMaster: boolean,
     nextCatalog: MaiPayServiceCatalogState,
     nextSettings: MaiPayServiceSettingsState = serviceSettings,
-    nextCustomServices: MaiPayServiceDefinition[] = customServices
+    nextCustomServices: MaiPayServiceDefinition[] = customServices,
+    nextSandboxFeatures: SandboxFeatureCatalogState = sandboxFeatureCatalog
   ) => {
     setIsSavingMaiPayConfig(true);
     try {
@@ -1717,6 +1791,7 @@ const AdminMaiPayControlDesk = ({
         maipayServiceCatalog: nextCatalog,
         maipayServiceSettings: nextSettings,
         maipayCustomServices: nextCustomServices,
+        sandboxFeatureCatalog: nextSandboxFeatures,
         liveMoneyWalletAddOnEnabled: Boolean(safeConfig.liveMoneyWalletAddOnEnabled),
         integrationSandboxUserIds: [],
         integrationSandboxEmails: STRICT_SANDBOX_EMAILS,
@@ -1727,6 +1802,7 @@ const AdminMaiPayControlDesk = ({
       setServiceCatalog(nextCatalog);
       setServiceSettings(nextSettings);
       setCustomServices(nextCustomServices);
+      setSandboxFeatureCatalog(nextSandboxFeatures);
     } catch (error) {
       showAppDialog(getApiErrorMessage(error, 'We could not save MaiPay controls right now.'), 'error', 'MaiPay save failed');
     } finally {
@@ -1745,6 +1821,14 @@ const AdminMaiPayControlDesk = ({
       [serviceId]: !serviceCatalog[serviceId],
     };
     void saveMaiPayConfig(maiPayMasterEnabled, nextCatalog);
+  };
+
+  const handleSandboxFeatureToggle = (featureId: string) => {
+    const nextSandboxFeatures = {
+      ...sandboxFeatureCatalog,
+      [featureId]: !sandboxFeatureCatalog[featureId],
+    };
+    void saveMaiPayConfig(maiPayMasterEnabled, serviceCatalog, serviceSettings, customServices, nextSandboxFeatures);
   };
 
   const handleAddCustomService = () => {
@@ -1943,6 +2027,61 @@ const AdminMaiPayControlDesk = ({
               </span>
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-[40px] border border-orange-200 bg-orange-50/70 p-7 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-accent">Sandbox innovation lab</p>
+            <h3 className="mt-2 text-2xl font-black text-mairide-primary">Out-of-the-box feature gates</h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-mairide-secondary">
+              These modules are isolated behind Super Admin controls for sandbox testing. Public users will not see them until the matching feature flag, policy metadata, and rollout approvals are enabled.
+            </p>
+          </div>
+          <p className="rounded-full bg-white px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
+            {activeSandboxFeatureCount}/{SANDBOX_FEATURE_CATALOG.length} sandbox active
+          </p>
+        </div>
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          {SANDBOX_FEATURE_CATALOG.map((feature) => {
+            const isEnabled = Boolean(sandboxFeatureCatalog[feature.id]);
+            return (
+              <article key={feature.id} className="rounded-3xl border border-orange-200 bg-white p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">{feature.category}</p>
+                    <h4 className="mt-2 text-lg font-black text-mairide-primary">{feature.label}</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSandboxFeatureToggle(feature.id)}
+                    disabled={isSavingMaiPayConfig}
+                    aria-pressed={isEnabled}
+                    className="group inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-mairide-primary transition hover:border-mairide-accent disabled:opacity-60"
+                  >
+                    <span className={cn(
+                      "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                      isEnabled ? "bg-green-500" : "bg-mairide-secondary"
+                    )}>
+                      <span className={cn(
+                        "inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                        isEnabled ? "translate-x-4" : "translate-x-1"
+                      )} />
+                    </span>
+                    {isEnabled ? 'Active' : 'Inactive'}
+                  </button>
+                </div>
+                <p className="mt-3 inline-flex rounded-full bg-orange-100 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-orange-700">
+                  {feature.statusLabel}
+                </p>
+                <p className="mt-4 text-sm leading-6 text-mairide-secondary">{feature.description}</p>
+                <p className="mt-4 rounded-2xl bg-mairide-bg px-4 py-3 text-xs leading-5 text-mairide-secondary">
+                  {feature.controlNote}
+                </p>
+              </article>
+            );
+          })}
         </div>
       </div>
 
@@ -10966,6 +11105,7 @@ const FareGuidanceHint = ({
             {varianceCopy} {guidance.source === 'estimate'
               ? 'Based on route distance because no comparable live corridor fares are available yet.'
               : `Based on ${guidance.sampleCount} comparable live fares.`}
+            {' '}AI only suggests the corridor range; the driver retains final pricing freedom.
             {Number.isFinite(quotedFare) && quotedFare ? ` Your current quote: ${formatCurrency(Number(quotedFare))}.` : ''}
           </p>
         </div>
@@ -10973,6 +11113,36 @@ const FareGuidanceHint = ({
     </div>
   );
 };
+
+const RideProtectionBadgeStrip = ({ compact = false }: { compact?: boolean }) => (
+  <div className={cn(
+    "mb-6 grid gap-3",
+    compact ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"
+  )}>
+    <div className="rounded-3xl border border-green-200 bg-green-50 px-5 py-4">
+      <div className="flex items-start gap-3">
+        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-green-700" />
+        <div>
+          <p className="text-xs font-black uppercase tracking-widest text-green-700">Insured Ride Sandbox</p>
+          <p className="mt-1 text-sm leading-6 text-mairide-secondary">
+            Coverage metadata and safer long-distance protection badges are staged for verified ride surfaces.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div className="rounded-3xl border border-orange-200 bg-orange-50 px-5 py-4">
+      <div className="flex items-start gap-3">
+        <Shield className="mt-0.5 h-5 w-5 shrink-0 text-mairide-accent" />
+        <div>
+          <p className="text-xs font-black uppercase tracking-widest text-mairide-accent">Driver Protection Sandbox</p>
+          <p className="mt-1 text-sm leading-6 text-mairide-secondary">
+            Driver protection signals stay feature-gated until policy, insurer, and claim metadata are approved.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 const RouteAlertsTicker = ({
   alerts,
@@ -14720,6 +14890,7 @@ const finalizeDriverRazorpayPayment = async (
 const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
   const travelTrackingAccessAllowed = canAccessTravelTrackingServices(profile, config || {});
+  const protectionSandboxVisible = isSandboxFeatureEnabled(config || {}, profile, 'insured_rides_protection');
   const firstName = String(profile.displayName || profile.email || 'Traveler').split(' ')[0] || 'Traveler';
   const [search, setSearch] = useState({ from: '', to: '' });
   const [rides, setRides] = useState<any[]>([]);
@@ -16979,6 +17150,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             onAction={() => setShowTravelerRouteAlertModal(true)}
           />
 
+          {protectionSandboxVisible && <RideProtectionBadgeStrip />}
+
           {travelTrackingAccessAllowed && (
             <PassengerTravelTrackingPanel profile={profile} config={config || {}} />
           )}
@@ -17962,6 +18135,7 @@ const DriverMaiPayPanel = ({
 
 const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: UserProfile, isLoaded: boolean, loadError?: Error, authFailure?: boolean }) => {
   const { config } = useAppConfig();
+  const protectionSandboxVisible = isSandboxFeatureEnabled(config || {}, profile, 'insured_rides_protection');
   type DriverTab = 'dashboard' | 'requests' | 'history' | 'wallet' | 'maipay' | 'support' | 'profile';
   const showDashboardHeroLogo = !isAppDisplayMode();
   const firstName = String(profile.displayName || profile.email || 'Driver').split(' ')[0] || 'Driver';
@@ -20407,6 +20581,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
             onAction={() => setShowDriverRouteAlertModal(true)}
           />
 
+          {protectionSandboxVisible && <RideProtectionBadgeStrip />}
+
           <div className="mb-8">
             {activeDriverSessionBooking ? (
               <div className="space-y-5">
@@ -22511,6 +22687,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
     maipayServiceCatalog: getDefaultMaiPayServiceCatalog(),
     maipayCustomServices: [],
     maipayServiceSettings: {},
+    sandboxFeatureCatalog: getDefaultSandboxFeatureCatalog(),
     paymentDmtServicesEnabled: false,
     trackingServicesEnabled: false,
     integrationSandboxUserIds: [],
@@ -22621,6 +22798,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
         },
         maipayCustomServices: normalizeMaiPayCustomServices(formData),
         maipayServiceSettings: formData.maipayServiceSettings || {},
+        sandboxFeatureCatalog: {
+          ...getDefaultSandboxFeatureCatalog(),
+          ...(formData.sandboxFeatureCatalog || {}),
+        },
         liveMoneyWalletAnnualFee: getLiveMoneyWalletAnnualFee(formData),
         liveMoneyWalletMinAnnualFee: 500,
         liveMoneyWalletMaxAnnualFee: 1000,
