@@ -851,14 +851,6 @@ type SandboxFeatureDefinition = {
 
 const SANDBOX_FEATURE_CATALOG: SandboxFeatureDefinition[] = [
   {
-    id: 'social_ride_matching',
-    label: 'Social Ride-Matching',
-    category: 'Professional Trust Layer',
-    statusLabel: 'Profile trust badges',
-    description: 'Optional professional profile tags and verified trust signals for long-distance driver-traveler matching.',
-    controlNote: 'Sandbox only: badges can be previewed by approved test accounts before appearing in public ride cards.',
-  },
-  {
     id: 'mairide_local_vault',
     label: 'mAIRide Local Vault',
     category: 'P2P Intercity Logistics',
@@ -901,8 +893,10 @@ const getDefaultSandboxFeatureCatalog = (): SandboxFeatureCatalogState =>
   }, {} as SandboxFeatureCatalogState);
 
 const getSandboxFeatureCatalog = (config?: Partial<AppConfig> | null): SandboxFeatureCatalogState => ({
-  ...getDefaultSandboxFeatureCatalog(),
-  ...(config?.sandboxFeatureCatalog || {}),
+  ...SANDBOX_FEATURE_CATALOG.reduce((acc, feature) => {
+    acc[feature.id] = config?.sandboxFeatureCatalog?.[feature.id] || false;
+    return acc;
+  }, {} as SandboxFeatureCatalogState),
 });
 
 const getDefaultMaiPayServiceCatalog = (): MaiPayServiceCatalogState =>
