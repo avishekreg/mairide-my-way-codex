@@ -11324,7 +11324,11 @@ const MapFirstDashboardShell = ({
 
       <div className={cn(
         "pointer-events-none absolute left-4 right-4 z-10 mx-auto",
-        topControlsOnly ? "top-20 z-20 max-w-xl" : "top-4 max-w-3xl md:top-6"
+        topControlsOnly
+          ? "top-20 z-20 max-w-xl"
+          : compactSearchBar
+            ? "top-20 max-w-3xl md:top-24"
+            : "top-4 max-w-3xl md:top-6"
       )}>
         {topControlsOnly ? (
           <div className="pointer-events-auto absolute left-1/2 top-0 z-20 flex w-fit max-w-full -translate-x-1/2 flex-row items-center justify-center gap-2 whitespace-nowrap rounded-full bg-white/90 px-3 py-1 shadow-lg shadow-mairide-primary/10 backdrop-blur-md">
@@ -11369,12 +11373,12 @@ const MapFirstDashboardShell = ({
         <div
           className={cn(
             "pointer-events-auto mx-auto max-w-3xl overflow-y-auto overscroll-contain rounded-t-[34px] border border-mairide-secondary bg-white/96 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl [touch-action:pan-y] md:rounded-[34px]",
-            compactBottomSheet ? "h-[20vh] max-h-[20vh] p-4" : "max-h-[46vh] p-5"
+            compactBottomSheet ? "h-[17vh] max-h-[17vh] p-3" : "max-h-[46vh] p-5"
           )}
           onWheel={(event) => event.stopPropagation()}
           onTouchMove={(event) => event.stopPropagation()}
         >
-          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-mairide-secondary/50" />
+          <div className={cn("mx-auto h-1.5 w-12 rounded-full bg-mairide-secondary/50", compactBottomSheet ? "mb-2" : "mb-3")} />
           {sheetContent || (
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -17317,18 +17321,18 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-available-rides')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="rounded-2xl bg-mairide-bg px-4 py-3 text-left transition-colors hover:bg-orange-50"
+                  className="rounded-2xl bg-mairide-bg px-4 py-2.5 text-left transition-colors hover:bg-orange-50"
                 >
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Available Rides</p>
-                  <p className="mt-1 text-2xl font-black text-mairide-primary">{rides.length + partialRides.length}</p>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-mairide-secondary">Available Rides</p>
+                  <p className="mt-0.5 text-xl font-black leading-none text-mairide-primary">{rides.length + partialRides.length}</p>
                 </button>
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-my-requests')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="rounded-2xl bg-mairide-bg px-4 py-3 text-left transition-colors hover:bg-orange-50"
+                  className="rounded-2xl bg-mairide-bg px-4 py-2.5 text-left transition-colors hover:bg-orange-50"
                 >
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">My Requests</p>
-                  <p className="mt-1 text-2xl font-black text-mairide-primary">{travelerRequests.filter(isUnifiedRideActive).length}</p>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-mairide-secondary">My Requests</p>
+                  <p className="mt-0.5 text-xl font-black leading-none text-mairide-primary">{travelerRequests.filter(isUnifiedRideActive).length}</p>
                 </button>
               </div>
             )}
