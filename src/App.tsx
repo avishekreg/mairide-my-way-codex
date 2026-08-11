@@ -1078,6 +1078,64 @@ const isBookingTrackable = (booking: Booking) => {
 
 const isDriverDashboardBooking = (booking: Booking) => isBookingTrackable(booking);
 
+const isConfirmedRideSession = (booking?: Booking | null) => {
+  if (!booking || (booking as any).rideRetired) return false;
+  if (['cancelled', 'rejected', 'completed'].includes(String(booking.status || '').toLowerCase())) return false;
+  if (booking.rideLifecycleStatus === 'completed' || Boolean(booking.rideEndedAt)) return false;
+  return String(booking.status || '').toLowerCase() === 'confirmed';
+};
+
+const isOpenDriverRideOffer = (ride?: Partial<Ride> | null) => {
+  if (!ride) return false;
+  const status = String((ride as any).status || '').trim().toLowerCase();
+  const availableSeats = Number(
+    (ride as any).available_seats ??
+      (ride as any).availableSeats ??
+      (ride as any).seatsAvailable ??
+      (ride as any).seats ??
+      0
+  );
+  return ['open', 'available'].includes(status) && availableSeats > 0;
+};
+
+const buildDepartureGapLabel = (travelerDeparture?: string | null, driverDeparture?: string | null) => {
+  const travelerTime = travelerDeparture ? new Date(travelerDeparture).getTime() : NaN;
+  const driverTime = driverDeparture ? new Date(driverDeparture).getTime() : NaN;
+  if (!Number.isFinite(travelerTime) || !Number.isFinite(driverTime)) {
+    return 'Departure Time Gap: flexible';
+  }
+  const gapMins = Math.round((driverTime - travelerTime) / 60000);
+  if (gapMins === 0) return 'Departure Time Gap: 0 mins';
+  return `Departure Time Gap: ${gapMins > 0 ? '+' : '-'}${Math.abs(gapMins)} mins`;
+};
+
+const buildDetourImpactLabel = (
+  driverRoute?: {
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+  } | null,
+  travelerRoute?: {
+    originLocation: { lat: number; lng: number };
+    destinationLocation: { lat: number; lng: number };
+  } | null
+) => {
+  if (!driverRoute || !travelerRoute) return 'Detour Added: route dependent';
+  const pickupDeltaKm = getDistance(
+    driverRoute.originLocation.lat,
+    driverRoute.originLocation.lng,
+    travelerRoute.originLocation.lat,
+    travelerRoute.originLocation.lng
+  );
+  const dropDeltaKm = getDistance(
+    driverRoute.destinationLocation.lat,
+    driverRoute.destinationLocation.lng,
+    travelerRoute.destinationLocation.lat,
+    travelerRoute.destinationLocation.lng
+  );
+  const detourMins = Math.max(0, Math.round((pickupDeltaKm + dropDeltaKm) * 2.2));
+  return `Detour Added: +${detourMins} mins`;
+};
+
 type UnifiedRideLifecycle = 'active' | 'completed' | 'cancelled';
 
 const getUnifiedRideLifecycle = (record: any): UnifiedRideLifecycle => {
@@ -12314,13 +12372,6 @@ const TravelerDashboardSummary = ({
                 <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
               </div>
             )}
-            {['pending', 'negotiating', 'confirmed'].includes(String(booking.status || '')) && (
-              <NegotiationCommunicationPanel
-                booking={booking}
-                viewerRole="consumer"
-                onSend={onSendMessage}
-              />
-            )}
             {booking.status === 'confirmed' && (
               <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
                 <div className="flex justify-between items-center mb-2">
@@ -12731,13 +12782,6 @@ const DriverDashboardSummary = ({
                   </div>
                 )}
               </div>
-            )}
-            {['pending', 'negotiating', 'confirmed'].includes(String(request.status || '')) && (
-              <NegotiationCommunicationPanel
-                booking={request}
-                viewerRole="driver"
-                onSend={onSendMessage}
-              />
             )}
             {request.status === 'confirmed' && (
               <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
@@ -15108,6 +15152,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [autocompleteTo, setAutocompleteTo] = useState<any | null>(null);
   const [searchLocationFrom, setSearchLocationFrom] = useState<{ lat: number, lng: number } | null>(null);
   const [searchLocationTo, setSearchLocationTo] = useState<{ lat: number, lng: number } | null>(null);
+  const [showTravelerSearchFilter, setShowTravelerSearchFilter] = useState(false);
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [isPostingRequest, setIsPostingRequest] = useState(false);
   const [newRequest, setNewRequest] = useState({
@@ -15159,6 +15204,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const hasHydratedDriverCountersRef = useRef(false);
   const travelerStatusAnnouncementKeysRef = useRef<Record<string, string>>({});
   const hasHydratedTravelerStatusAnnouncementsRef = useRef(false);
+  const seenTravelerOfferIdsRef = useRef<Record<string, string>>({});
+  const hasHydratedTravelerOffersRef = useRef(false);
   const lastTravelerLocationWriteRef = useRef(0);
   const activeRideFeedRef = useRef<Ride[]>([]);
   const activeRideBookingsRef = useRef<Booking[]>([]);
@@ -15168,6 +15215,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const travelerRealtimeReconnectTimerRef = useRef<number | null>(null);
   const travelerNegotiationFallbackInFlightRef = useRef(false);
   const [travelerRealtimeReconnectKey, setTravelerRealtimeReconnectKey] = useState(0);
+  const [travelerOfferAlertRide, setTravelerOfferAlertRide] = useState<Ride | null>(null);
   const travelerFeedLocation = useMemo(
     () => getFeedViewerLocation(userLocation, profile.location),
     [profile.location?.lat, profile.location?.lng, userLocation]
@@ -15216,7 +15264,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       }
     });
     [...rides, ...partialRides].forEach((ride) => {
-      if (!ride?.driverId || String(ride.status || '') !== 'available') return;
+      if (!ride?.driverId || !isOpenDriverRideOffer(ride)) return;
       if (travelerFeedLocation && !isWithinDashboardMatchRadius(travelerFeedLocation, getFeedItemOriginLocation(ride))) {
         return;
       }
@@ -15228,7 +15276,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     if (!activeTravelerRequestRoutes.length) return 0;
     const driverIds = new Set<string>();
     [...rides, ...partialRides].forEach((ride) => {
-      if (!ride?.driverId || String(ride.status || '') !== 'available') return;
+      if (!ride?.driverId || !isOpenDriverRideOffer(ride)) return;
       const rideRoute = getFeedItemRoute(ride);
       if (
         isWithinAnyDashboardCorridor(rideRoute, activeTravelerRequestRoutes) ||
@@ -15290,22 +15338,26 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       ) || null,
     [dashboardBookings]
   );
+  const confirmedTravelerSessionBooking = useMemo(
+    () => dashboardBookings.find(isConfirmedRideSession) || null,
+    [dashboardBookings]
+  );
   const activeTravelerRouteReports = useMemo(
     () =>
-      activeTravelerSessionBooking
+      confirmedTravelerSessionBooking
         ? filterVisibleRouteReports({
             reports: routeAlertReports,
-            booking: activeTravelerSessionBooking,
+            booking: confirmedTravelerSessionBooking,
             viewerLocation: travelerFeedLocation,
           })
         : filterVisibleRouteReports({
             reports: routeAlertReports,
             viewerLocation: travelerFeedLocation,
           }),
-    [activeTravelerSessionBooking, routeAlertReports]
+    [confirmedTravelerSessionBooking, routeAlertReports]
   );
   const travelerRouteAlertDraftBooking = useMemo(() => {
-    if (activeTravelerSessionBooking) return activeTravelerSessionBooking;
+    if (confirmedTravelerSessionBooking) return confirmedTravelerSessionBooking;
     const primaryRequest = travelerRequests.find(isUnifiedRideActive);
     const hasViewerLocation = Boolean(travelerFeedLocation);
     const origin = primaryRequest?.origin || search.from || newRequest.origin || (hasViewerLocation ? 'Current location' : '');
@@ -15317,7 +15369,57 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       viewerRole: 'consumer',
       profile,
     });
-  }, [activeTravelerSessionBooking, newRequest.destination, newRequest.origin, profile, search.from, search.to, travelerFeedLocation, travelerRequests]);
+  }, [confirmedTravelerSessionBooking, newRequest.destination, newRequest.origin, profile, search.from, search.to, travelerFeedLocation, travelerRequests]);
+
+  const getTravelerOfferRouteIntelligence = (ride: Partial<Ride>) => {
+    const rideRoute = getFeedItemRoute(ride);
+    const activeRequests = travelerRequests.filter(isUnifiedRideActive);
+    const matchedRequest =
+      activeRequests.find((request) => {
+        const requestRoute = getFeedItemRoute(request);
+        if (!rideRoute || !requestRoute) return false;
+        return (
+          routesSharePartialCorridor(
+            rideRoute,
+            requestRoute,
+            DASHBOARD_MATCH_RADIUS_KM,
+            DASHBOARD_PARTIAL_DROP_RADIUS_KM
+          ) ||
+          routesSharePartialCorridor(
+            requestRoute,
+            rideRoute,
+            DASHBOARD_MATCH_RADIUS_KM,
+            DASHBOARD_PARTIAL_DROP_RADIUS_KM
+          )
+        );
+      }) || activeRequests[0];
+    const requestRoute = matchedRequest ? getFeedItemRoute(matchedRequest) : null;
+    return {
+      requestedRouteLabel: `Requested Route: ${matchedRequest?.origin || search.from || 'Your origin'} → ${matchedRequest?.destination || search.to || 'Your destination'}`,
+      departureGapLabel: buildDepartureGapLabel(
+        matchedRequest?.departureTime,
+        (ride as any).departureTime
+      ),
+      detourImpactLabel: buildDetourImpactLabel(rideRoute, requestRoute),
+    };
+  };
+
+  const getTravelerSmartMatchRouteIntelligence = (ride: Partial<Ride>) => {
+    const draft = travelerSmartMatchPrompt?.draft;
+    if (!draft) {
+      return getTravelerOfferRouteIntelligence(ride);
+    }
+    const driverRoute = getFeedItemRoute(ride);
+    const travelerRoute = {
+      originLocation: draft.originLocation,
+      destinationLocation: draft.destinationLocation,
+    };
+    return {
+      requestedRouteLabel: `Requested Route: ${draft.origin} → ${draft.destination}`,
+      departureGapLabel: buildDepartureGapLabel(draft.departureTime, (ride as any).departureTime),
+      detourImpactLabel: buildDetourImpactLabel(driverRoute, travelerRoute),
+    };
+  };
 
   useEffect(() => {
     dashboardBookingsRef.current = dashboardBookings;
@@ -15861,6 +15963,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   useEffect(() => {
     if (isLocalDevFirestoreMode()) return;
     const reconnectAndRefresh = (reason: string) => {
+      const now = Date.now();
+      if (now - lastTravelerNegotiationSyncRef.current < 10000) return;
+      lastTravelerNegotiationSyncRef.current = now;
       setTravelerRealtimeReconnectKey((key) => key + 1);
       void refreshTravelerNegotiationState(reason);
     };
@@ -16038,6 +16143,55 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
     travelerStatusAnnouncementKeysRef.current = currentKeys;
   }, [config?.chatbotTtsPitch, config?.chatbotTtsRate, dashboardBookings]);
+
+  useEffect(() => {
+    const activeTravelerRequestExists = travelerRequests.some(isUnifiedRideActive);
+    const visibleOpenOffers = [...rides, ...partialRides]
+      .filter(isOpenDriverRideOffer)
+      .filter((ride, index, list) => list.findIndex((candidate) => candidate.id === ride.id) === index);
+    const currentOfferKeys = visibleOpenOffers.reduce((acc: Record<string, string>, ride) => {
+      acc[ride.id] = [
+        ride.id,
+        ride.price,
+        ride.availableSeats ?? (ride as any).available_seats ?? '',
+        ride.status,
+        (ride as any).updatedAt || ride.createdAt || '',
+      ].join('|');
+      return acc;
+    }, {});
+
+    if (!hasHydratedTravelerOffersRef.current) {
+      seenTravelerOfferIdsRef.current = currentOfferKeys;
+      hasHydratedTravelerOffersRef.current = true;
+      return;
+    }
+
+    if (!activeTravelerRequestExists) {
+      seenTravelerOfferIdsRef.current = currentOfferKeys;
+      return;
+    }
+
+    const freshOffer = visibleOpenOffers.find((ride) => currentOfferKeys[ride.id] !== seenTravelerOfferIdsRef.current[ride.id]);
+    if (freshOffer) {
+      setTravelerOfferAlertRide(freshOffer);
+      void sendBrowserNotification(
+        'mAIRide New Ride Offer',
+        `${freshOffer.driverName || 'A driver'} posted ${formatCurrency(Number(freshOffer.price || 0))} for ${freshOffer.origin} to ${freshOffer.destination}.`,
+        { tag: `traveler-new-offer-${freshOffer.id}`, requirePermissionPrompt: true }
+      );
+      speakDeviceAnnouncement(
+        `New ride offer received from ${freshOffer.driverName || 'a driver'}. Fare ${Math.round(Number(freshOffer.price || 0))} rupees.`,
+        {
+          dedupeKey: `traveler-new-offer-${freshOffer.id}-${currentOfferKeys[freshOffer.id]}`,
+          minIntervalMs: 4000,
+          rate: Number(config?.chatbotTtsRate || 1),
+          pitch: Number(config?.chatbotTtsPitch || 1),
+        }
+      );
+    }
+
+    seenTravelerOfferIdsRef.current = currentOfferKeys;
+  }, [config?.chatbotTtsPitch, config?.chatbotTtsRate, partialRides, rides, travelerRequests]);
 
   useEffect(() => {
     if (reviewBooking) return;
@@ -16341,7 +16495,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     let availableRides: Ride[] = [];
     let allBookings: Booking[] = [];
     if (isLocalDevFirestoreMode()) {
-      const ridesSnapshot = await getDocs(query(collection(db, 'rides'), where('status', '==', 'available')));
+      const ridesSnapshot = await getDocs(query(collection(db, 'rides')));
       const bookingsSnapshot = await getDocs(query(collection(db, 'bookings')));
       availableRides = ridesSnapshot.docs.map((snapshotDoc) => ({
         id: snapshotDoc.id,
@@ -16375,7 +16529,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
     availableRides.forEach((ride) => {
       if (!ride?.id || lockedRideIds.has(ride.id)) return;
-      if (String(ride.status || '') !== 'available') return;
+      if (!isOpenDriverRideOffer(ride)) return;
       if (!isRideWithinPlanningWindow(ride)) return;
       if (ride.departureDay && draft.departureDay && ride.departureDay !== draft.departureDay) return;
 
@@ -16643,7 +16797,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     const partialRideMap = new Map<string, any>();
     availableRides.forEach((data) => {
       if (!data?.id || lockedRideIds.has(data.id)) return;
-      if (String(data.status || '') !== 'available') return;
+      if (!isOpenDriverRideOffer(data)) return;
 
       const normalizedSearchFrom = normalizeSearchText(search.from);
       const normalizedSearchTo = normalizeSearchText(search.to);
@@ -16734,7 +16888,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       let allBookings: Booking[] = [];
 
       if (isLocalDevFirestoreMode()) {
-        const querySnapshot = await getDocs(query(collection(db, 'rides'), where('status', '==', 'available')));
+        const querySnapshot = await getDocs(query(collection(db, 'rides')));
         const bookingsSnapshot = await getDocs(query(collection(db, 'bookings')));
         availableRides = querySnapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
         allBookings = bookingsSnapshot.docs.map((snapshotDoc) =>
@@ -16751,7 +16905,9 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         allBookings = Array.isArray(data?.bookings) ? data.bookings.map((booking: Booking) => normalizeNegotiationBooking(booking)) : [];
       }
 
-      availableRides = availableRides.filter((ride) => isRecordVisibleForDemoScope(ride, profile));
+      availableRides = availableRides
+        .filter((ride) => isRecordVisibleForDemoScope(ride, profile))
+        .filter(isOpenDriverRideOffer);
       allBookings = allBookings.filter((booking) => isRecordVisibleForDemoScope(booking, profile));
 
       activeRideFeedRef.current = availableRides;
@@ -16902,6 +17058,20 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
 
     void handleBookRide(ride, requestedFare);
+  };
+
+  const submitTravelerSelectedRideCounter = () => {
+    if (!selectedRide) return;
+    const counterFare = Number(travelerCounterFare);
+    if (!Number.isFinite(counterFare) || counterFare <= 0) {
+      showAppDialog('Enter a valid counter fare before sending your offer.', 'error');
+      return;
+    }
+    if (counterFare === Number(selectedRide.price || 0)) {
+      showAppDialog('Your counter fare must be different from the listed fare.', 'error');
+      return;
+    }
+    requestRideBooking(selectedRide, counterFare);
   };
 
   const handleTravelerNegotiation = async (booking: Booking, action: 'accepted' | 'rejected') => {
@@ -17308,7 +17478,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           <MapFirstDashboardShell
             searchLabel="Where to?"
             searchSubtext=""
-            onSearchClick={() => setShowRequestForm(true)}
+            onSearchClick={() => setShowTravelerSearchFilter(true)}
             compactSearchBar
             compactBottomSheet
             primaryAction={(
@@ -17385,9 +17555,141 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             )}
           </MapFirstDashboardShell>
 
+          <AnimatePresence>
+            {showTravelerSearchFilter && (
+              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, y: 20, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 20, scale: 0.96 }}
+                  className="relative w-full max-w-lg rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                >
+                  <button
+                    onClick={() => setShowTravelerSearchFilter(false)}
+                    className="absolute right-5 top-5 rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+                    aria-label="Close destination search"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-accent">Ride Search</p>
+                  <h3 className="mt-2 text-2xl font-black tracking-tight text-mairide-primary">Where to?</h3>
+                  <p className="mt-1 text-sm text-mairide-secondary">Filter open driver offers by route. This does not create a ride request.</p>
+                  <div className="mt-5 space-y-3">
+                    <input
+                      value={search.from}
+                      onChange={(event) => {
+                        setSearch((prev) => ({ ...prev, from: event.target.value }));
+                        setSearchLocationFrom(null);
+                      }}
+                      placeholder="Pickup / origin"
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
+                    />
+                    <input
+                      value={search.to}
+                      onChange={(event) => {
+                        setSearch((prev) => ({ ...prev, to: event.target.value }));
+                        setSearchLocationTo(null);
+                      }}
+                      placeholder="Destination"
+                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
+                    />
+                  </div>
+                  <div className="mt-5 grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearch({ from: '', to: '' });
+                        setSearchLocationFrom(null);
+                        setSearchLocationTo(null);
+                        void handleSearch();
+                        setShowTravelerSearchFilter(false);
+                      }}
+                      className={cn("rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-sm font-bold text-mairide-primary", secondaryActionButtonClass)}
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSearch();
+                        setShowTravelerSearchFilter(false);
+                      }}
+                      className={cn("rounded-2xl bg-mairide-accent px-4 py-3 text-sm font-bold text-white", primaryActionButtonClass)}
+                    >
+                      Search Offers
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {travelerOfferAlertRide && (() => {
+              const routeIntel = getTravelerOfferRouteIntelligence(travelerOfferAlertRide);
+              return (
+              <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 18, scale: 0.96 }}
+                  className="relative w-full max-w-md rounded-[32px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+                >
+                  <button
+                    onClick={() => setTravelerOfferAlertRide(null)}
+                    className="absolute right-5 top-5 rounded-full bg-mairide-bg p-2 text-mairide-secondary transition-colors hover:text-mairide-primary"
+                    aria-label="Dismiss new ride offer"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-accent">New ride offer received</p>
+                  <h3 className="mt-3 text-2xl font-black tracking-tight text-mairide-primary">
+                    {travelerOfferAlertRide.origin} → {travelerOfferAlertRide.destination}
+                  </h3>
+                  <div className="mt-4 rounded-2xl bg-mairide-bg p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-bold text-mairide-primary">{travelerOfferAlertRide.driverName || 'Available driver'}</p>
+                        <p className="text-xs text-mairide-secondary">{formatRideDeparture(travelerOfferAlertRide)}</p>
+                      </div>
+                      <p className="text-2xl font-black text-mairide-accent">
+                        {formatCurrency(Number(travelerOfferAlertRide.price || 0))}
+                      </p>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest">
+                      <span className="rounded-full bg-white px-3 py-1 text-mairide-primary">{routeIntel.requestedRouteLabel}</span>
+                      <span className="rounded-full bg-white px-3 py-1 text-mairide-secondary">{routeIntel.departureGapLabel}</span>
+                      <span className="rounded-full bg-white px-3 py-1 text-mairide-accent">{routeIntel.detourImpactLabel}</span>
+                    </div>
+                  </div>
+                  <div className="mt-5 grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setTravelerOfferAlertRide(null)}
+                      className={cn("rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-sm font-bold text-mairide-primary", secondaryActionButtonClass)}
+                    >
+                      Later
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedRide(travelerOfferAlertRide);
+                        setTravelerOfferAlertRide(null);
+                      }}
+                      className={cn("rounded-2xl bg-mairide-accent px-4 py-3 text-sm font-bold text-white", primaryActionButtonClass)}
+                    >
+                      Review Offer
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+              );
+            })()}
+          </AnimatePresence>
+
           {protectionSandboxVisible && <RideProtectionBadgeStrip />}
 
-          {activeTravelerSessionBooking && (
+          {confirmedTravelerSessionBooking && (
             <>
               <RouteAlertsTicker
                 alerts={travelerRouteAlerts}
@@ -17397,12 +17699,12 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               />
               <div className="mb-8 space-y-5">
                 <NegotiationCommunicationPanel
-                  booking={activeTravelerSessionBooking}
+                  booking={confirmedTravelerSessionBooking}
                   viewerRole="consumer"
                   onSend={handleTravelerCommunicationMessage}
                 />
                 <RouteAlertComposer
-                  booking={activeTravelerSessionBooking}
+                  booking={confirmedTravelerSessionBooking}
                   viewerRole="consumer"
                   viewerProfile={profile}
                   reports={activeTravelerRouteReports}
@@ -17513,7 +17815,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                 <div className="w-8 h-8 border-4 border-mairide-accent border-t-transparent rounded-full animate-spin" />
               </div>
             ) : rides.length > 0 ? (
-              rides.map(ride => (
+              rides.map((ride) => {
+                const routeIntel = getTravelerOfferRouteIntelligence(ride);
+                return (
                 <motion.div 
                   key={ride.id}
                   initial={{ opacity: 0, x: -20 }}
@@ -17555,6 +17859,11 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                         <Clock className="w-3.5 h-3.5 mr-2" />
                         Departure: {formatRideDeparture(ride)}
                       </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest">
+                        <span className="rounded-full bg-mairide-bg px-3 py-1 text-mairide-primary">{routeIntel.requestedRouteLabel}</span>
+                        <span className="rounded-full bg-mairide-bg px-3 py-1 text-mairide-secondary">{routeIntel.departureGapLabel}</span>
+                        <span className="rounded-full bg-orange-50 px-3 py-1 text-mairide-accent">{routeIntel.detourImpactLabel}</span>
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center justify-between md:flex-col md:items-end gap-2">
@@ -17569,7 +17878,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                     </button>
                   </div>
                 </motion.div>
-              ))
+                );
+              })
             ) : partialRides.length > 0 ? (
               <div className="text-center py-12 bg-mairide-bg rounded-3xl border border-dashed border-mairide-secondary">
                 <Search className="w-12 h-12 text-mairide-secondary mx-auto mb-4" />
@@ -17601,7 +17911,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               </div>
 
               <div className="space-y-4">
-                {partialRides.map((ride) => (
+                {partialRides.map((ride) => {
+                  const routeIntel = getTravelerOfferRouteIntelligence(ride);
+                  return (
                   <motion.div
                     key={`partial-${ride.id}`}
                     initial={{ opacity: 0, x: -20 }}
@@ -17646,6 +17958,11 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                             Detour may apply
                           </div>
                         </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest">
+                          <span className="rounded-full bg-mairide-bg px-3 py-1 text-mairide-primary">{routeIntel.requestedRouteLabel}</span>
+                          <span className="rounded-full bg-mairide-bg px-3 py-1 text-mairide-secondary">{routeIntel.departureGapLabel}</span>
+                          <span className="rounded-full bg-orange-50 px-3 py-1 text-mairide-accent">{routeIntel.detourImpactLabel}</span>
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center justify-between md:flex-col md:items-end gap-2">
@@ -17660,7 +17977,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                       </button>
                     </div>
                   </motion.div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -17873,12 +18191,19 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                         </span>
                       </div>
                       <div className="space-y-3">
-                        {travelerSmartMatchPrompt.fullMatches.map((ride) => (
+                        {travelerSmartMatchPrompt.fullMatches.map((ride) => {
+                          const routeIntel = getTravelerSmartMatchRouteIntelligence(ride);
+                          return (
                           <div key={`traveler-full-${ride.id}`} className="rounded-2xl border border-mairide-secondary bg-mairide-bg p-4">
                             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                               <div>
                                 <p className="text-base font-bold text-mairide-primary">{ride.origin} → {ride.destination}</p>
                                 <p className="text-sm text-mairide-secondary">{ride.driverName} • {formatRideDeparture(ride)}</p>
+                                <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest">
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-primary">{routeIntel.requestedRouteLabel}</span>
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-secondary">{routeIntel.departureGapLabel}</span>
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-accent">{routeIntel.detourImpactLabel}</span>
+                                </div>
                               </div>
                               <div className="flex flex-col items-start gap-2 md:items-end">
                                 <p className="text-xl font-black text-mairide-accent">{formatCurrency(ride.price)}</p>
@@ -17891,7 +18216,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -17905,12 +18231,19 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                         </span>
                       </div>
                       <div className="space-y-3">
-                        {travelerSmartMatchPrompt.partialMatches.map((ride) => (
+                        {travelerSmartMatchPrompt.partialMatches.map((ride) => {
+                          const routeIntel = getTravelerSmartMatchRouteIntelligence(ride);
+                          return (
                           <div key={`traveler-partial-${ride.id}`} className="rounded-2xl border border-orange-200 bg-orange-50/40 p-4">
                             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                               <div>
                                 <p className="text-base font-bold text-mairide-primary">{ride.origin} → {ride.destination}</p>
                                 <p className="text-sm text-mairide-secondary">{ride.driverName} • {formatRideDeparture(ride)}</p>
+                                <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest">
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-primary">{routeIntel.requestedRouteLabel}</span>
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-secondary">{routeIntel.departureGapLabel}</span>
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-accent">{routeIntel.detourImpactLabel}</span>
+                                </div>
                               </div>
                               <div className="flex flex-col items-start gap-2 md:items-end">
                                 <p className="text-xl font-black text-mairide-accent">{formatCurrency(ride.price)}</p>
@@ -17923,7 +18256,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -17952,7 +18286,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           </AnimatePresence>
 
           <AnimatePresence>
-            {selectedRide && (
+            {selectedRide && (() => {
+              const routeIntel = getTravelerOfferRouteIntelligence(selectedRide);
+              return (
               <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-black/60 backdrop-blur-sm">
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.9 }}
@@ -18002,6 +18338,14 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                           {formatRideDeparture(selectedRide)}
                         </span>
                       </div>
+                      <div className="mb-4 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent">Route fit</p>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest">
+                          <span className="rounded-full bg-white px-3 py-1 text-mairide-primary">{routeIntel.requestedRouteLabel}</span>
+                          <span className="rounded-full bg-white px-3 py-1 text-mairide-secondary">{routeIntel.departureGapLabel}</span>
+                          <span className="rounded-full bg-white px-3 py-1 text-mairide-accent">{routeIntel.detourImpactLabel}</span>
+                        </div>
+                      </div>
                       {isFutureRide(selectedRide) && (
                         <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 mb-4">
                           <p className="text-[10px] font-bold uppercase tracking-widest text-orange-700">Advance booking</p>
@@ -18041,10 +18385,16 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                             className="w-full pl-12 pr-4 py-4 bg-white border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
                             value={travelerCounterFare}
                             onChange={(e) => setTravelerCounterFare(e.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                submitTravelerSelectedRideCounter();
+                              }
+                            }}
                           />
                         </div>
                         <button
-                          onClick={() => requestRideBooking(selectedRide, Number(travelerCounterFare))}
+                          onClick={submitTravelerSelectedRideCounter}
                           disabled={isBooking || !travelerCounterFare || Number(travelerCounterFare) <= 0}
                           className="bg-mairide-primary text-white px-6 py-4 rounded-2xl font-bold hover:bg-mairide-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -18085,7 +18435,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                   </p>
                 </motion.div>
               </div>
-            )}
+              );
+            })()}
           </AnimatePresence>
           <AnimatePresence>
             {pendingFutureRideAction && (
@@ -18528,22 +18879,26 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       ) || null,
     [activeDashboardRequests]
   );
+  const confirmedDriverSessionBooking = useMemo(
+    () => activeDashboardRequests.find(isConfirmedRideSession) || null,
+    [activeDashboardRequests]
+  );
   const activeDriverRouteReports = useMemo(
     () =>
-      activeDriverSessionBooking
+      confirmedDriverSessionBooking
         ? filterVisibleRouteReports({
             reports: routeAlertReports,
-            booking: activeDriverSessionBooking,
+            booking: confirmedDriverSessionBooking,
             viewerLocation: driverFeedLocation,
           })
         : filterVisibleRouteReports({
             reports: routeAlertReports,
             viewerLocation: driverFeedLocation,
           }),
-    [activeDriverSessionBooking, routeAlertReports]
+    [confirmedDriverSessionBooking, routeAlertReports]
   );
   const driverRouteAlertDraftBooking = useMemo(() => {
-    if (activeDriverSessionBooking) return activeDriverSessionBooking;
+    if (confirmedDriverSessionBooking) return confirmedDriverSessionBooking;
     const primaryRequest = activeDashboardRequests.find((booking) =>
       ['pending', 'negotiating', 'confirmed'].includes(String(booking.status || ''))
     );
@@ -18557,7 +18912,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       viewerRole: 'driver',
       profile,
     });
-  }, [activeDashboardRequests, activeDriverSessionBooking, driverFeedLocation, newRide.destination, newRide.origin, profile]);
+  }, [activeDashboardRequests, confirmedDriverSessionBooking, driverFeedLocation, newRide.destination, newRide.origin, profile]);
 
   useEffect(() => {
     let isMounted = true;
@@ -18921,7 +19276,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
           .filter((ride) => isRecordVisibleForDemoScope(ride, profile));
         driverRideFeedRef.current = driverRides;
         const nextRoutes = driverRides
-          .filter((ride) => String(ride.status || '') === 'available')
+          .filter(isOpenDriverRideOffer)
           .map((ride) => getFeedItemRoute(ride as any))
           .filter(
             (route): route is {
@@ -19808,6 +20163,27 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return { fullMatches, partialMatches };
   };
 
+  const getDriverMatchRouteIntelligence = (request: TravelerRideRequest) => {
+    const draft = driverSmartMatchPrompt?.draft;
+    if (!draft) {
+      return {
+        requestedRouteLabel: `Requested Route: ${request.origin} → ${request.destination}`,
+        departureGapLabel: 'Departure Time Gap: flexible',
+        detourImpactLabel: 'Detour Added: route dependent',
+      };
+    }
+    const driverRoute = {
+      originLocation: draft.originLocation,
+      destinationLocation: draft.destinationLocation,
+    };
+    const requestRoute = getFeedItemRoute(request);
+    return {
+      requestedRouteLabel: `Requested Route: ${request.origin} → ${request.destination}`,
+      departureGapLabel: buildDepartureGapLabel(request.departureTime, draft.departureTime),
+      detourImpactLabel: buildDetourImpactLabel(driverRoute, requestRoute),
+    };
+  };
+
   const submitDriverRideDraft = async (
     draft: {
       driverId: string;
@@ -19933,7 +20309,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       setDriverAvailableRideRoutes(
         driverRideFeedRef.current
           .filter((ride) => ride.driverId === profile.uid)
-          .filter((ride) => String(ride.status || '') === 'available')
+          .filter(isOpenDriverRideOffer)
           .map((ride) => getFeedItemRoute(ride as any))
           .filter(
             (route): route is {
@@ -20028,7 +20404,12 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       if (!linkedTravelerRequestId) {
         const matches = findDriverMatchCandidates(draft);
         if (matches.fullMatches.length > 0 || matches.partialMatches.length > 0) {
-          await startDriverNegotiationFromTravelerRequest(matches.fullMatches[0] || matches.partialMatches[0], draft);
+          setShowOfferForm(false);
+          setDriverSmartMatchPrompt({
+            draft,
+            fullMatches: matches.fullMatches,
+            partialMatches: matches.partialMatches,
+          });
           return;
         }
       }
@@ -20778,7 +21159,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             )}
           </MapFirstDashboardShell>
 
-          {activeDriverSessionBooking && (
+          {confirmedDriverSessionBooking && (
             <RouteAlertsTicker
               alerts={driverRouteAlerts}
               title="Geo-tagged route watch"
@@ -20789,16 +21170,16 @@ const finalizeDriverDashboardRazorpayPayment = async (
 
           {protectionSandboxVisible && <RideProtectionBadgeStrip />}
 
-          {activeDriverSessionBooking && (
+          {confirmedDriverSessionBooking && (
             <div className="mb-8">
               <div className="space-y-5">
                 <NegotiationCommunicationPanel
-                  booking={activeDriverSessionBooking}
+                  booking={confirmedDriverSessionBooking}
                   viewerRole="driver"
                   onSend={handleDriverCommunicationMessage}
                 />
                 <RouteAlertComposer
-                  booking={activeDriverSessionBooking}
+                  booking={confirmedDriverSessionBooking}
                   viewerRole="driver"
                   viewerProfile={profile}
                   reports={activeDriverRouteReports}
@@ -21014,7 +21395,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                     <div>
                       <h3 className="text-3xl font-black tracking-tight text-mairide-primary">Matching traveler requests found</h3>
                       <p className="mt-1 text-sm text-mairide-secondary">
-                        Start negotiation now, or force-post your ride offer.
+                        Accept the matching demand and negotiate fare, or publish this as a separate open ride.
                       </p>
                     </div>
                     <button
@@ -21037,12 +21418,19 @@ const finalizeDriverDashboardRazorpayPayment = async (
                         </span>
                       </div>
                       <div className="space-y-3">
-                        {driverSmartMatchPrompt.fullMatches.map((request) => (
+                        {driverSmartMatchPrompt.fullMatches.map((request) => {
+                          const routeIntel = getDriverMatchRouteIntelligence(request);
+                          return (
                           <div key={`driver-full-${request.id}`} className="rounded-2xl border border-mairide-secondary bg-mairide-bg p-4">
                             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                               <div>
                                 <p className="text-base font-bold text-mairide-primary">{request.origin} → {request.destination}</p>
                                 <p className="text-sm text-mairide-secondary">{request.consumerName} • {formatRideDeparture(request)}</p>
+                                <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest">
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-primary">{routeIntel.requestedRouteLabel}</span>
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-secondary">{routeIntel.departureGapLabel}</span>
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-accent">{routeIntel.detourImpactLabel}</span>
+                                </div>
                               </div>
                               <div className="flex flex-col items-start gap-2 md:items-end">
                                 <p className="text-xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
@@ -21051,12 +21439,13 @@ const finalizeDriverDashboardRazorpayPayment = async (
                                   disabled={isPostingRide}
                                   className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
                                 >
-                                  {isPostingRide ? 'Opening...' : 'Enter Negotiation'}
+                                  {isPostingRide ? 'Opening...' : 'Accept & Negotiate Fare'}
                                 </button>
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -21070,12 +21459,19 @@ const finalizeDriverDashboardRazorpayPayment = async (
                         </span>
                       </div>
                       <div className="space-y-3">
-                        {driverSmartMatchPrompt.partialMatches.map((request) => (
+                        {driverSmartMatchPrompt.partialMatches.map((request) => {
+                          const routeIntel = getDriverMatchRouteIntelligence(request);
+                          return (
                           <div key={`driver-partial-${request.id}`} className="rounded-2xl border border-orange-200 bg-orange-50/40 p-4">
                             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                               <div>
                                 <p className="text-base font-bold text-mairide-primary">{request.origin} → {request.destination}</p>
                                 <p className="text-sm text-mairide-secondary">{request.consumerName} • {formatRideDeparture(request)}</p>
+                                <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest">
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-primary">{routeIntel.requestedRouteLabel}</span>
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-secondary">{routeIntel.departureGapLabel}</span>
+                                  <span className="rounded-full bg-white px-3 py-1 text-mairide-accent">{routeIntel.detourImpactLabel}</span>
+                                </div>
                               </div>
                               <div className="flex flex-col items-start gap-2 md:items-end">
                                 <p className="text-xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
@@ -21084,12 +21480,13 @@ const finalizeDriverDashboardRazorpayPayment = async (
                                   disabled={isPostingRide}
                                   className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
                                 >
-                                  {isPostingRide ? 'Opening...' : 'Enter Negotiation'}
+                                  {isPostingRide ? 'Opening...' : 'Accept & Negotiate Fare'}
                                 </button>
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -21109,7 +21506,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                       disabled={isPostingRide}
                       className={cn("rounded-2xl bg-mairide-accent px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
                     >
-                      {isPostingRide ? 'Posting...' : 'Force Post New Offer'}
+                      {isPostingRide ? 'Posting...' : 'Post New Independent Ride'}
                     </button>
                   </div>
                 </motion.div>
@@ -27688,6 +28085,11 @@ const App = () => {
   const [showTravelerAvatarOptions, setShowTravelerAvatarOptions] = useState(false);
   const [showTravelerCameraCapture, setShowTravelerCameraCapture] = useState(false);
   const [showTravelerCameraSettingsPrompt, setShowTravelerCameraSettingsPrompt] = useState(false);
+  const resolvedAuthProfileRef = useRef<{
+    authUid: string | null;
+    profile: UserProfile | null;
+    partnerProfile: B2BPartner | null;
+  }>({ authUid: null, profile: null, partnerProfile: null });
   const travelerAvatarInputRef = useRef<HTMLInputElement | null>(null);
   const androidPushRegistrationKeyRef = useRef('');
   const criticalSessionResetRef = useRef(false);
@@ -28009,10 +28411,26 @@ const App = () => {
     };
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setLoading(true);
+      if (!active) return;
+      const cached = resolvedAuthProfileRef.current;
+      const isSameResolvedUser =
+        Boolean(u?.uid) &&
+        cached.authUid === u?.uid &&
+        (Boolean(cached.profile) || Boolean(cached.partnerProfile));
+
       setUser(u);
-      setProfile(null);
-      setPartnerProfile(null);
+      if (isSameResolvedUser) {
+        setProfile(cached.profile);
+        setPartnerProfile(cached.partnerProfile);
+        setLoading(false);
+        return;
+      }
+
+      setLoading((prev) => (cached.authUid === u?.uid && !prev ? prev : true));
+      if (cached.authUid !== u?.uid) {
+        setProfile(null);
+        setPartnerProfile(null);
+      }
 
       if (u) {
         const mappedPhoneProfileId = u.isAnonymous ? safeStorageGet('session', PHONE_LOGIN_PROFILE_KEY) : null;
@@ -28023,7 +28441,9 @@ const App = () => {
           const snapshot = await getDoc(doc(db, 'users', profileDocId));
           if (!active) return;
           if (snapshot.exists()) {
-            setProfile(snapshot.data() as UserProfile);
+            const resolvedProfile = snapshot.data() as UserProfile;
+            resolvedAuthProfileRef.current = { authUid: u.uid, profile: resolvedProfile, partnerProfile: null };
+            setProfile(resolvedProfile);
             setPartnerProfile(null);
             if (u.isAnonymous) {
               safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
@@ -28062,9 +28482,11 @@ const App = () => {
                   if (existingProfile.uid.startsWith('manual_')) {
                     await deleteDoc(doc(db, 'users', existingProfile.uid));
                   }
+                  resolvedAuthProfileRef.current = { authUid: u.uid, profile: newProfile, partnerProfile: null };
                   setProfile(newProfile);
                   setPartnerProfile(null);
                 } else {
+                  resolvedAuthProfileRef.current = { authUid: u.uid, profile: existingProfile, partnerProfile: null };
                   setProfile(existingProfile);
                   setPartnerProfile(null);
                 }
@@ -28088,6 +28510,7 @@ const App = () => {
                   };
                   await setDoc(doc(db, 'users', u.uid), newProfile);
                   await walletService.initializeUserWallet(u.uid);
+                  resolvedAuthProfileRef.current = { authUid: u.uid, profile: newProfile, partnerProfile: null };
                   setProfile(newProfile);
                   setPartnerProfile(null);
                   clearStoredOAuthIntent();
@@ -28095,11 +28518,13 @@ const App = () => {
                   clearStoredOAuthIntent();
                   const matchedPartner = await resolvePartnerProfile(u.uid);
                   if (matchedPartner) {
+                    resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
                     setPartnerProfile(matchedPartner);
                     setProfile(null);
                   } else {
                     setNotRegisteredError(true);
                     await signOut(auth);
+                    resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
                     setProfile(null);
                   }
                 }
@@ -28115,10 +28540,11 @@ const App = () => {
             if (u.isAnonymous && pendingPhoneLogin) {
               try {
                 const matchedProfile = await findUserProfileByPhone(pendingPhoneLogin);
-                if (matchedProfile) {
-                  safeStorageSet('session', PHONE_LOGIN_PROFILE_KEY, matchedProfile.uid);
-                  safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
-                  setProfile(matchedProfile);
+              if (matchedProfile) {
+                safeStorageSet('session', PHONE_LOGIN_PROFILE_KEY, matchedProfile.uid);
+                safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
+                resolvedAuthProfileRef.current = { authUid: u.uid, profile: matchedProfile, partnerProfile: null };
+                setProfile(matchedProfile);
                   setPartnerProfile(null);
                   setNotRegisteredError(false);
                   setLoading(false);
@@ -28133,6 +28559,7 @@ const App = () => {
               safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
             }
             const matchedPartner = !u.isAnonymous ? await resolvePartnerProfile(u.uid) : null;
+            resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
             setProfile(null);
             setPartnerProfile(matchedPartner);
             setLoading(false);
@@ -28140,6 +28567,7 @@ const App = () => {
         } catch (error) {
           reportFirestoreError(error, OperationType.GET, `users/${profileDocId}`);
           const matchedPartner = !u.isAnonymous ? await resolvePartnerProfile(u.uid) : null;
+          resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
           setProfile(null);
           setPartnerProfile(matchedPartner);
           setLoading(false);
@@ -28147,6 +28575,7 @@ const App = () => {
       } else {
         safeStorageRemove('session', PHONE_LOGIN_PROFILE_KEY);
         safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
+        resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
         setProfile(null);
         setPartnerProfile(null);
         setLoading(false);
