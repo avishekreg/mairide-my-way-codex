@@ -2948,7 +2948,16 @@ export async function handleUserCounterBooking(req: ReqLike, res: ResLike) {
 }
 
 export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLike) {
-  const { bookingId, consumerId, fare } = req.body || {};
+  const {
+    bookingId,
+    consumerId,
+    travelerId,
+    driverId,
+    rideId,
+    negotiationId,
+    linkedTravelerRequestId,
+    fare,
+  } = req.body || {};
 
   if (!bookingId || !consumerId || !Number.isFinite(Number(fare)) || Number(fare) <= 0) {
     return res.status(400).json({ error: "Missing bookingId, consumerId, or valid fare" });
@@ -2974,7 +2983,22 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
 
     const seedData = getBookingThreadSource(bookingRow);
     const updatedAt = new Date().toISOString();
-    const threadConsumerId = bookingRow.consumer_id || seedData.consumerId;
+    const resolvedConsumerId = String(bookingRow.consumer_id || seedData.consumerId || consumerId || travelerId || "").trim();
+    const resolvedTravelerId = String(travelerId || resolvedConsumerId).trim();
+    const resolvedDriverId = String(driverId || bookingRow.driver_id || seedData.driverId || seedData.matchedDriverId || "").trim();
+    const resolvedRideId = String(rideId || bookingRow.ride_id || seedData.rideId || seedData.matchedRideId || "").trim();
+    const resolvedLinkedTravelerRequestId = String(
+      linkedTravelerRequestId || seedData.linkedTravelerRequestId || seedData.rideRequestId || bookingRow.id || bookingId
+    ).trim();
+    const resolvedNegotiationId = String(negotiationId || seedData.negotiationId || seedData.negotiation_id || bookingRow.id).trim();
+
+    if (!resolvedDriverId) {
+      return res.status(409).json({
+        error: "Driver linkage missing for this negotiation. Please refresh and retry the counter offer.",
+      });
+    }
+
+    const threadConsumerId = resolvedConsumerId;
     let targetRows = [bookingRow];
 
     if (threadConsumerId) {
@@ -3003,15 +3027,40 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
     await Promise.all(
       targetRows.map(async (row: any) => {
         const rowData = row.data || {};
+        const rowRideId = String(row.ride_id || rowData.rideId || rowData.ride_id || resolvedRideId || "").trim();
+        const rowDriverId = String(row.driver_id || rowData.driverId || rowData.driver_id || resolvedDriverId || "").trim();
+        const rowConsumerId = String(row.consumer_id || rowData.consumerId || rowData.consumer_id || resolvedConsumerId || "").trim();
         const nextData = {
           ...rowData,
+          ...(hasInvestorDemoDataFlag(row) || req.body?.isDemo === true || req.body?.is_demo === true
+            ? { isDemo: true, is_demo: true }
+            : {}),
+          bookingId: row.id,
+          rideId: rowRideId,
+          ride_id: rowRideId,
+          driverId: rowDriverId,
+          driver_id: rowDriverId,
+          consumerId: rowConsumerId,
+          consumer_id: rowConsumerId,
+          travelerId: resolvedTravelerId || rowConsumerId,
+          traveler_id: resolvedTravelerId || rowConsumerId,
+          linkedTravelerRequestId: resolvedLinkedTravelerRequestId,
+          rideRequestId: resolvedLinkedTravelerRequestId,
+          ride_request_id: resolvedLinkedTravelerRequestId,
+          negotiationId: resolvedNegotiationId,
+          negotiation_id: resolvedNegotiationId,
           driverListedFare: Number(rowData.driverListedFare || rowData.ridePrice || rowData.price || rowData.driverBid || rowData.negotiatedFare || 0),
           travelerListedFare: Number(rowData.travelerListedFare || rowData.requestedFare || rowData.listedFare || rowData.fare || fare),
           negotiatedFare: Number(fare),
           consumerBid: Number(fare),
           negotiationStatus: "pending",
           negotiationActor: "consumer",
+          negotiationEvent: "COUNTER_OFFER",
+          counterOfferStatus: "COUNTER_OFFER",
+          counterOfferActor: "consumer",
+          counterOfferFare: Number(fare),
           driverCounterPending: false,
+          travelerCounterPending: true,
           status: "negotiating",
           rideRetired: false,
           updatedAt,
@@ -3020,6 +3069,9 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
         const { data: updatedRow, error } = await supabaseAdmin
           .from("bookings")
           .update({
+            ...(rowRideId ? { ride_id: rowRideId } : {}),
+            ...(rowDriverId ? { driver_id: rowDriverId } : {}),
+            ...(rowConsumerId ? { consumer_id: rowConsumerId } : {}),
             status: "negotiating",
             updated_at: updatedAt,
             data: nextData,
@@ -3035,10 +3087,17 @@ export async function handleUserTravelerCounterBooking(req: ReqLike, res: ResLik
       })
     );
 
-    await setRideStatusFromBookingState(supabaseAdmin, seedData.rideId || bookingRow.ride_id, "negotiating", {
+    await setRideStatusFromBookingState(supabaseAdmin, resolvedRideId || seedData.rideId || bookingRow.ride_id, "negotiating", {
       matchedBookingId: bookingRow.id,
+      linkedTravelerRequestId: resolvedLinkedTravelerRequestId,
+      rideRequestId: resolvedLinkedTravelerRequestId,
+      negotiationId: resolvedNegotiationId,
       negotiationStatus: "pending",
       negotiationActor: "consumer",
+      negotiationEvent: "COUNTER_OFFER",
+      counterOfferStatus: "COUNTER_OFFER",
+      counterOfferActor: "consumer",
+      counterOfferFare: Number(fare),
       updatedAt,
     });
 

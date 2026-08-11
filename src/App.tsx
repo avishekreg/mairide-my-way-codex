@@ -4643,6 +4643,22 @@ const normalizeNegotiationBooking = <T extends Booking>(booking: T): T => {
         : data.negotiatedFare ?? (booking as any).negotiatedFare;
   return {
     ...booking,
+    ...(data.isDemo !== undefined ? { isDemo: data.isDemo } : {}),
+    ...(data.is_demo !== undefined ? { is_demo: data.is_demo } : {}),
+    ...(data.rideId ? { rideId: data.rideId } : {}),
+    ...(data.ride_id ? { ride_id: data.ride_id } : {}),
+    ...(data.driverId ? { driverId: data.driverId } : {}),
+    ...(data.driver_id ? { driverId: data.driver_id } : {}),
+    ...(data.consumerId ? { consumerId: data.consumerId } : {}),
+    ...(data.consumer_id ? { consumerId: data.consumer_id } : {}),
+    ...(data.travelerId ? { travelerId: data.travelerId } : {}),
+    ...(data.traveler_id ? { travelerId: data.traveler_id } : {}),
+    ...(data.linkedTravelerRequestId ? { linkedTravelerRequestId: data.linkedTravelerRequestId } : {}),
+    ...(data.rideRequestId ? { rideRequestId: data.rideRequestId } : {}),
+    ...(data.negotiationId ? { negotiationId: data.negotiationId } : {}),
+    ...(data.negotiation_id ? { negotiationId: data.negotiation_id } : {}),
+    ...(data.negotiationEvent ? { negotiationEvent: data.negotiationEvent } : {}),
+    ...(data.counterOfferStatus ? { counterOfferStatus: data.counterOfferStatus } : {}),
     ...(activeNegotiatedFare !== undefined ? { negotiatedFare: activeNegotiatedFare } : {}),
     ...(driverBid !== undefined ? { driverBid } : {}),
     ...(consumerBid !== undefined ? { consumerBid } : {}),
@@ -5820,6 +5836,8 @@ const canUseSpeechAnnouncements = () =>
   typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 
 const spokenAnnouncementTimestamps = new Map<string, number>();
+let lastSpeechAnnouncementAt = 0;
+let lastSpeechAnnouncementText = '';
 
 const speakDeviceAnnouncement = (
   message: string,
@@ -5838,8 +5856,13 @@ const speakDeviceAnnouncement = (
   const lastSpokenAt = spokenAnnouncementTimestamps.get(dedupeKey) || 0;
   const now = Date.now();
   if (now - lastSpokenAt < minIntervalMs) return false;
+  const normalizedMessage = message.trim().toLowerCase();
+  if (normalizedMessage === lastSpeechAnnouncementText && now - lastSpeechAnnouncementAt < Math.max(3000, minIntervalMs)) {
+    return false;
+  }
 
   try {
+    window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(message);
     utterance.rate = Number.isFinite(options?.rate) ? Number(options?.rate) : 1;
     utterance.pitch = Number.isFinite(options?.pitch) ? Number(options?.pitch) : 1;
@@ -5848,6 +5871,8 @@ const speakDeviceAnnouncement = (
       utterance.lang = options.lang;
     }
     spokenAnnouncementTimestamps.set(dedupeKey, now);
+    lastSpeechAnnouncementAt = now;
+    lastSpeechAnnouncementText = normalizedMessage;
     window.speechSynthesis.speak(utterance);
     return true;
   } catch {
@@ -12178,6 +12203,137 @@ const NegotiationCommunicationPanel = ({
   );
 };
 
+const NegotiationActionModal = ({
+  booking,
+  viewerRole,
+  config,
+  fareGuideSourceEntries,
+  counterFare,
+  onCounterFareChange,
+  onClose,
+  onAccept,
+  onReject,
+  onCounter,
+  isSubmitting,
+}: {
+  booking: Booking;
+  viewerRole: 'consumer' | 'driver';
+  config: AppConfig;
+  fareGuideSourceEntries: Array<Partial<Booking> | Partial<Ride> | Partial<TravelerRideRequest>>;
+  counterFare: string;
+  onCounterFareChange: (value: string) => void;
+  onClose: () => void;
+  onAccept: () => void;
+  onReject: () => void;
+  onCounter: (fare: number) => void;
+  isSubmitting: boolean;
+}) => {
+  const pendingActor = getPendingNegotiationActor(booking);
+  const isTraveler = viewerRole === 'consumer';
+  const displayFare = getNegotiationDisplayFare(booking);
+  const travelerListedFare = getTravelerListedFare(booking);
+  const driverListedFare = getDriverListedFare(booking);
+  const currentCounterValue = Number(counterFare || displayFare);
+  const fareGuidance = buildFareGuidance(
+    fareGuideSourceEntries,
+    booking.origin,
+    booking.destination,
+    currentCounterValue
+  );
+  const incomingOffer =
+    (isTraveler && pendingActor === 'driver') ||
+    (!isTraveler && pendingActor === 'consumer') ||
+    booking.status === 'pending';
+  const actorLabel = isTraveler ? 'Driver' : 'Traveler';
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, y: 22, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 22, scale: 0.96 }}
+        className="relative my-6 w-full max-w-lg rounded-[36px] border border-mairide-secondary bg-white p-6 shadow-2xl"
+      >
+        <button
+          onClick={onClose}
+          className="absolute right-5 top-5 rounded-full bg-mairide-bg p-2 text-mairide-secondary transition hover:text-mairide-primary"
+          aria-label="Close negotiation"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-mairide-accent">Live Negotiation</p>
+        <h3 className="mt-3 pr-10 text-2xl font-black tracking-tight text-mairide-primary">
+          {booking.origin} → {booking.destination}
+        </h3>
+        <p className="mt-1 text-sm text-mairide-secondary">
+          {actorLabel}: {isTraveler ? booking.driverName : booking.consumerName}
+        </p>
+
+        <div className="mt-5 rounded-3xl bg-mairide-bg p-5">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-sm text-mairide-secondary">Traveler requested fare</span>
+            <span className="font-bold text-mairide-primary">{formatCurrency(travelerListedFare)}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-4">
+            <span className="text-sm text-mairide-secondary">Driver listed fare</span>
+            <span className="font-bold text-mairide-primary">{formatCurrency(driverListedFare)}</span>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-4 border-t border-mairide-secondary/20 pt-3">
+            <span className="text-sm font-bold text-mairide-primary">
+              {incomingOffer ? 'Current offer received' : 'Your latest offer'}
+            </span>
+            <span className="text-2xl font-black text-mairide-accent">{formatCurrency(displayFare)}</span>
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <button
+            onClick={onAccept}
+            disabled={isSubmitting}
+            className={cn("bg-green-600 text-white py-3 disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
+          >
+            Accept Offer
+          </button>
+          <button
+            onClick={onReject}
+            disabled={isSubmitting}
+            className={cn("bg-white border border-mairide-secondary text-mairide-primary py-3 disabled:cursor-not-allowed disabled:opacity-60", secondaryActionButtonClass)}
+          >
+            Reject
+          </button>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+          <input
+            type="number"
+            min="1"
+            placeholder="Counter fare"
+            value={counterFare}
+            onChange={(event) => onCounterFareChange(event.target.value)}
+            disabled={isSubmitting}
+            className="flex-1 rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent disabled:opacity-60"
+          />
+          <button
+            onClick={() => onCounter(Number(counterFare))}
+            disabled={isSubmitting || !counterFare || Number(counterFare) <= 0}
+            className={cn("min-w-[150px] bg-mairide-primary text-white px-5 py-3 disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
+          >
+            {isSubmitting ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                Sending Offer...
+              </span>
+            ) : (
+              'Submit Counter Offer'
+            )}
+          </button>
+        </div>
+        <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
+      </motion.div>
+    </div>
+  );
+};
+
 const TravelerDashboardSummary = ({
   bookings,
   tripSessions,
@@ -12194,6 +12350,7 @@ const TravelerDashboardSummary = ({
   onPayWithCoins,
   onPayOnline,
   onOpenBooking,
+  onOpenNegotiation,
 }: {
   bookings: Booking[];
   tripSessions: Record<string, TripSession>;
@@ -12210,6 +12367,7 @@ const TravelerDashboardSummary = ({
   onPayWithCoins: (booking: Booking) => void;
   onPayOnline: (booking: Booking) => void;
   onOpenBooking: (booking: Booking) => void;
+  onOpenNegotiation: (booking: Booking) => void;
 }) => {
   const activeBookings = bookings.filter((booking) => {
     if ((booking as any).rideRetired) return false;
@@ -12311,30 +12469,12 @@ const TravelerDashboardSummary = ({
             {hasDriverCounterOffer && (
               <div className="mt-4 rounded-2xl border border-mairide-accent/20 bg-mairide-accent/10 p-4">
                 <p className="font-bold text-mairide-primary">Counter offer received: {formatCurrency(displayFare)}</p>
-                <div className="mt-4 flex flex-col md:flex-row gap-3">
-                  <button onClick={() => onAcceptCounter(booking)} className={cn("flex-1 bg-mairide-primary text-white py-3", primaryActionButtonClass)}>
-                    Accept Counter Offer
-                  </button>
-                  <button onClick={() => onRejectCounter(booking)} className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3", secondaryActionButtonClass)}>
-                    Reject
-                  </button>
-                </div>
-                <div className="mt-4 flex flex-col md:flex-row gap-3">
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Counter fare"
-                    className="flex-1 rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
-                    value={counterFares[booking.id] || ''}
-                    onChange={(e) => setCounterFares((prev) => ({ ...prev, [booking.id]: e.target.value }))}
-                  />
-                  <button
-                    onClick={() => onCounter(booking, Number(counterFares[booking.id]))}
-                    className={cn("bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
-                  >
-                    Send Counter
-                  </button>
-                </div>
+                <button
+                  onClick={() => onOpenNegotiation(booking)}
+                  className={cn("mt-4 w-full bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
+                >
+                  Open Negotiation
+                </button>
                 <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
               </div>
             )}
@@ -12353,22 +12493,12 @@ const TravelerDashboardSummary = ({
                 ) : (
                   <p className="font-bold text-mairide-primary">You can update your offer while the booking is still pending.</p>
                 )}
-                <div className="mt-4 flex flex-col md:flex-row gap-3">
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Counter fare"
-                    className="flex-1 rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
-                    value={counterFares[booking.id] || ''}
-                    onChange={(e) => setCounterFares((prev) => ({ ...prev, [booking.id]: e.target.value }))}
-                  />
-                  <button
-                    onClick={() => onCounter(booking, Number(counterFares[booking.id]))}
-                    className={cn("bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
-                  >
-                    Send Counter Offer
-                  </button>
-                </div>
+                <button
+                  onClick={() => onOpenNegotiation(booking)}
+                  className={cn("mt-4 w-full bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
+                >
+                  Open Negotiation
+                </button>
                 <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
               </div>
             )}
@@ -12638,6 +12768,7 @@ const DriverDashboardSummary = ({
   onPayOnline,
   onStartRide,
   onEndRide,
+  onOpenNegotiation,
 }: {
   requests: Booking[];
   tripSessions: Record<string, TripSession>;
@@ -12653,6 +12784,7 @@ const DriverDashboardSummary = ({
   onPayOnline: (request: Booking) => void;
   onStartRide: (request: Booking, otp: string) => void;
   onEndRide: (request: Booking, otp: string) => void;
+  onOpenNegotiation: (request: Booking) => void;
 }) => {
   const liveRequests = useMemo(
     () =>
@@ -12732,26 +12864,12 @@ const DriverDashboardSummary = ({
             </div>
             {(request.status === 'pending' || request.status === 'negotiating' || travelerCounterPending || driverCounterPending) && (
               <div className="mt-4 space-y-4">
-                <div className="flex gap-3">
-                  <button onClick={() => onAccept(request)} className={cn("flex-1 bg-green-600 text-white py-3", primaryActionButtonClass)}>
-                    {travelerCounterPending || driverCounterPending ? 'Accept Offer' : 'Accept Request'}
-                  </button>
-                  <button onClick={() => onReject(request)} className={cn("flex-1 bg-white border border-mairide-secondary text-mairide-primary py-3", secondaryActionButtonClass)}>
-                    Reject
-                  </button>
-                </div>
-                <div className="flex gap-3">
-                  <input
-                    type="number"
-                    placeholder="Counter fare"
-                    value={counterFares[request.id] || ''}
-                    onChange={(e) => setCounterFares((prev) => ({ ...prev, [request.id]: e.target.value }))}
-                    className="flex-1 p-3 bg-mairide-bg border border-mairide-secondary rounded-xl outline-none"
-                  />
-                  <button onClick={() => onCounter(request, Number(counterFares[request.id]))} className={cn("bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}>
-                    Send Counter
-                  </button>
-                </div>
+                <button
+                  onClick={() => onOpenNegotiation(request)}
+                  className={cn("w-full bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
+                >
+                  Open Negotiation
+                </button>
                 <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
                 {showsDetour && (
                   <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
@@ -15148,6 +15266,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [isBooking, setIsBooking] = useState(false);
   const [travelerCounterFare, setTravelerCounterFare] = useState('');
   const [dashboardCounterFares, setDashboardCounterFares] = useState<{ [key: string]: string }>({});
+  const [travelerNegotiationModalBooking, setTravelerNegotiationModalBooking] = useState<Booking | null>(null);
+  const [travelerCounterSubmittingIds, setTravelerCounterSubmittingIds] = useState<Record<string, boolean>>({});
   const [autocompleteFrom, setAutocompleteFrom] = useState<any | null>(null);
   const [autocompleteTo, setAutocompleteTo] = useState<any | null>(null);
   const [searchLocationFrom, setSearchLocationFrom] = useState<{ lat: number, lng: number } | null>(null);
@@ -16085,6 +16205,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       const nextKey = currentKeys[booking.id];
       const previousKey = seenDriverCounterNotificationsRef.current[booking.id];
       if (nextKey && nextKey !== previousKey) {
+        setTravelerNegotiationModalBooking(booking);
         void sendBrowserNotification(
           'mAIRide Counter Offer',
           `${booking.driverName} proposed ${formatCurrency(getNegotiationDisplayFare(booking))} for ${booking.origin} to ${booking.destination}.`,
@@ -16205,6 +16326,14 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       setReviewBooking(pendingReview);
     }
   }, [dashboardBookings, dismissedReviewIds, reviewBooking]);
+
+  useEffect(() => {
+    if (!travelerNegotiationModalBooking) return;
+    const latest = dashboardBookings.find((booking) => booking.id === travelerNegotiationModalBooking.id);
+    if (latest) {
+      setTravelerNegotiationModalBooking(latest);
+    }
+  }, [dashboardBookings, travelerNegotiationModalBooking?.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -17199,15 +17328,61 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       showAppDialog('Please enter a valid counter fare.', 'warning');
       return;
     }
+    if (travelerCounterSubmittingIds[booking.id]) return;
 
+    setTravelerCounterSubmittingIds((prev) => ({ ...prev, [booking.id]: true }));
+    const optimisticUpdatedAt = new Date().toISOString();
+    const negotiationId = String((booking as any).negotiationId || (booking as any).negotiation_id || booking.id);
+    const linkedTravelerRequestId = String(
+      (booking as any).linkedTravelerRequestId ||
+        (booking as any).rideRequestId ||
+        (booking as any).bookingId ||
+        booking.id
+    );
+    const optimisticThread = normalizeNegotiationBooking({
+      ...booking,
+      ...getInvestorDemoWriteFields(profile),
+      rideId: booking.rideId,
+      driverId: booking.driverId,
+      consumerId: booking.consumerId || profile.uid,
+      travelerId: booking.consumerId || profile.uid,
+      linkedTravelerRequestId,
+      rideRequestId: linkedTravelerRequestId,
+      negotiationId,
+      driverListedFare: (booking as any).driverListedFare || getDriverListedFare(booking),
+      travelerListedFare: (booking as any).travelerListedFare || getTravelerListedFare(booking),
+      negotiatedFare: fare,
+      consumerBid: fare,
+      negotiationStatus: 'pending',
+      negotiationActor: 'consumer',
+      negotiationEvent: 'COUNTER_OFFER',
+      counterOfferStatus: 'COUNTER_OFFER',
+      counterOfferActor: 'consumer',
+      driverCounterPending: false,
+      status: 'negotiating',
+      rideRetired: false,
+      updatedAt: optimisticUpdatedAt,
+    } as Booking);
+    setDashboardBookings((prev) => mergeNegotiationThread(prev, optimisticThread));
+    setDashboardCounterFares((prev) => ({ ...prev, [booking.id]: '' }));
+    setTravelerNegotiationModalBooking(null);
     try {
       const token = await getAccessToken();
       const { data } = await axios.post(
         '/api/user?action=traveler-counter-booking',
         {
           bookingId: booking.id,
+          negotiationId,
+          rideId: booking.rideId,
+          driverId: booking.driverId,
           consumerId: profile.uid,
+          travelerId: profile.uid,
+          linkedTravelerRequestId,
           fare,
+          status: 'COUNTER_OFFER',
+          negotiationStatus: 'COUNTER_OFFER',
+          negotiationActor: 'consumer',
+          ...getInvestorDemoWriteFields(profile),
         },
         {
           headers: {
@@ -17221,12 +17396,23 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       const canonicalThread = data?.booking ? normalizeNegotiationBooking(data.booking as Booking) : null;
       const updatedThread = canonicalThread || normalizeNegotiationBooking({
         ...booking,
+        ...getInvestorDemoWriteFields(profile),
+        rideId: booking.rideId,
+        driverId: booking.driverId,
+        consumerId: booking.consumerId || profile.uid,
+        travelerId: booking.consumerId || profile.uid,
+        linkedTravelerRequestId,
+        rideRequestId: linkedTravelerRequestId,
+        negotiationId,
         driverListedFare: (booking as any).driverListedFare || getDriverListedFare(booking),
         travelerListedFare: (booking as any).travelerListedFare || getTravelerListedFare(booking),
         negotiatedFare: fare,
         consumerBid: fare,
         negotiationStatus: 'pending',
         negotiationActor: 'consumer',
+        negotiationEvent: 'COUNTER_OFFER',
+        counterOfferStatus: 'COUNTER_OFFER',
+        counterOfferActor: 'consumer',
         driverCounterPending: false,
         status: 'negotiating',
         rideRetired: false,
@@ -17245,12 +17431,23 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         const updatedAt = await persistCounterOfferThroughCompatStore(booking, 'consumer', fare);
         const updatedThread = normalizeNegotiationBooking({
           ...booking,
+          ...getInvestorDemoWriteFields(profile),
+          rideId: booking.rideId,
+          driverId: booking.driverId,
+          consumerId: booking.consumerId || profile.uid,
+          travelerId: booking.consumerId || profile.uid,
+          linkedTravelerRequestId,
+          rideRequestId: linkedTravelerRequestId,
+          negotiationId,
           driverListedFare: (booking as any).driverListedFare || getDriverListedFare(booking),
           travelerListedFare: (booking as any).travelerListedFare || getTravelerListedFare(booking),
           negotiatedFare: fare,
           consumerBid: fare,
           negotiationStatus: 'pending',
           negotiationActor: 'consumer',
+          negotiationEvent: 'COUNTER_OFFER',
+          counterOfferStatus: 'COUNTER_OFFER',
+          counterOfferActor: 'consumer',
           driverCounterPending: false,
           status: 'negotiating',
           rideRetired: false,
@@ -17264,6 +17461,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       } catch {
         handleFirestoreError(error, OperationType.UPDATE, `bookings/${booking.id}`);
       }
+    } finally {
+      setTravelerCounterSubmittingIds((prev) => ({ ...prev, [booking.id]: false }));
     }
   };
 
@@ -17743,7 +17942,34 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             onPayWithCoins={(booking) => handleTravelerDashboardPayment(booking, true)}
             onPayOnline={(booking) => handleTravelerDashboardPayment(booking, false)}
             onOpenBooking={() => setActiveTab('history')}
+            onOpenNegotiation={(booking) => setTravelerNegotiationModalBooking(booking)}
           />
+
+          <AnimatePresence>
+            {travelerNegotiationModalBooking && (
+              <NegotiationActionModal
+                booking={travelerNegotiationModalBooking}
+                viewerRole="consumer"
+                config={config}
+                fareGuideSourceEntries={[...rides, ...partialRides, ...dashboardBookings]}
+                counterFare={dashboardCounterFares[travelerNegotiationModalBooking.id] || ''}
+                onCounterFareChange={(value) =>
+                  setDashboardCounterFares((prev) => ({ ...prev, [travelerNegotiationModalBooking.id]: value }))
+                }
+                onClose={() => setTravelerNegotiationModalBooking(null)}
+                onAccept={() => {
+                  setTravelerNegotiationModalBooking(null);
+                  void handleTravelerNegotiation(travelerNegotiationModalBooking, 'accepted');
+                }}
+                onReject={() => {
+                  setTravelerNegotiationModalBooking(null);
+                  void handleTravelerNegotiation(travelerNegotiationModalBooking, 'rejected');
+                }}
+                onCounter={(fare) => void handleTravelerCounterOffer(travelerNegotiationModalBooking, fare)}
+                isSubmitting={Boolean(travelerCounterSubmittingIds[travelerNegotiationModalBooking.id])}
+              />
+            )}
+          </AnimatePresence>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
             <div className="bg-white rounded-[32px] border border-mairide-secondary p-6 shadow-sm">
@@ -18703,6 +18929,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [requests, setRequests] = useState<Booking[]>([]);
   const [driverNegotiationPreview, setDriverNegotiationPreview] = useState<Booking | null>(null);
   const [counterFares, setCounterFares] = useState<{ [key: string]: string }>({});
+  const [driverCounterSubmittingIds, setDriverCounterSubmittingIds] = useState<Record<string, boolean>>({});
   const [paymentRequest, setPaymentRequest] = useState<Booking | null>(null);
   const [retiredRideIds, setRetiredRideIds] = useState<string[]>([]);
   const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
@@ -19065,6 +19292,17 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         );
         return areBookingRenderListsEqual(prev, next) ? prev : next;
       });
+      if (hasPendingTravelerCounterOffer(normalized)) {
+        setDriverNegotiationPreview(normalized);
+        recordInternalDebugEvent('driver_incoming_counter_offer_realtime_projected', {
+          userId: profile.uid,
+          bookingId: normalized.id,
+          rideId: normalized.rideId,
+          travelerId: normalized.consumerId,
+          fare: normalized.negotiatedFare,
+          event: (normalized as any).negotiationEvent || (normalized as any).counterOfferStatus || 'COUNTER_OFFER',
+        });
+      }
       setDriverNegotiationPreview((prev) => {
         if (!prev || getBookingThreadKey(prev) !== getBookingThreadKey(normalized)) return prev;
         if (!isDriverDashboardBooking(normalized)) return null;
@@ -19426,7 +19664,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   useEffect(() => {
     if (reviewBooking) return;
-    const pendingReview = driverBookings.find(
+    const pendingReview = [...driverBookings, ...requests].find(
       (booking) =>
         (booking.status === 'completed' || booking.rideLifecycleStatus === 'completed' || !!booking.rideEndedAt) &&
         !booking.driverReview &&
@@ -19435,7 +19673,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     if (pendingReview) {
       setReviewBooking(pendingReview);
     }
-  }, [dismissedReviewIds, driverBookings, reviewBooking]);
+  }, [dismissedReviewIds, driverBookings, requests, reviewBooking]);
 
   useEffect(() => {
     const currentKeys = requests.reduce((acc: Record<string, string>, booking) => {
@@ -19456,6 +19694,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       const nextKey = currentKeys[booking.id];
       const previousKey = seenTravelerCounterNotificationsRef.current[booking.id];
       if (nextKey && nextKey !== previousKey) {
+        setDriverNegotiationPreview(booking);
         void sendBrowserNotification(
           'mAIRide Counter Offer',
           `${booking.consumerName} offered ${formatCurrency(getNegotiationDisplayFare(booking))} for ${booking.origin} to ${booking.destination}.`,
@@ -20565,10 +20804,29 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const handleDriverCounterOffer = async (request: Booking, fare: number) => {
     if (!fare || fare <= 0) {
-      alert('Please enter a valid fare.');
+      showAppDialog('Please enter a valid fare.', 'warning');
       return;
     }
+    if (driverCounterSubmittingIds[request.id]) return;
 
+    setDriverCounterSubmittingIds((prev) => ({ ...prev, [request.id]: true }));
+    const optimisticUpdatedAt = new Date().toISOString();
+    const optimisticThread = normalizeNegotiationBooking({
+      ...request,
+      driverListedFare: (request as any).driverListedFare || getDriverListedFare(request),
+      travelerListedFare: (request as any).travelerListedFare || getTravelerListedFare(request),
+      negotiatedFare: fare,
+      driverBid: fare,
+      negotiationStatus: 'pending' as const,
+      negotiationActor: 'driver' as const,
+      driverCounterPending: true,
+      status: 'negotiating' as const,
+      updatedAt: optimisticUpdatedAt,
+    } as Booking);
+    setRequests((prev) => mergeNegotiationThread(prev, optimisticThread));
+    setDriverBookings((prev) => mergeNegotiationThread(prev, optimisticThread).filter(isDriverDashboardBooking));
+    setCounterFares((prev) => ({ ...prev, [request.id]: '' }));
+    setDriverNegotiationPreview(null);
     try {
       const token = await getAccessToken();
       const { data } = await axios.post(
@@ -20666,6 +20924,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       } catch {
         handleFirestoreError(error, OperationType.UPDATE, `bookings/${request.id}`);
       }
+    } finally {
+      setDriverCounterSubmittingIds((prev) => ({ ...prev, [request.id]: false }));
     }
   };
 
@@ -21529,6 +21789,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
               );
               const isDriverCounterPending = pendingActor === 'driver';
               const isTravelerCounterPending = pendingActor === 'consumer';
+              const isCounterSubmitting = Boolean(driverCounterSubmittingIds[driverNegotiationPreview.id]);
 
               return (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
@@ -21618,13 +21879,14 @@ const finalizeDriverDashboardRazorpayPayment = async (
                               placeholder="Enter your offer"
                               className="w-full rounded-2xl border border-mairide-secondary bg-white py-4 pl-12 pr-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
                               value={counterValue}
+                              disabled={isCounterSubmitting}
                               onChange={(e) => setCounterFares((prev) => ({ ...prev, [driverNegotiationPreview.id]: e.target.value }))}
                               onKeyDown={(event) => {
                                 if (event.key !== 'Enter' && event.key !== 'NumpadEnter') {
                                   return;
                                 }
                                 event.preventDefault();
-                                if (counterValue && Number(counterValue) > 0) {
+                                if (!isCounterSubmitting && counterValue && Number(counterValue) > 0) {
                                   void handleDriverCounterOffer(driverNegotiationPreview, Number(counterValue));
                                 }
                               }}
@@ -21632,10 +21894,17 @@ const finalizeDriverDashboardRazorpayPayment = async (
                           </div>
                           <button
                             onClick={() => void handleDriverCounterOffer(driverNegotiationPreview, Number(counterValue))}
-                            disabled={!counterValue || Number(counterValue) <= 0}
+                            disabled={isCounterSubmitting || !counterValue || Number(counterValue) <= 0}
                             className="rounded-2xl bg-mairide-primary px-6 py-4 font-bold text-white transition-all hover:bg-mairide-accent disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            Send Counter
+                            {isCounterSubmitting ? (
+                              <span className="inline-flex items-center justify-center gap-2">
+                                <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                                Sending Offer...
+                              </span>
+                            ) : (
+                              'Submit Counter Offer'
+                            )}
                           </button>
                         </div>
                         <FareGuidanceHint
@@ -21783,6 +22052,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 onPayOnline={(request) => handleDriverDashboardPayment(request, false)}
                 onStartRide={handleStartRide}
                 onEndRide={handleEndRide}
+                onOpenNegotiation={(request) => setDriverNegotiationPreview(request)}
               />
             </div>
           )}
