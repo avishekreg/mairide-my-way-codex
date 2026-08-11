@@ -4045,12 +4045,71 @@ const getHybridPaymentBreakdown = (booking: Booking, balance: number, useCoins: 
 };
 let razorpayScriptPromise: Promise<boolean> | null = null;
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+const INVESTOR_DEMO_SESSION_KEY = 'mairide_investor_demo_mode_v1';
+const INVESTOR_DEMO_ROLE_SESSION_KEY = 'mairide_investor_demo_role_v1';
+type InvestorDemoRole = 'traveler' | 'driver' | 'admin';
 const UI_LANGUAGE_STORAGE_KEY = 'mairide_ui_language';
 const UI_LANGUAGE_PROMPT_SEEN_KEY = 'mairide_ui_language_prompt_seen';
 const UI_LANGUAGE_PROMPT_SESSION_KEY = 'mairide_ui_language_prompt_session';
 const UI_LANGUAGE_SESSION_KEY = 'mairide_ui_language_session';
 const UI_LANGUAGE_PROMPT_SHARED_SESSION_KEY = 'mairide_ui_language_prompt_session_shared';
 const UI_LANGUAGE_GEO_SESSION_KEY = 'mairide_ui_language_geo_session';
+const resolveInvestorDemoMode = () => {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('investor_demo') === '1') {
+    window.sessionStorage.setItem(INVESTOR_DEMO_SESSION_KEY, '1');
+    return true;
+  }
+  if (params.get('investor_demo') === '0') {
+    window.sessionStorage.removeItem(INVESTOR_DEMO_SESSION_KEY);
+    return false;
+  }
+  return window.sessionStorage.getItem(INVESTOR_DEMO_SESSION_KEY) === '1';
+};
+const resolveInvestorDemoRole = (): InvestorDemoRole | null => {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const rawRole = params.get('role');
+  const normalizedRole =
+    rawRole === 'traveler' || rawRole === 'driver' || rawRole === 'admin'
+      ? rawRole
+      : null;
+
+  if (params.get('investor_demo') === '0') {
+    window.sessionStorage.removeItem(INVESTOR_DEMO_ROLE_SESSION_KEY);
+    return null;
+  }
+
+  if (params.get('investor_demo') === '1' && normalizedRole) {
+    window.sessionStorage.setItem(INVESTOR_DEMO_ROLE_SESSION_KEY, normalizedRole);
+    return normalizedRole;
+  }
+
+  const storedRole = window.sessionStorage.getItem(INVESTOR_DEMO_ROLE_SESSION_KEY);
+  return storedRole === 'traveler' || storedRole === 'driver' || storedRole === 'admin'
+    ? storedRole
+    : null;
+};
+const INVESTOR_DEMO_DATA_EMAILS = new Set([
+  'demo.traveler@mairide.in',
+  'demo.driver@mairide.in',
+]);
+const normalizeDemoEmail = (value?: string | null) => String(value || '').trim().toLowerCase();
+const isInvestorDemoDataProfile = (profile?: Pick<UserProfile, 'email' | 'role'> | null) => {
+  const email = normalizeDemoEmail(profile?.email);
+  return INVESTOR_DEMO_DATA_EMAILS.has(email) && (profile?.role === 'consumer' || profile?.role === 'driver');
+};
+const hasInvestorDemoDataFlag = (record: any) => {
+  const data = record?.data || {};
+  return record?.isDemo === true || record?.is_demo === true || data?.isDemo === true || data?.is_demo === true;
+};
+const getInvestorDemoWriteFields = (profile?: UserProfile | null) =>
+  isInvestorDemoDataProfile(profile)
+    ? { isDemo: true, is_demo: true }
+    : {};
+const isRecordVisibleForDemoScope = (record: any, profile?: UserProfile | null) =>
+  isInvestorDemoDataProfile(profile) ? hasInvestorDemoDataFlag(record) : !hasInvestorDemoDataFlag(record);
 type SupportedUiLanguage = {
   value: string;
   label: string;
@@ -5397,14 +5456,14 @@ const uploadRouteAlertImage = async (base64: string, userId: string) => {
   return getDownloadURL(imageRef);
 };
 
-const fetchRecentRouteAlertReports = async () => {
+const fetchRecentRouteAlertReports = async (profile?: UserProfile | null) => {
   const snapshot = await getDocs(
     query(collection(db, 'route_alert_reports'), orderBy('createdAt', 'desc'), limit(30))
   );
   return snapshot.docs.map((entry) => ({
     id: entry.id,
     ...entry.data(),
-  })) as RouteAlertReport[];
+  })).filter((report) => isRecordVisibleForDemoScope(report, profile)) as RouteAlertReport[];
 };
 
 const filterVisibleRouteReports = ({
@@ -6648,12 +6707,12 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               ) : null}
             </div>
           ) : null}
-          <div className="flex flex-wrap items-center justify-center gap-3">
+          <div className="flex flex-row items-center justify-center gap-4">
             <a
               href={getTrackedAndroidApkUrl()}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center rounded-xl bg-black text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition shadow-sm"
+              className="inline-flex h-12 items-center rounded-xl bg-black px-5 text-sm font-bold tracking-wide text-white shadow-sm transition hover:opacity-90"
             >
               Get it on Android
             </a>
@@ -6661,7 +6720,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               href="/downloads/ios.html"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center rounded-xl bg-mairide-primary text-white px-4 py-2 text-xs font-bold tracking-wide hover:opacity-90 transition"
+              className="inline-flex h-12 items-center rounded-xl bg-mairide-primary px-5 text-sm font-bold tracking-wide text-white transition hover:opacity-90"
             >
               Get it on iOS
             </a>
@@ -6669,21 +6728,29 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               href={PUBLIC_ANDROID_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white/85 p-2 pr-3 shadow-sm transition hover:bg-white"
+              className="inline-flex w-32 flex-col items-center justify-center rounded-2xl border border-mairide-secondary bg-white/90 p-2 shadow-sm transition hover:bg-white"
               aria-label="Scan QR code to download the mAIRide Android app"
             >
-              <span className="rounded-xl bg-white p-1 shadow-inner">
+              <span className="relative flex h-24 w-24 items-center justify-center rounded-xl bg-white p-1 shadow-inner">
                 <img
                   src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
                   alt="QR code to download the mAIRide Android app"
-                  className="h-14 w-14"
-                  width={56}
-                  height={56}
+                  className="h-24 w-24"
+                  width={96}
+                  height={96}
                   loading="lazy"
                 />
+                <span
+                  className="absolute left-1/2 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-mairide-secondary/40 bg-white/95 text-mairide-primary shadow-sm"
+                  aria-hidden="true"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+                    <path d="M7.2 8.2 5.7 5.6a.45.45 0 0 1 .78-.45l1.56 2.7a8.64 8.64 0 0 1 7.92 0l1.56-2.7a.45.45 0 0 1 .78.45l-1.5 2.6A6.43 6.43 0 0 1 20 13.5H4a6.43 6.43 0 0 1 3.2-5.3ZM8.5 11a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm7 0a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM4 14.5h16v3.25A2.25 2.25 0 0 1 17.75 20H6.25A2.25 2.25 0 0 1 4 17.75V14.5Z" />
+                  </svg>
+                </span>
               </span>
-              <span className="max-w-[86px] text-left text-[9px] font-bold uppercase leading-3 tracking-widest text-mairide-secondary">
-                Scan Android
+              <span className="mt-2 text-center text-[11px] font-black leading-4 text-mairide-primary">
+                Scan for Android
               </span>
             </a>
           </div>
@@ -9850,7 +9917,7 @@ const WalletDashboard = ({ profile }: { profile: UserProfile }) => {
     };
 
     fetchWalletData();
-  }, [profile.uid]);
+  }, [profile.email, profile.role, profile.uid]);
 
   if (isLoading) {
     return (
@@ -10086,7 +10153,7 @@ const DriverOnboarding = ({
 
   useEffect(() => {
     void requestMobileRegistrationPermissions({ uid: profile.uid, role: 'driver' });
-  }, [profile.uid]);
+  }, [profile.email, profile.role, profile.uid]);
 
   const updateAadhaarSegment = (index: number, value: string) => {
     const nextSegments = [...aadhaarSegments];
@@ -11219,6 +11286,89 @@ const RouteAlertsTicker = ({
     </div>
   );
 };
+
+const MapFirstDashboardShell = ({
+  searchLabel,
+  searchSubtext,
+  onSearchClick,
+  primaryAction,
+  secondaryAction,
+  sheetTitle,
+  sheetBody,
+  children,
+  topControlsOnly = false,
+  showBottomSheet = true,
+}: {
+  searchLabel: string;
+  searchSubtext: string;
+  onSearchClick?: () => void;
+  primaryAction?: React.ReactNode;
+  secondaryAction?: React.ReactNode;
+  sheetTitle: string;
+  sheetBody: string;
+  children: React.ReactNode;
+  topControlsOnly?: boolean;
+  showBottomSheet?: boolean;
+}) => (
+  <section className="relative -mx-4 -mt-4 mb-8 overflow-hidden bg-mairide-primary md:-mx-8 md:-mt-8">
+    <div className="relative min-h-[calc(100vh-96px)]">
+      <div className="absolute inset-0 z-0 pointer-events-auto bg-mairide-bg">{children}</div>
+      <div className="pointer-events-none absolute inset-0 z-[1] bg-[linear-gradient(180deg,rgba(244,247,249,0.88)_0%,rgba(244,247,249,0.34)_22%,rgba(244,247,249,0)_48%,rgba(244,247,249,0.76)_100%)]" />
+
+      <div className={cn(
+        "pointer-events-none absolute left-4 right-4 z-10 mx-auto",
+        topControlsOnly ? "top-20 z-20 max-w-xl" : "top-4 max-w-3xl md:top-6"
+      )}>
+        {topControlsOnly ? (
+          <div className="pointer-events-auto absolute left-1/2 top-0 z-20 flex w-fit max-w-full -translate-x-1/2 flex-row items-center justify-center gap-2 whitespace-nowrap rounded-full bg-white/90 px-3 py-1 shadow-lg shadow-mairide-primary/10 backdrop-blur-md">
+            {primaryAction}
+            {secondaryAction}
+          </div>
+        ) : (
+          <div className="pointer-events-auto flex items-center gap-3 rounded-[28px] border border-mairide-secondary bg-white/95 p-3 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-mairide-primary text-white">
+              <Search className="h-5 w-5" />
+            </div>
+            <button
+              type="button"
+              onClick={onSearchClick}
+              className="min-w-0 flex-1 text-left"
+            >
+              <p className="truncate text-lg font-black tracking-tight text-mairide-primary">{searchLabel}</p>
+              <p className="truncate text-sm text-mairide-secondary">{searchSubtext}</p>
+            </button>
+            <div className="hidden shrink-0 items-center gap-2 sm:flex">
+              {primaryAction}
+              {secondaryAction}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showBottomSheet && (
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-3 md:px-8 md:pb-6">
+        <div
+          className="pointer-events-auto mx-auto max-h-[46vh] max-w-3xl overflow-y-auto overscroll-contain rounded-t-[34px] border border-mairide-secondary bg-white/96 p-5 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl [touch-action:pan-y] md:rounded-[34px]"
+          onWheel={(event) => event.stopPropagation()}
+          onTouchMove={(event) => event.stopPropagation()}
+        >
+          <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-mairide-secondary/50" />
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-black tracking-tight text-mairide-primary">{sheetTitle}</h2>
+              <p className="mt-1 text-sm leading-relaxed text-mairide-secondary">{sheetBody}</p>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 sm:hidden">
+              {primaryAction}
+              {secondaryAction}
+            </div>
+          </div>
+        </div>
+      </div>
+      )}
+    </div>
+  </section>
+);
 
 const DashboardTranslatorCard = ({
   title,
@@ -13008,7 +13158,7 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [profile.uid]);
+  }, [profile.email, profile.role, profile.uid]);
 
   const submitTravelerPaymentProof = async (
     booking: Booking,
@@ -13650,7 +13800,16 @@ const MyRides = ({
     () =>
       rides.filter((ride) => {
         if (hiddenRideIds.includes(ride.id)) return false;
-        return isUnifiedRideActive(ride);
+        const status = String(ride.status || '').trim().toLowerCase();
+        const availableSeats = Number(
+          ride.available_seats ??
+          ride.availableSeats ??
+          ride.seatsAvailable ??
+          0
+        );
+        const isOpenOffer = status === 'open' || status === 'available';
+        const isStaleOffer = ['full', 'completed', 'expired', 'cancelled', 'canceled'].includes(status);
+        return isOpenOffer && !isStaleOffer && availableSeats > 0;
       }),
     [rides, hiddenRideIds]
   );
@@ -13730,10 +13889,10 @@ const MyRides = ({
     return () => {
       active = false;
     };
-  }, [profile.uid]);
+  }, [profile.email, profile.role, profile.uid]);
 
   const confirmCancelRideOffer = async (ride: any) => {
-    if (ride.status !== 'available') {
+    if (!['available', 'open'].includes(String(ride.status || '').toLowerCase())) {
       showAppDialog('Only active unbooked ride offers can be cancelled.', 'warning');
       return;
     }
@@ -13829,6 +13988,9 @@ const MyRides = ({
       <div className="space-y-6">
         {visibleRides.map((ride) => {
           const negotiationActive = activeNegotiationRideIds.includes(ride.id);
+          const rideStatus = String(ride.status || '').toLowerCase();
+          const availableSeats = Number(ride.available_seats ?? ride.availableSeats ?? ride.seatsAvailable ?? 0);
+          const isOpenOffer = rideStatus === 'available' || rideStatus === 'open';
           return (
             <div
               key={ride.id}
@@ -13863,7 +14025,7 @@ const MyRides = ({
                       "px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wide",
                       negotiationActive
                         ? "bg-orange-200/70 text-orange-800"
-                        : ride.status === 'available'
+                        : isOpenOffer
                         ? "bg-green-100 text-green-700"
                         : "bg-mairide-secondary text-mairide-primary"
                     )}
@@ -13888,8 +14050,8 @@ const MyRides = ({
               <div className="flex justify-between items-center pt-4 border-t border-mairide-secondary/20">
                 <span className="text-sm text-mairide-secondary">{new Date(ride.createdAt).toLocaleDateString()}</span>
                 <div className="flex items-center gap-3">
-                  <span className="font-bold text-mairide-primary">{ride.seatsAvailable} seats left</span>
-                  {ride.status === 'available' && !negotiationActive && (
+                  <span className="font-bold text-mairide-primary">{availableSeats} seats left</span>
+                  {isOpenOffer && !negotiationActive && (
                     <button
                       onClick={() => setPendingCancelRide(ride)}
                       disabled={cancellingRideId === ride.id}
@@ -13898,7 +14060,7 @@ const MyRides = ({
                       {cancellingRideId === ride.id ? 'Cancelling...' : 'Cancel Offer'}
                     </button>
                   )}
-                  {ride.status === 'available' && negotiationActive && (
+                  {isOpenOffer && negotiationActive && (
                     <span className="px-3 py-2 rounded-xl border border-orange-300 bg-orange-100/60 text-orange-800 text-xs font-bold uppercase tracking-wide">
                       Negotiation in progress
                     </span>
@@ -15136,7 +15298,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
 
   useEffect(() => {
     let isMounted = true;
-    void fetchRecentRouteAlertReports()
+    void fetchRecentRouteAlertReports(profile)
       .then((reports) => {
         if (isMounted) {
           setRouteAlertReports(reports);
@@ -15165,6 +15327,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         const photoUrl = await uploadRouteAlertImage(payload.photoDataUrl, auth.currentUser.uid);
         const createdAt = new Date().toISOString();
         const reportDraft: Omit<RouteAlertReport, 'id'> = {
+          ...getInvestorDemoWriteFields(profile),
           bookingId: booking.id,
           rideId: booking.rideId,
           routeThreadKey: getBookingThreadKey(booking),
@@ -15404,7 +15567,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       window.removeEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
       window.removeEventListener(APP_NAV_TAB_EVENT, handleTabNavigation as EventListener);
     };
-  }, []);
+  }, [profile]);
 
   const loadTravelerDashboardBookings = useCallback(async () => {
     let list: Booking[] = [];
@@ -15428,6 +15591,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     return dedupeBookingsByThread(
       list
         .map((booking) => normalizeNegotiationBooking(booking))
+        .filter((booking) => isRecordVisibleForDemoScope(booking, profile))
         .sort(
           (a, b) =>
             new Date((b as any).updatedAt || b.createdAt).getTime() -
@@ -15456,6 +15620,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
 
     return list
+      .filter((item) => isRecordVisibleForDemoScope(item, profile))
       .filter((item) => isRideWithinPlanningWindow(item))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [profile.uid]);
@@ -16119,6 +16284,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     }
 
     return {
+      ...getInvestorDemoWriteFields(profile),
       consumerId: resolvedConsumerId,
       consumerName: resolvedConsumerName,
       consumerPhone: profile.phoneNumber || '',
@@ -16155,10 +16321,18 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         ...(snapshotDoc.data() as Booking),
       }));
     } else {
-      const { data } = await axios.get(apiPath('/api/health?action=search-rides'));
+      const token = await getAccessToken();
+      const { data } = await axios.get(apiPath('/api/user?action=search-rides'), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       availableRides = Array.isArray(data?.rides) ? data.rides : [];
       allBookings = Array.isArray(data?.bookings) ? data.bookings : [];
     }
+
+    availableRides = availableRides.filter((ride) => isRecordVisibleForDemoScope(ride, profile));
+    allBookings = allBookings.filter((booking) => isRecordVisibleForDemoScope(booking, profile));
 
     const lockedRideIds = getLockedRideIds(allBookings);
     const fullMatches = new Map<string, Ride>();
@@ -16536,10 +16710,18 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
           normalizeNegotiationBooking({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) })
         );
       } else {
-        const { data } = await axios.get(apiPath('/api/health?action=search-rides'));
+        const token = await getAccessToken();
+        const { data } = await axios.get(apiPath('/api/user?action=search-rides'), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
         availableRides = Array.isArray(data?.rides) ? data.rides : [];
         allBookings = Array.isArray(data?.bookings) ? data.bookings.map((booking: Booking) => normalizeNegotiationBooking(booking)) : [];
       }
+
+      availableRides = availableRides.filter((ride) => isRecordVisibleForDemoScope(ride, profile));
+      allBookings = allBookings.filter((booking) => isRecordVisibleForDemoScope(booking, profile));
 
       activeRideFeedRef.current = availableRides;
       activeRideBookingsRef.current = allBookings;
@@ -16550,7 +16732,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     } finally {
       setIsLoading(false);
     }
-  }, [applyActiveRideFeed]);
+  }, [applyActiveRideFeed, profile.email, profile.role, profile.uid]);
 
   useEffect(() => {
     if (activeTab !== 'search') return;
@@ -16571,6 +16753,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
         normalizeSearchText(requestedDestination) !== normalizeSearchText(ride.destination);
       
       const bookingData = {
+        ...getInvestorDemoWriteFields(profile),
         rideId: ride.id,
         consumerId: profile.uid,
         consumerName: profile.displayName,
@@ -17073,69 +17256,82 @@ const finalizeTravelerDashboardRazorpayPayment = async (
     }
   };
 
-  if (hasMapsIssue) {
-    return (
-      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-red-100">
-        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-gray-900 mb-2">Google Maps Error</h2>
-        <p className="text-gray-600 mb-4">
-          {loadError ? loadError.message : "Authentication Failure (Check API Key restrictions or billing)"}
-        </p>
-        <div className="text-sm bg-red-50 p-4 rounded-lg text-red-700 font-mono break-all text-left">
-          <p className="font-bold mb-2">Possible Causes:</p>
-          <ul className="list-disc ml-4 space-y-1">
-            <li><strong>RefererNotAllowedMapError:</strong> Your domain restriction in Google Cloud Console is incorrect.</li>
-            <li><strong>ApiNotActivatedMapError:</strong> Maps JavaScript API is not enabled.</li>
-            <li><strong>BillingNotEnabledMapError:</strong> Billing is not linked to this project.</li>
-          </ul>
-          <p className="mt-4 text-xs opacity-70">API Key: {GOOGLE_MAPS_API_KEY.substring(0, 10)}...</p>
-        </div>
-      </div>
-    );
-  }
+  const travelerMapCenter = userLocation || { lat: 26.1433, lng: 91.7385 };
+  const travelerMapReady = Boolean(
+    GOOGLE_MAPS_API_KEY &&
+    isLoaded &&
+    !hasMapsIssue &&
+    typeof window !== 'undefined' &&
+    window.google
+  );
 
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8">
+    <div className={cn(
+      activeTab === 'search'
+        ? "relative min-h-[calc(100vh-4rem)] bg-mairide-bg"
+        : "max-w-4xl mx-auto p-4 md:p-8"
+    )}>
       {activeTab === 'search' && (
         <>
-          <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-col gap-2">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
-                {firstName}
-              </p>
-              <div>
-                <h1 className="mb-2 text-4xl font-bold uppercase tracking-tight text-mairide-primary">Where to?</h1>
-                <p className="italic serif text-mairide-secondary">Find discounted intercity rides on empty leg journeys.</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowRequestForm(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-mairide-accent px-6 py-4 text-sm font-bold text-white transition-all hover:bg-mairide-primary"
-            >
-              <Plus className="h-5 w-5" />
-              Request a Ride
-            </button>
-          </div>
-
-          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Nearby cabs ready</p>
-              <p className="mt-3 text-3xl font-black tracking-tight text-mairide-primary">{nearbyAvailableCabCount}</p>
-              <p className="mt-2 text-sm text-mairide-secondary">Drivers currently online in your dashboard radius.</p>
-            </div>
-            <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Drivers watching your fare</p>
-              <p className="mt-3 text-3xl font-black tracking-tight text-mairide-primary">{liveFareWatcherCount}</p>
-              <p className="mt-2 text-sm text-mairide-secondary">Live route-overlap count across the negotiation feed.</p>
-            </div>
-            <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Active requests</p>
-              <p className="mt-3 text-3xl font-black tracking-tight text-mairide-primary">
-                {travelerRequests.filter(isUnifiedRideActive).length}
-              </p>
-              <p className="mt-2 text-sm text-mairide-secondary">Open or negotiating traveler threads being tracked live.</p>
-            </div>
-          </div>
+          <MapFirstDashboardShell
+            searchLabel="Where to?"
+            searchSubtext="Choose a destination to request an empty-leg ride"
+            onSearchClick={() => setShowRequestForm(true)}
+            primaryAction={(
+              <button
+                onClick={() => setShowRequestForm(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-mairide-accent px-5 py-3 text-sm font-bold text-white shadow-lg shadow-mairide-accent/20 transition-all hover:bg-mairide-primary"
+              >
+                <Plus className="h-5 w-5" />
+                Request a Ride
+              </button>
+            )}
+            sheetTitle="Find your next ride"
+            sheetBody="Set your route and fare once. Matching drivers, route alerts, and negotiations continue below without changing the booking logic."
+          >
+            {travelerMapReady ? (
+              <GoogleMap
+                mapContainerStyle={{ width: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
+                center={travelerMapCenter}
+                zoom={userLocation ? 13 : 7}
+                options={{
+                  disableDefaultUI: true,
+                  clickableIcons: false,
+                  scrollwheel: false,
+                  gestureHandling: 'greedy',
+                  zoomControl: true,
+                  styles: [
+                    { featureType: "poi", elementType: "all", stylers: [{ visibility: "off" }] },
+                    { featureType: "transit", elementType: "all", stylers: [{ visibility: "off" }] },
+                    { featureType: "road", elementType: "geometry", stylers: [{ saturation: -65 }, { lightness: 25 }] },
+                    { featureType: "water", elementType: "geometry", stylers: [{ color: "#d6e4e2" }] },
+                    { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#eef3f4" }] },
+                  ],
+                }}
+              >
+                {userLocation && (
+                  <Marker
+                    position={userLocation}
+                    icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
+                    title="You"
+                  />
+                )}
+                {drivers.filter(d => d.location && typeof d.location.lat === 'number' && typeof d.location.lng === 'number').map(driver => (
+                  <Marker
+                    key={driver.uid}
+                    position={{ lat: driver.location!.lat, lng: driver.location!.lng }}
+                    icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/car.png' }}
+                    title={driver.displayName}
+                  />
+                ))}
+                {directionsResponse && (
+                  <DirectionsRenderer directions={directionsResponse} />
+                )}
+              </GoogleMap>
+            ) : (
+              <div className="h-full min-h-[calc(100vh-96px)] bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
+            )}
+          </MapFirstDashboardShell>
 
           <RouteAlertsTicker
             alerts={travelerRouteAlerts}
@@ -17228,95 +17424,6 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               <p className="mt-3 text-sm text-white/80">
                 Your wallet is your fastest growth engine on mAIRide. Keep it growing through referrals, bookings, and repeat usage.
               </p>
-            </div>
-          </div>
-
-          <div id="consumer-live-map" className="mb-12 overflow-hidden rounded-[32px] border border-mairide-secondary bg-white shadow-xl">
-            <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-mairide-secondary/70">
-              <div>
-                <h2 className="text-xl font-bold text-mairide-primary flex items-center">
-                  <MapPin className="w-5 h-5 mr-2 text-mairide-accent" />
-                  Live Driver Map
-                </h2>
-                <p className="text-sm text-mairide-secondary">
-                  See active driver positions around you before searching for a ride.
-                </p>
-              </div>
-              <div className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
-                {nearbyAvailableCabCount} Cabs Visible
-              </div>
-            </div>
-            <div className="h-[360px] relative">
-              {(loadError || authFailure) ? (
-                <div className="flex flex-col items-center justify-center h-full bg-red-50 p-8 text-center">
-                  <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-                  <h3 className="text-xl font-bold text-red-900 mb-2">Google Maps Error Detected</h3>
-                  <p className="text-red-700 mb-4">
-                    {loadError ? loadError.message : "Authentication Failure (Check Referrer Restrictions)"}
-                  </p>
-                  <div className="text-xs bg-white/50 p-4 rounded border border-red-200 text-red-800 font-mono text-left">
-                    <p><strong>API Key:</strong> {GOOGLE_MAPS_API_KEY.substring(0, 10)}...</p>
-                    <p><strong>Status:</strong> {isLoaded ? "Script Loaded" : "Script Not Loaded"}</p>
-                  </div>
-                </div>
-              ) : GOOGLE_MAPS_API_KEY && isLoaded && window.google ? (
-                <GoogleMap
-                  mapContainerStyle={{ width: '100%', height: '100%' }}
-                  center={userLocation || { lat: 26.1433, lng: 91.7385 }}
-                  zoom={userLocation ? 14 : 7}
-                  options={{
-                    styles: [
-                      { "featureType": "all", "elementType": "geometry.fill", "stylers": [{ "weight": "2.00" }] },
-                      { "featureType": "all", "elementType": "geometry.stroke", "stylers": [{ "color": "#9c9c9c" }] },
-                      { "featureType": "all", "elementType": "labels.text", "stylers": [{ "visibility": "on" }] },
-                      { "featureType": "landscape", "elementType": "all", "stylers": [{ "color": "#f2f2f2" }] },
-                      { "featureType": "landscape", "elementType": "geometry.fill", "stylers": [{ "color": "#ffffff" }] },
-                      { "featureType": "landscape.man_made", "elementType": "geometry.fill", "stylers": [{ "color": "#ffffff" }] },
-                      { "featureType": "poi", "elementType": "all", "stylers": [{ "visibility": "off" }] },
-                      { "featureType": "road", "elementType": "all", "stylers": [{ "saturation": -100 }, { "lightness": 45 }] },
-                      { "featureType": "road", "elementType": "geometry.fill", "stylers": [{ "color": "#eeeeee" }] },
-                      { "featureType": "road", "elementType": "labels.text.fill", "stylers": [{ "color": "#7b7b7b" }] },
-                      { "featureType": "road", "elementType": "labels.text.stroke", "stylers": [{ "color": "#ffffff" }] },
-                      { "featureType": "road.highway", "elementType": "all", "stylers": [{ "visibility": "simplified" }] },
-                      { "featureType": "road.arterial", "elementType": "labels.icon", "stylers": [{ "visibility": "off" }] },
-                      { "featureType": "transit", "elementType": "all", "stylers": [{ "visibility": "off" }] },
-                      { "featureType": "water", "elementType": "all", "stylers": [{ "color": "#46bcec" }, { "visibility": "on" }] },
-                      { "featureType": "water", "elementType": "geometry.fill", "stylers": [{ "color": "#c8d7d4" }] },
-                      { "featureType": "water", "elementType": "labels.text.fill", "stylers": [{ "color": "#070707" }] },
-                      { "featureType": "water", "elementType": "labels.text.stroke", "stylers": [{ "color": "#ffffff" }] }
-                    ]
-                  }}
-                >
-                  {userLocation && (
-                    <Marker
-                      position={userLocation}
-                      icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
-                      title="You"
-                    />
-                  )}
-                  {drivers.filter(d => d.location && typeof d.location.lat === 'number' && typeof d.location.lng === 'number').map(driver => (
-                    <Marker
-                      key={driver.uid}
-                      position={{ lat: driver.location!.lat, lng: driver.location!.lng }}
-                      icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/car.png' }}
-                      title={driver.displayName}
-                    />
-                  ))}
-                  {directionsResponse && (
-                    <DirectionsRenderer directions={directionsResponse} />
-                  )}
-                </GoogleMap>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full bg-mairide-bg p-8 text-center">
-                  <MapPin className="w-12 h-12 text-mairide-secondary mb-4" />
-                  <h3 className="text-xl font-bold text-mairide-primary mb-2">
-                    {loadError ? "Maps Error" : "Maps Unavailable"}
-                  </h3>
-                  <p className="text-mairide-secondary max-w-xs mx-auto">
-                    {loadError ? loadError.message : "Please configure and activate your Google Maps API Key (Maps JavaScript API & Places API) in the Google Cloud Console."}
-                  </p>
-                </div>
-              )}
             </div>
           </div>
 
@@ -18402,7 +18509,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   useEffect(() => {
     let isMounted = true;
-    void fetchRecentRouteAlertReports()
+    void fetchRecentRouteAlertReports(profile)
       .then((reports) => {
         if (isMounted) {
           setRouteAlertReports(reports);
@@ -18431,6 +18538,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         const photoUrl = await uploadRouteAlertImage(payload.photoDataUrl, auth.currentUser.uid);
         const createdAt = new Date().toISOString();
         const reportDraft: Omit<RouteAlertReport, 'id'> = {
+          ...getInvestorDemoWriteFields(profile),
           bookingId: booking.id,
           rideId: booking.rideId,
           routeThreadKey: getBookingThreadKey(booking),
@@ -18487,7 +18595,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       const patched = patchBooking(prev);
       return getBookingRenderSignature(patched) === getBookingRenderSignature(prev) ? prev : patched;
     });
-  }, []);
+  }, [profile]);
 
   const applyStartedBookingState = useCallback((booking: Booking, session?: TripSession) => {
     const normalized = normalizeNegotiationBooking(booking);
@@ -18581,6 +18689,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return dedupeBookingsByThread(
       list
         .map((booking) => normalizeNegotiationBooking(booking))
+        .filter((booking) => isRecordVisibleForDemoScope(booking, profile))
         .filter(isDriverDashboardBooking)
         .sort(
           (a, b) =>
@@ -18588,7 +18697,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
             new Date((a as any).updatedAt || a.createdAt).getTime()
         )
     );
-  }, [profile.uid]);
+  }, [profile.email, profile.role, profile.uid]);
 
   const refreshDriverBookingState = useCallback(async (reason = 'manual') => {
     const normalized = await loadDriverBookingState();
@@ -18756,7 +18865,8 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         const snapshot = await getDocs(query(collection(db, 'rides'), where('driverId', '==', profile.uid)));
         if (!isMounted) return;
         const driverRides = snapshot.docs
-          .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }));
+          .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Ride) }))
+          .filter((ride) => isRecordVisibleForDemoScope(ride, profile));
         driverRideFeedRef.current = driverRides;
         const nextRoutes = driverRides
           .filter((ride) => String(ride.status || '') === 'available')
@@ -18776,7 +18886,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return () => {
       isMounted = false;
     };
-  }, [profile.uid]);
+  }, [profile.email, profile.role, profile.uid]);
 
   useEffect(() => {
     let isMounted = true;
@@ -18801,6 +18911,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
         if (!isMounted) return;
         setTravelerRideRequests(
           list
+            .filter((item) => isRecordVisibleForDemoScope(item, profile))
             .filter((item) => isRideWithinPlanningWindow(item))
             .sort((a, b) => new Date(a.departureTime || a.createdAt).getTime() - new Date(b.departureTime || b.createdAt).getTime())
         );
@@ -18820,7 +18931,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     return () => {
       isMounted = false;
     };
-  }, [profile.uid]);
+  }, [profile.email, profile.role, profile.uid]);
 
   useEffect(() => {
     let isMounted = true;
@@ -19262,8 +19373,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     const driverListedFare = Number(ridePayload.price || travelerListedFare || 0);
     const requestedOrigin = request.origin || ridePayload.origin || '';
     const requestedDestination = request.destination || ridePayload.destination || '';
+    const threadIsDemo = hasInvestorDemoDataFlag(request) || hasInvestorDemoDataFlag(ridePayload);
 
     return {
+      ...(threadIsDemo ? { isDemo: true, is_demo: true } : {}),
       id: bookingId,
       rideId,
       consumerId: request.consumerId,
@@ -19497,8 +19610,10 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     );
 
     const threadKey = getBookingThreadKey(seedBooking);
+    const seedIsDemo = hasInvestorDemoDataFlag(seedBooking);
     const threadBookings = snapshot.docs
       .map((snapshotDoc) => ({ id: snapshotDoc.id, ...(snapshotDoc.data() as Booking) }))
+      .filter((booking) => hasInvestorDemoDataFlag(booking) === seedIsDemo)
       .filter((booking) => booking.driverId === seedBooking.driverId)
       .filter((booking) => getBookingThreadKey(booking) === threadKey)
       .filter((booking) => ['pending', 'confirmed', 'negotiating'].includes(booking.status));
@@ -19548,6 +19663,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     }
 
     return {
+      ...getInvestorDemoWriteFields(profile),
       driverId: resolvedDriverId,
       driverName: profile.displayName,
       driverPhotoUrl: getResolvedUserPhoto(profile),
@@ -19581,6 +19697,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     const partialMatches: TravelerRideRequest[] = [];
 
     travelerRideRequests
+      .filter((request) => isRecordVisibleForDemoScope(request, profile))
       .filter((request) => request.status === 'open')
       .filter((request) => request.consumerId !== profile.uid)
       .filter((request) => isRideWithinPlanningWindow(request))
@@ -20501,41 +20618,37 @@ const finalizeDriverDashboardRazorpayPayment = async (
     }
   };
 
-  if (hasMapsIssue) {
-    return (
-      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-red-100">
-        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-gray-900 mb-2">Google Maps Error</h2>
-        <p className="text-gray-600 mb-4">
-          {loadError ? loadError.message : "Authentication Failure (Check API Key restrictions or billing)"}
-        </p>
-        <div className="text-sm bg-red-50 p-4 rounded-lg text-red-700 font-mono break-all text-left">
-          <p className="font-bold mb-2">Possible Causes:</p>
-          <ul className="list-disc ml-4 space-y-1">
-            <li><strong>RefererNotAllowedMapError:</strong> Your domain restriction in Google Cloud Console is incorrect.</li>
-            <li><strong>ApiNotActivatedMapError:</strong> Maps JavaScript API is not enabled.</li>
-          </ul>
-        </div>
-      </div>
-    );
-  }
-
+  const driverMapCenter = userLocation || { lat: 26.1433, lng: 91.7385 };
+  const driverMapReady = Boolean(
+    GOOGLE_MAPS_API_KEY &&
+    isLoaded &&
+    !hasMapsIssue &&
+    typeof window !== 'undefined' &&
+    window.google
+  );
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8">
+    <div className={cn(
+      activeTab === 'dashboard'
+        ? "relative min-h-[calc(100vh-4rem)] bg-mairide-bg"
+        : "max-w-4xl mx-auto p-4 md:p-8"
+    )}>
       {activeTab === 'dashboard' && (
         <>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
-            <div className="flex flex-col gap-2">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
-                {firstName}
-              </p>
-              <div>
-                <h1 className="text-4xl font-bold text-mairide-primary tracking-tight mb-2 uppercase">Driver Dashboard</h1>
-                <p className="text-mairide-secondary italic serif">Manage your empty leg journeys and earnings.</p>
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              <button 
+          <MapFirstDashboardShell
+            searchLabel="Where are you heading?"
+            searchSubtext={isOnline ? "Post an empty-leg offer from your route" : "Go online to start accepting live demand"}
+            topControlsOnly
+            showBottomSheet={false}
+            onSearchClick={() => {
+              if (!isOnline) {
+                void toggleOnline();
+                return;
+              }
+              setLinkedTravelerRequestId(null);
+              setShowOfferForm(true);
+            }}
+            primaryAction={(
+              <button
                 onClick={() => {
                   if (!isOnline) {
                     alert('Please switch online first to offer a ride.');
@@ -20545,40 +20658,86 @@ const finalizeDriverDashboardRazorpayPayment = async (
                   setShowOfferForm(true);
                 }}
                 className={cn(
-                  "px-6 py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 transition-all",
+                  "inline-flex h-12 items-center justify-center gap-2 rounded-full px-4 text-sm font-black shadow-xl transition-all sm:px-5",
                   isOnline
-                    ? "bg-mairide-accent text-white hover:bg-mairide-primary"
-                    : "bg-mairide-secondary text-mairide-primary cursor-not-allowed opacity-80"
+                    ? "bg-mairide-accent text-white shadow-mairide-accent/20 hover:bg-mairide-primary"
+                    : "cursor-not-allowed bg-mairide-secondary text-mairide-primary opacity-80"
                 )}
                 disabled={!isOnline}
               >
-                <Plus className="w-5 h-5" />
-                <span>{isOnline ? 'Offer a Ride' : 'Go Online to Offer'}</span>
+                <Plus className="h-5 w-5" />
+                Offer a Ride
               </button>
-              <button 
+            )}
+            secondaryAction={(
+              <button
                 onClick={toggleOnline}
                 className={cn(
-                  "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center space-x-3",
-                  isOnline ? "bg-green-600 text-white shadow-lg shadow-green-100" : "bg-mairide-secondary text-mairide-primary"
+                  "inline-flex h-12 items-center justify-center gap-2 rounded-full px-4 text-sm font-black shadow-xl transition-all sm:px-5",
+                  isOnline ? "bg-green-600 text-white shadow-green-900/20" : "bg-white text-mairide-primary"
                 )}
               >
-                <div className={cn("w-3 h-3 rounded-full", isOnline ? "bg-white animate-pulse" : "bg-mairide-primary")} />
-                <span>{isOnline ? 'You are Online' : 'Go Online'}</span>
+                <span className={cn("h-2.5 w-2.5 rounded-full", isOnline ? "bg-white animate-pulse" : "bg-mairide-primary")} />
+                {isOnline ? 'Online' : 'Offline'}
               </button>
-            </div>
-          </div>
+            )}
+            sheetTitle=""
+            sheetBody=""
+          >
+            {driverMapReady ? (
+              <GoogleMap
+                mapContainerStyle={{ width: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
+                center={driverMapCenter}
+                zoom={userLocation ? 13 : 7}
+                options={{
+                  disableDefaultUI: true,
+                  clickableIcons: false,
+                  scrollwheel: false,
+                  gestureHandling: 'greedy',
+                  zoomControl: true,
+                  styles: [
+                    { featureType: "poi", elementType: "all", stylers: [{ visibility: "off" }] },
+                    { featureType: "transit", elementType: "all", stylers: [{ visibility: "off" }] },
+                    { featureType: "road", elementType: "geometry", stylers: [{ saturation: -65 }, { lightness: 25 }] },
+                    { featureType: "water", elementType: "geometry", stylers: [{ color: "#d6e4e2" }] },
+                    { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#eef3f4" }] },
+                  ],
+                }}
+              >
+                {userLocation && (
+                  <Marker
+                    position={userLocation}
+                    icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/car.png' }}
+                    title="You"
+                  />
+                )}
+                {consumers.filter(c => c.location && typeof c.location.lat === 'number' && typeof c.location.lng === 'number').map(consumer => (
+                  <Marker
+                    key={consumer.uid}
+                    position={{ lat: consumer.location!.lat, lng: consumer.location!.lng }}
+                    icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
+                    title={consumer.displayName}
+                  />
+                ))}
+              </GoogleMap>
+            ) : (
+              <div className="h-full min-h-[calc(100vh-96px)] bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
+            )}
+          </MapFirstDashboardShell>
 
-          <RouteAlertsTicker
-            alerts={driverRouteAlerts}
-            title="Geo-tagged route watch"
-            actionLabel="Report Route Issue"
-            onAction={() => setShowDriverRouteAlertModal(true)}
-          />
+          {activeDriverSessionBooking && (
+            <RouteAlertsTicker
+              alerts={driverRouteAlerts}
+              title="Geo-tagged route watch"
+              actionLabel="Report Route Issue"
+              onAction={() => setShowDriverRouteAlertModal(true)}
+            />
+          )}
 
           {protectionSandboxVisible && <RideProtectionBadgeStrip />}
 
-          <div className="mb-8">
-            {activeDriverSessionBooking ? (
+          {activeDriverSessionBooking && (
+            <div className="mb-8">
               <div className="space-y-5">
                 <NegotiationCommunicationPanel
                   booking={activeDriverSessionBooking}
@@ -20593,16 +20752,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
                   onSubmit={handleDriverRouteAlertSubmit}
                 />
               </div>
-            ) : (
-              <div className="rounded-[28px] border border-mairide-secondary bg-white p-6 shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Ride session tools</p>
-                <h3 className="mt-3 text-xl font-black tracking-tight text-mairide-primary">Private translator and route reporting activate per live negotiation.</h3>
-                <p className="mt-2 text-sm text-mairide-secondary">
-                  Once a traveler is matched to your ride, mAIRide opens a private translated session for that booking and lets both sides publish geotagged photo-backed route reports without leaking messages to any other ride.
-                </p>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <RouteAlertComposerModal
             booking={showDriverRouteAlertModal ? driverRouteAlertDraftBooking : null}
@@ -20617,7 +20768,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             onClose={() => setShowDriverRouteAlertModal(false)}
           />
 
-          {showOfferForm && (
+          {showOfferForm && typeof document !== 'undefined' && createPortal((
             <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
               <motion.div 
                 initial={{ opacity: 0, y: 20, scale: 0.96 }}
@@ -20795,7 +20946,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
               </button>
               </motion.div>
             </div>
-          )}
+          ), document.body)}
 
           <AnimatePresence>
             {driverSmartMatchPrompt && (
@@ -21256,102 +21407,22 @@ const finalizeDriverDashboardRazorpayPayment = async (
             </div>
           </div>
 
-          <div className="mb-12 overflow-hidden rounded-[32px] border border-mairide-secondary bg-white shadow-xl">
-            <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-mairide-secondary/70">
-              <div>
-                <h2 className="text-xl font-bold text-mairide-primary flex items-center">
-                  <MapPin className="w-5 h-5 mr-2 text-mairide-accent" />
-                  Live Traveler Map
-                </h2>
-                <p className="text-sm text-mairide-secondary">
-                  See nearby traveler demand directly from your landing dashboard before posting a ride.
-                </p>
-              </div>
-              <div className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
-                {consumers.filter(c => c.location && typeof c.location.lat === 'number' && typeof c.location.lng === 'number').length} Travelers Visible
-              </div>
-            </div>
-            <div className="relative h-[280px] md:h-[360px]" style={{ contentVisibility: 'auto', containIntrinsicSize: '280px 360px' }}>
-              {GOOGLE_MAPS_API_KEY && isLoaded && window.google ? (
-                <GoogleMap
-                  mapContainerStyle={{ width: '100%', height: '100%' }}
-                  center={userLocation || { lat: 26.1433, lng: 91.7385 }}
-                  zoom={userLocation ? 14 : 7}
-                  options={{
-                    styles: [
-                      { "featureType": "all", "elementType": "geometry.fill", "stylers": [{ "weight": "2.00" }] },
-                      { "featureType": "all", "elementType": "geometry.stroke", "stylers": [{ "color": "#9c9c9c" }] },
-                      { "featureType": "all", "elementType": "labels.text", "stylers": [{ "visibility": "on" }] },
-                      { "featureType": "landscape", "elementType": "all", "stylers": [{ "color": "#f2f2f2" }] },
-                      { "featureType": "landscape", "elementType": "geometry.fill", "stylers": [{ "color": "#ffffff" }] },
-                      { "featureType": "landscape.man_made", "elementType": "geometry.fill", "stylers": [{ "color": "#ffffff" }] },
-                      { "featureType": "poi", "elementType": "all", "stylers": [{ "visibility": "off" }] },
-                      { "featureType": "road", "elementType": "all", "stylers": [{ "saturation": -100 }, { "lightness": 45 }] },
-                      { "featureType": "road", "elementType": "geometry.fill", "stylers": [{ "color": "#eeeeee" }] },
-                      { "featureType": "road", "elementType": "labels.text.fill", "stylers": [{ "color": "#7b7b7b" }] },
-                      { "featureType": "road", "elementType": "labels.text.stroke", "stylers": [{ "color": "#ffffff" }] },
-                      { "featureType": "road.highway", "elementType": "all", "stylers": [{ "visibility": "simplified" }] },
-                      { "featureType": "road.arterial", "elementType": "labels.icon", "stylers": [{ "visibility": "off" }] },
-                      { "featureType": "transit", "elementType": "all", "stylers": [{ "visibility": "off" }] },
-                      { "featureType": "water", "elementType": "all", "stylers": [{ "color": "#46bcec" }, { "visibility": "on" }] },
-                      { "featureType": "water", "elementType": "geometry.fill", "stylers": [{ "color": "#c8d7d4" }] },
-                      { "featureType": "water", "elementType": "labels.text.fill", "stylers": [{ "color": "#070707" }] },
-                      { "featureType": "water", "elementType": "labels.text.stroke", "stylers": [{ "color": "#ffffff" }] }
-                    ]
-                  }}
-                >
-                  {userLocation && (
-                    <Marker 
-                      position={userLocation} 
-                      icon={{
-                        url: 'https://maps.google.com/mapfiles/ms/icons/car.png',
-                        scaledSize: (isLoaded && window.google) ? new window.google.maps.Size(32, 32) : undefined
-                      }}
-                      title="You"
-                    />
-                  )}
-                  {consumers.filter(c => c.location && typeof c.location.lat === 'number' && typeof c.location.lng === 'number').map(consumer => (
-                    <Marker
-                      key={consumer.uid}
-                      position={{ lat: consumer.location!.lat, lng: consumer.location!.lng }}
-                      icon={{
-                        url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
-                        scaledSize: (isLoaded && window.google) ? new window.google.maps.Size(24, 24) : undefined
-                      }}
-                      title={consumer.displayName}
-                    />
-                  ))}
-                </GoogleMap>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full bg-mairide-bg p-8 text-center">
-                  <MapPin className="w-12 h-12 text-mairide-secondary mb-4" />
-                  <h3 className="text-xl font-bold text-mairide-primary mb-2">
-                    {loadError ? "Maps Error" : "Maps Unavailable"}
-                  </h3>
-                  <p className="text-mairide-secondary max-w-xs mx-auto">
-                    {loadError ? loadError.message : "Please configure and activate your Google Maps API Key (Maps JavaScript API & Places API) in the Google Cloud Console."}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-mairide-primary">Your Ride Offers</h2>
             </div>
 
-            <MyRides
-              profile={profile}
-              hiddenRideIds={suppressedRideIds}
-              refreshKey={rideOffersRefreshKey}
-              onRideRetired={(rideId) =>
-                setRetiredRideIds((prev) => (prev.includes(rideId) ? prev : [...prev, rideId]))
-              }
-            />
-          </div>
-        </>
-      )}
+	            <MyRides
+	              profile={profile}
+	              hiddenRideIds={suppressedRideIds}
+	              refreshKey={rideOffersRefreshKey}
+	              onRideRetired={(rideId) =>
+	                setRetiredRideIds((prev) => (prev.includes(rideId) ? prev : [...prev, rideId]))
+	              }
+	            />
+	          </div>
+	        </>
+	      )}
 
       {activeTab === 'requests' && <BookingRequests profile={profile} />}
       {activeTab === 'history' && <DriverHistory profile={profile} />}
@@ -21461,6 +21532,13 @@ const ChatbotCore = ({
 
   const getLanguageLabel = (language: string) =>
     languageOptions.find((item) => item.value === language)?.label || 'English';
+
+  useEffect(() => {
+    if (!canOpenAdminTab(activeTab)) {
+      setActiveTab('dashboard');
+      setIsB2BNavOpen(false);
+    }
+  }, [activeTab, canOpenAdminTab]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -24340,13 +24418,24 @@ const AdminDashboard = ({
   type UsersInsightView = 'drivers' | 'travelers' | 'onlineDrivers' | 'onlineTravelers' | 'activeTrips' | 'openOffers' | null;
   type AdminTab = 'dashboard' | 'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b' | 'maipay';
   const adminTabIds: AdminTab[] = ['dashboard', 'users', 'support', 'verification', 'profile', 'rides', 'revenue', 'transactions', 'config', 'analytics', 'security', 'map', 'capacity', 'mobile', 'b2b', 'maipay'];
+  const investorDemoAdminTabs: AdminTab[] = ['dashboard', 'map', 'capacity', 'analytics'];
   const resolveAdminTab = (value: unknown): AdminTab =>
     adminTabIds.includes(value as AdminTab) ? (value as AdminTab) : 'dashboard';
+  const isInvestorDemoMode = useMemo(() => resolveInvestorDemoMode(), []);
+  const isPermanentDemoAdmin = String(profile.email || '').trim().toLowerCase() === 'demo.admin@mairide.in';
+  const isAdminDemoReadOnly = isPermanentDemoAdmin || (isInvestorDemoMode && effectiveAdminRole === 'super_admin');
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+  const canOpenAdminTab = useCallback((tab: AdminTab) => {
+    return !isAdminDemoReadOnly || investorDemoAdminTabs.includes(tab);
+  }, [isAdminDemoReadOnly]);
+  const selectAdminTab = useCallback((tab: AdminTab) => {
+    if (!canOpenAdminTab(tab)) return;
+    setActiveTab(tab);
+  }, [canOpenAdminTab]);
   const adminHistoryInitializedRef = useRef(false);
   const adminHistoryPopRef = useRef(false);
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -24496,8 +24585,8 @@ const AdminDashboard = ({
 
       if (state.mairideAdminShell) {
         const nextTab = resolveAdminTab(state.adminTab);
-        setActiveTab(nextTab);
-        setIsB2BNavOpen(nextTab === 'b2b');
+        setActiveTab(canOpenAdminTab(nextTab) ? nextTab : 'dashboard');
+        setIsB2BNavOpen(canOpenAdminTab(nextTab) && nextTab === 'b2b');
         return;
       }
 
@@ -24516,7 +24605,7 @@ const AdminDashboard = ({
 
     window.addEventListener('popstate', handleAdminPopState);
     return () => window.removeEventListener('popstate', handleAdminPopState);
-  }, []);
+  }, [canOpenAdminTab]);
 
   useEffect(() => {
     let active = true;
@@ -25330,15 +25419,18 @@ const AdminDashboard = ({
             { id: 'support', label: 'Support', icon: LifeBuoy, roles: ['super_admin', 'support'] },
             { id: 'security', label: 'Security', icon: Lock, roles: ['super_admin'] },
             { id: 'profile', label: 'Profile', icon: UserIcon, roles: ['super_admin', 'support', 'finance', 'compliance'] },
-          ].filter(item => item.roles.includes(effectiveAdminRole)).map(item => {
+          ]
+            .filter(item => item.roles.includes(effectiveAdminRole))
+            .filter(item => canOpenAdminTab(item.id as AdminTab))
+            .map(item => {
             if (item.id === 'b2b') {
               return (
                 <div key={item.id} className="space-y-2">
-                  <button
-                    onClick={() => {
-                      setActiveTab('b2b');
-                      setIsB2BNavOpen((current) => (activeTab === 'b2b' ? !current : true));
-                    }}
+	                  <button
+	                    onClick={() => {
+	                      selectAdminTab('b2b');
+	                      setIsB2BNavOpen((current) => (activeTab === 'b2b' ? !current : true));
+	                    }}
                     className={cn(
                       "w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all group relative",
                       activeTab === item.id
@@ -25364,9 +25456,9 @@ const AdminDashboard = ({
                         return (
                           <button
                             key={sectionItem.id}
-                            onClick={() => {
-                              setActiveTab('b2b');
-                              setActiveB2BSection(sectionItem.id as 'hotels' | 'fleets');
+	                            onClick={() => {
+	                              selectAdminTab('b2b');
+	                              setActiveB2BSection(sectionItem.id as 'hotels' | 'fleets');
                               if (window.innerWidth < 1024) {
                                 setIsSidebarOpen(false);
                               }
@@ -25391,10 +25483,10 @@ const AdminDashboard = ({
 
             return (
               <button
-                key={item.id}
-                onClick={() => {
-                  setActiveTab(item.id as any);
-                  if (item.id !== 'b2b') {
+	                key={item.id}
+	                onClick={() => {
+	                  selectAdminTab(item.id as AdminTab);
+	                  if (item.id !== 'b2b') {
                     setIsB2BNavOpen(false);
                   }
                   if (window.innerWidth < 1024) {
@@ -25478,6 +25570,14 @@ const AdminDashboard = ({
 
             {activeTab === 'dashboard' && (
               <div className="space-y-8">
+                {isAdminDemoReadOnly && (
+                  <div className="rounded-[28px] border border-orange-200 bg-orange-50 px-6 py-5 shadow-sm">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-orange-700">Investor Demo Mode</p>
+                    <p className="mt-2 text-sm leading-6 text-orange-900">
+                      This admin session is read-only. Monitoring dashboards remain visible, while approvals, user edits, financial controls, and system configuration panels are hidden from this preview.
+                    </p>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                   {[
                     {
@@ -25485,46 +25585,46 @@ const AdminDashboard = ({
                       value: formatCurrency(adminDriverWalletMarketLiability),
                       helper: `${formatCurrency(adminWalletAvailableFloat)} active · ${formatCurrency(adminWalletPendingPayouts)} pending payouts`,
                       icon: Wallet,
-                      tone: 'bg-red-50 text-red-600',
-                      actionLabel: 'Open MaiPay desk',
-                      onClick: () => setActiveTab('maipay' as typeof activeTab),
-                    },
+	                      tone: 'bg-red-50 text-red-600',
+	                      actionLabel: 'Open MaiPay desk',
+	                      onClick: () => selectAdminTab('maipay' as typeof activeTab),
+	                    },
                     {
                       label: 'Active / Live rides',
                       value: activeTrips.length + openRideOffers.length,
                       helper: `${activeTrips.length} active trips · ${openRideOffers.length} open offers`,
                       icon: Car,
-                      tone: 'bg-orange-50 text-orange-600',
-                      actionLabel: 'Open rides desk',
-                      onClick: () => setActiveTab('rides' as typeof activeTab),
-                    },
+	                      tone: 'bg-orange-50 text-orange-600',
+	                      actionLabel: 'Open rides desk',
+	                      onClick: () => selectAdminTab('rides' as typeof activeTab),
+	                    },
                     {
                       label: 'Pending approvals desk',
                       value: pendingVerificationDrivers.length + pendingPartnerCount,
                       helper: `${pendingVerificationDrivers.length} driver verifications · ${pendingPartnerCount} partner approvals`,
                       icon: ShieldCheck,
-                      tone: 'bg-blue-50 text-blue-600',
-                      actionLabel: 'Review approvals',
-                      onClick: () => setActiveTab('verification' as typeof activeTab),
-                    },
+	                      tone: 'bg-blue-50 text-blue-600',
+	                      actionLabel: 'Review approvals',
+	                      onClick: () => selectAdminTab('verification' as typeof activeTab),
+	                    },
                     {
                       label: 'Total revenue',
                       value: formatCurrency(adminRevenueTotal),
                       helper: `GST captured ${formatCurrency(adminGstTotal)}`,
                       icon: IndianRupee,
-                      tone: 'bg-emerald-50 text-emerald-600',
-                      actionLabel: 'Open revenue',
-                      onClick: () => setActiveTab('revenue' as typeof activeTab),
-                    },
+	                      tone: 'bg-emerald-50 text-emerald-600',
+	                      actionLabel: 'Open revenue',
+	                      onClick: () => selectAdminTab('revenue' as typeof activeTab),
+	                    },
                     {
                       label: 'Capacity & system health',
                       value: `${liveTripSessions.length}`,
                       helper: `${staleTripSessions.length} stale · ${offlineTripSessions.length} offline · ${antiSpoofAlerts} anti-spoof alerts`,
                       icon: TrendingUp,
-                      tone: 'bg-purple-50 text-purple-600',
-                      actionLabel: 'Inspect health',
-                      onClick: () => setActiveTab('capacity' as typeof activeTab),
-                    },
+	                      tone: 'bg-purple-50 text-purple-600',
+	                      actionLabel: 'Inspect health',
+	                      onClick: () => selectAdminTab('capacity' as typeof activeTab),
+	                    },
                   ].map((card) => (
                     <button
                       key={card.label}
@@ -25556,9 +25656,9 @@ const AdminDashboard = ({
                       </div>
                     </div>
                     <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('mobile' as typeof activeTab)}
+	                      <button
+	                        type="button"
+	                        onClick={() => selectAdminTab('mobile' as typeof activeTab)}
                         className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5 text-left transition-all hover:bg-white hover:shadow-md"
                       >
                         <div className="flex items-center gap-3">
@@ -25572,9 +25672,9 @@ const AdminDashboard = ({
                         </div>
                         <p className="mt-4 text-sm text-mairide-secondary">Review Android / iOS rollout, build details, and app delivery posture.</p>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('transactions' as typeof activeTab)}
+	                      <button
+	                        type="button"
+	                        onClick={() => selectAdminTab('transactions' as typeof activeTab)}
                         className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5 text-left transition-all hover:bg-white hover:shadow-md"
                       >
                         <div className="flex items-center gap-3">
@@ -27490,7 +27590,10 @@ const App = () => {
   });
   const [notRegisteredError, setNotRegisteredError] = useState(false);
   const [referralCodeInput, setReferralCodeInput] = useState('');
-  const [role, setRole] = useState<'consumer' | 'driver'>('consumer');
+  const [role, setRole] = useState<'consumer' | 'driver'>(() => {
+    const demoRole = resolveInvestorDemoRole();
+    return demoRole === 'driver' ? 'driver' : 'consumer';
+  });
   const [uiLanguage, setUiLanguage] = useState<string>(() => {
     if (typeof window === 'undefined') return 'en';
     const sessionLanguage = getSharedPreferenceValue(UI_LANGUAGE_SESSION_KEY);

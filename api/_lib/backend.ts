@@ -426,6 +426,35 @@ async function getUserProfileByPhone(phone: string) {
   return data;
 }
 
+const INVESTOR_DEMO_DATA_EMAILS = new Set([
+  "demo.traveler@mairide.in",
+  "demo.driver@mairide.in",
+]);
+
+function normalizeDemoEmail(value?: string | null) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isInvestorDemoDataProfile(profile: any, user?: { email?: string | null }) {
+  const profileData = (profile?.data as Record<string, any>) || {};
+  const email = normalizeDemoEmail(profile?.email || profileData.email || user?.email);
+  const role = String(profile?.role || profileData.role || "").trim().toLowerCase();
+  return INVESTOR_DEMO_DATA_EMAILS.has(email) && (role === "consumer" || role === "traveler" || role === "driver");
+}
+
+function hasInvestorDemoDataFlag(record: any) {
+  const data = (record?.data as Record<string, any>) || record || {};
+  return record?.isDemo === true || record?.is_demo === true || data?.isDemo === true || data?.is_demo === true;
+}
+
+function withInvestorDemoDataScope<T extends Record<string, any>>(payload: T, isDemo: boolean): T {
+  return isDemo ? ({ ...payload, isDemo: true, is_demo: true } as T) : payload;
+}
+
+function isVisibleForInvestorDemoScope(record: any, isDemoActor: boolean) {
+  return isDemoActor ? hasInvestorDemoDataFlag(record) : !hasInvestorDemoDataFlag(record);
+}
+
 async function findAuthUser(uid: string, email?: string | null) {
   const supabaseAdmin = getSupabaseAdmin();
 
@@ -1257,6 +1286,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
     if (!isActive(actorProfile.status || profileData.status)) {
       return res.status(403).json({ error: "Driver account is not active." });
     }
+    const actorIsDemo = isInvestorDemoDataProfile(actorProfile);
 
     let linkedTravelerRequestId = String(payload.linkedTravelerRequestId || "").trim();
     let linkedBookingId: string | null = null;
@@ -1271,6 +1301,9 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
 
       if (requestReadError) throw requestReadError;
       if (!requestRow) {
+        return res.status(404).json({ error: "Traveler request not found." });
+      }
+      if (!isVisibleForInvestorDemoScope(requestRow, actorIsDemo)) {
         return res.status(404).json({ error: "Traveler request not found." });
       }
 
@@ -1342,7 +1375,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       payload.driverRating || profileData.reviewStats?.averageRating || profileData.driverDetails?.rating || 0
     );
 
-    const rideData = {
+    const rideData = withInvestorDemoDataScope({
       id: rideId,
       driverId: actorId,
       driverName,
@@ -1365,7 +1398,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
       linkedTravelerRequestId: linkedTravelerRequestId || undefined,
       createdAt: now,
       updatedAt: now,
-    };
+    }, actorIsDemo);
 
     const { error: insertRideError } = await getSupabaseAdmin().from("rides").insert({
       id: rideId,
@@ -1385,7 +1418,9 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
         .order("created_at", { ascending: true });
       if (openRequestError) throw openRequestError;
 
-      const autoMatch = (openRequestRows || []).find((requestRow: any) => {
+      const autoMatch = (openRequestRows || []).filter((requestRow: any) =>
+        isVisibleForInvestorDemoScope(requestRow, actorIsDemo)
+      ).find((requestRow: any) => {
         const requestData = requestRow.data || {};
         if (String(requestRow.consumer_id || requestData.consumerId || "") === actorId) return false;
         if (requestData.departureDay && rideData.departureDay && requestData.departureDay !== rideData.departureDay) return false;
@@ -1410,7 +1445,8 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
         const listedFare = Number(requestData.fare);
         const requestedFare = Number.isFinite(listedFare) && listedFare > 0 ? listedFare : price;
         const driverListedFare = Number.isFinite(price) && price > 0 ? price : requestedFare;
-        const bookingThreadData = {
+        const threadIsDemo = actorIsDemo || hasInvestorDemoDataFlag(linkedRequestRow);
+        const bookingThreadData = withInvestorDemoDataScope({
           ...requestData,
           rideId,
           consumerId: String(linkedRequestRow.consumer_id || requestData.consumerId || "").trim(),
@@ -1458,7 +1494,7 @@ export async function handleUserCreateRide(req: ReqLike, res: ResLike) {
           rideRetired: false,
           updatedAt: now,
           createdAt: requestData.createdAt || linkedRequestRow.created_at || now,
-        };
+        }, threadIsDemo);
         const { data: linkedRows, error: linkedUpdateError } = await getSupabaseAdmin()
           .from("bookings")
           .update({
@@ -1576,6 +1612,8 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
     if (user.id !== driverId) {
       return res.status(403).json({ error: "Forbidden" });
     }
+    const actorProfile = await getUserProfile(user.id);
+    const actorIsDemo = isInvestorDemoDataProfile(actorProfile, user);
 
     const supabaseAdmin = getSupabaseAdmin();
     const { data: requestRow, error: requestError } = await supabaseAdmin
@@ -1586,6 +1624,9 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
 
     if (requestError) throw requestError;
     if (!requestRow) {
+      return res.status(404).json({ error: "Traveler request not found." });
+    }
+    if (!isVisibleForInvestorDemoScope(requestRow, actorIsDemo)) {
       return res.status(404).json({ error: "Traveler request not found." });
     }
 
@@ -1628,7 +1669,12 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
       threadData.negotiatedFare || driverListedFare || listedFare || 0
     );
 
-    const nextData = {
+    const threadIsDemo =
+      actorIsDemo ||
+      hasInvestorDemoDataFlag(requestRow) ||
+      hasInvestorDemoDataFlag(threadData) ||
+      hasInvestorDemoDataFlag(ridePayload);
+    const nextData = withInvestorDemoDataScope({
       ...requestData,
       ...threadData,
       id: requestId,
@@ -1678,7 +1724,7 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
         threadData.departureTime || requestData.departureTime || ridePayload.departureTime || now,
       createdAt: requestData.createdAt || requestRow.created_at || now,
       updatedAt: now,
-    };
+    }, threadIsDemo);
 
     const { data: updatedRow, error: updateError } = await supabaseAdmin
       .from("bookings")
@@ -1696,6 +1742,7 @@ export async function handleUserStartMatchedTravelerNegotiation(req: ReqLike, re
     if (updateError) throw updateError;
 
     await setRideStatusFromBookingState(supabaseAdmin, rideId, "negotiating", {
+      ...(threadIsDemo ? { isDemo: true, is_demo: true } : {}),
       linkedTravelerRequestId: requestId,
       matchedBookingId: requestId,
       negotiationStatus: "pending",
@@ -1843,10 +1890,12 @@ export async function handleUserListBookings(req: any, res: ResLike) {
       "consumer";
 
     let currentUserId = "";
+    let currentUser: any = null;
 
     if (process.env.NODE_ENV === "production") {
       try {
         const user = await verifyTokenFromHeader(authHeader);
+        currentUser = user;
         currentUserId = user.id;
       } catch (error: any) {
         return res.status(error?.status || 401).json({
@@ -1888,8 +1937,13 @@ export async function handleUserListBookings(req: any, res: ResLike) {
       throw error;
     }
 
+    const currentProfile = currentUserId ? await getUserProfile(currentUserId) : null;
+    const currentIsDemo = isInvestorDemoDataProfile(currentProfile, currentUser);
+
     return res.status(200).json({
-      bookings: (data || []).map(mapBookingRow),
+      bookings: (data || [])
+        .filter((row: any) => isVisibleForInvestorDemoScope(row, currentIsDemo))
+        .map(mapBookingRow),
     });
   } catch (error: any) {
     console.error("Error fetching bookings:", error);
@@ -1994,11 +2048,12 @@ export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike
     if (!isActive(actorProfile.status || profileData.status)) {
       return res.status(403).json({ error: "Traveler account is not active." });
     }
+    const actorIsDemo = isInvestorDemoDataProfile(actorProfile);
 
     const requestId = crypto.randomUUID();
     const now = new Date().toISOString();
     const departureTime = String(payload.departureTime || "").trim() || now;
-    const requestData = {
+    const requestData = withInvestorDemoDataScope({
       id: requestId,
       consumerId: actorId,
       consumerName:
@@ -2027,7 +2082,7 @@ export async function handleUserCreateTravelerRequest(req: ReqLike, res: ResLike
       createdAt: now,
       updatedAt: now,
       recordType: "traveler_ride_request",
-    };
+    }, actorIsDemo);
 
     const { error: insertRequestError } = await getSupabaseAdmin().from("bookings").insert({
       id: requestId,
@@ -2073,10 +2128,12 @@ export async function handleUserListTravelerRequests(req: any, res: ResLike) {
       "open";
     let currentUserId =
       req.body?.userId || req.query?.userId || url?.searchParams.get("userId") || "";
+    let currentUser: any = null;
 
     if (process.env.NODE_ENV === "production") {
       try {
         const user = await verifyTokenFromHeader(authHeader);
+        currentUser = user;
         currentUserId = user.id;
       } catch (error: any) {
         return res.status(error?.status || 401).json({
@@ -2119,7 +2176,11 @@ export async function handleUserListTravelerRequests(req: any, res: ResLike) {
       throw error;
     }
 
-    const requests = (data || []).map(mapTravelerRequestRow);
+    const currentProfile = currentUserId ? await getUserProfile(currentUserId) : null;
+    const currentIsDemo = isInvestorDemoDataProfile(currentProfile, currentUser);
+    const requests = (data || [])
+      .filter((row: any) => isVisibleForInvestorDemoScope(row, currentIsDemo))
+      .map(mapTravelerRequestRow);
 
     return res.status(200).json({
       requests:
@@ -2194,10 +2255,27 @@ export async function handleUserCancelTravelerRequest(req: ReqLike, res: ResLike
   }
 }
 
-export async function handleUserSearchRides(_req: ReqLike, res: ResLike) {
+export async function handleUserSearchRides(req: ReqLike, res: ResLike) {
   try {
     const admin = getSupabaseAdmin();
-    const [{ data: rideRows, error: ridesError }, { data: driverRows, error: driversError }] = await Promise.all([
+    const authHeader = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+    let requesterIsDemo = false;
+    if (authHeader) {
+      try {
+        const user = await verifyTokenFromHeader(authHeader);
+        const profile = await getUserProfile(user.id);
+        requesterIsDemo = isInvestorDemoDataProfile(profile, user);
+      } catch {
+        requesterIsDemo = false;
+      }
+    }
+    const [
+      { data: rideRows, error: ridesError },
+      { data: driverRows, error: driversError },
+      { data: bookingRows, error: bookingsError },
+    ] = await Promise.all([
       admin
         .from("rides")
         .select("id, driver_id, status, data, created_at, updated_at")
@@ -2205,10 +2283,15 @@ export async function handleUserSearchRides(_req: ReqLike, res: ResLike) {
       admin
         .from("users")
         .select("id, role, status, onboarding_complete, verification_status, data"),
+      admin
+        .from("bookings")
+        .select("*")
+        .eq("status", "confirmed"),
     ]);
 
     if (ridesError) throw ridesError;
     if (driversError) throw driversError;
+    if (bookingsError) throw bookingsError;
 
     const approvedDriverIds = new Set(
       (driverRows || [])
@@ -2231,6 +2314,7 @@ export async function handleUserSearchRides(_req: ReqLike, res: ResLike) {
     );
 
     const rides = (rideRows || [])
+      .filter((row: any) => isVisibleForInvestorDemoScope(row, requesterIsDemo))
       .filter((row) => approvedDriverIds.has(row.driver_id || row.data?.driverId))
       .map((row: any) => ({
         ...(row.data || {}),
@@ -2241,7 +2325,19 @@ export async function handleUserSearchRides(_req: ReqLike, res: ResLike) {
         updatedAt: row.updated_at || row.data?.updatedAt,
       }));
 
-    return res.status(200).json({ rides });
+    const bookings = (bookingRows || [])
+      .filter((row: any) => isVisibleForInvestorDemoScope(row, requesterIsDemo))
+      .map((row: any) => {
+        const data = (row.data as Record<string, any>) || {};
+        return {
+          id: row.id,
+          rideId: row.ride_id || data.rideId || null,
+          status: row.status || data.status || null,
+          rideLifecycleStatus: data.rideLifecycleStatus || null,
+        };
+      });
+
+    return res.status(200).json({ rides, bookings });
   } catch (error: any) {
     console.error("Error searching rides:", error);
     return res.status(error?.status || 500).json({

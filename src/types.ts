@@ -160,6 +160,8 @@ export interface ChatMessage {
 
 export interface Ride {
   id: string;
+  isDemo?: boolean;
+  is_demo?: boolean;
   driverId: string;
   driverName: string;
   driverPhotoUrl?: string;
@@ -189,6 +191,8 @@ export interface Ride {
 
 export interface TravelerRideRequest {
   id: string;
+  isDemo?: boolean;
+  is_demo?: boolean;
   consumerId: string;
   consumerName: string;
   consumerPhone?: string;
@@ -468,6 +472,8 @@ export interface BookingCommunicationMessage {
 
 export interface RouteAlertReport {
   id: string;
+  isDemo?: boolean;
+  is_demo?: boolean;
   bookingId?: string;
   rideId?: string;
   routeThreadKey: string;
@@ -490,6 +496,8 @@ export interface RouteAlertReport {
 
 export interface Booking {
   id: string;
+  isDemo?: boolean;
+  is_demo?: boolean;
   rideId: string;
   ride_id?: string;
   consumerId: string;

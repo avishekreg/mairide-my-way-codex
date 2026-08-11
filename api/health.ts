@@ -72,6 +72,11 @@ function isApprovedDriver(row: any) {
   );
 }
 
+function hasInvestorDemoDataFlag(record: any) {
+  const data = (record?.data as Record<string, any>) || record || {};
+  return record?.isDemo === true || record?.is_demo === true || data?.isDemo === true || data?.is_demo === true;
+}
+
 function normalizePhone(phoneNumber: unknown) {
   return String(phoneNumber || "").replace(/[^\d]/g, "");
 }
@@ -281,6 +286,7 @@ export default async function handler(req: any, res: any) {
     const approvedDriverIds = new Set((driverRows || []).filter(isApprovedDriver).map((row: any) => row.id));
 
     const rides = (rideRows || [])
+      .filter((row: any) => !hasInvestorDemoDataFlag(row))
       .filter((row: any) => {
         const data = (row.data as Record<string, any>) || {};
         return approvedDriverIds.has(row.driver_id || data.driverId);
@@ -297,7 +303,7 @@ export default async function handler(req: any, res: any) {
         };
       });
 
-    const bookings = (bookingRows || []).map((row: any) => {
+    const bookings = (bookingRows || []).filter((row: any) => !hasInvestorDemoDataFlag(row)).map((row: any) => {
       const data = (row.data as Record<string, any>) || {};
       return {
         id: row.id,
