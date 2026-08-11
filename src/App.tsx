@@ -7692,6 +7692,7 @@ const Navbar = ({
           { id: 'search', label: 'Dashboard' },
           { id: 'history', label: 'My Bookings' },
           { id: 'wallet', label: 'Wallet' },
+          { id: 'travel', label: 'Train & Flight Status' },
           { id: 'support', label: 'Support' },
           { id: 'profile', label: 'Profile' },
         ];
@@ -11298,17 +11299,23 @@ const MapFirstDashboardShell = ({
   children,
   topControlsOnly = false,
   showBottomSheet = true,
+  compactSearchBar = false,
+  compactBottomSheet = false,
+  sheetContent,
 }: {
   searchLabel: string;
   searchSubtext: string;
   onSearchClick?: () => void;
   primaryAction?: React.ReactNode;
   secondaryAction?: React.ReactNode;
-  sheetTitle: string;
-  sheetBody: string;
+  sheetTitle?: string;
+  sheetBody?: string;
   children: React.ReactNode;
   topControlsOnly?: boolean;
   showBottomSheet?: boolean;
+  compactSearchBar?: boolean;
+  compactBottomSheet?: boolean;
+  sheetContent?: React.ReactNode;
 }) => (
   <section className="relative -mx-4 -mt-4 mb-8 overflow-hidden bg-mairide-primary md:-mx-8 md:-mt-8">
     <div className="relative min-h-[calc(100vh-96px)]">
@@ -11323,6 +11330,18 @@ const MapFirstDashboardShell = ({
           <div className="pointer-events-auto absolute left-1/2 top-0 z-20 flex w-fit max-w-full -translate-x-1/2 flex-row items-center justify-center gap-2 whitespace-nowrap rounded-full bg-white/90 px-3 py-1 shadow-lg shadow-mairide-primary/10 backdrop-blur-md">
             {primaryAction}
             {secondaryAction}
+          </div>
+        ) : compactSearchBar ? (
+          <div className="pointer-events-auto mx-auto flex w-fit max-w-full items-center justify-center gap-2 rounded-full bg-white/92 px-2 py-2 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl">
+            <button
+              type="button"
+              onClick={onSearchClick}
+              className="inline-flex min-w-0 items-center gap-3 rounded-full px-4 py-3 text-left transition-colors hover:bg-mairide-bg"
+            >
+              <Search className="h-5 w-5 shrink-0 text-mairide-primary" />
+              <span className="truncate text-base font-black tracking-tight text-mairide-primary">{searchLabel}</span>
+            </button>
+            {primaryAction}
           </div>
         ) : (
           <div className="pointer-events-auto flex items-center gap-3 rounded-[28px] border border-mairide-secondary bg-white/95 p-3 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl">
@@ -11348,21 +11367,26 @@ const MapFirstDashboardShell = ({
       {showBottomSheet && (
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-3 md:px-8 md:pb-6">
         <div
-          className="pointer-events-auto mx-auto max-h-[46vh] max-w-3xl overflow-y-auto overscroll-contain rounded-t-[34px] border border-mairide-secondary bg-white/96 p-5 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl [touch-action:pan-y] md:rounded-[34px]"
+          className={cn(
+            "pointer-events-auto mx-auto max-w-3xl overflow-y-auto overscroll-contain rounded-t-[34px] border border-mairide-secondary bg-white/96 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl [touch-action:pan-y] md:rounded-[34px]",
+            compactBottomSheet ? "h-[20vh] max-h-[20vh] p-4" : "max-h-[46vh] p-5"
+          )}
           onWheel={(event) => event.stopPropagation()}
           onTouchMove={(event) => event.stopPropagation()}
         >
-          <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-mairide-secondary/50" />
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-2xl font-black tracking-tight text-mairide-primary">{sheetTitle}</h2>
-              <p className="mt-1 text-sm leading-relaxed text-mairide-secondary">{sheetBody}</p>
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-mairide-secondary/50" />
+          {sheetContent || (
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                {sheetTitle && <h2 className="text-2xl font-black tracking-tight text-mairide-primary">{sheetTitle}</h2>}
+                {sheetBody && <p className="mt-1 text-sm leading-relaxed text-mairide-secondary">{sheetBody}</p>}
+              </div>
+              <div className="flex shrink-0 flex-col gap-2 sm:hidden">
+                {primaryAction}
+                {secondaryAction}
+              </div>
             </div>
-            <div className="flex shrink-0 flex-col gap-2 sm:hidden">
-              {primaryAction}
-              {secondaryAction}
-            </div>
-          </div>
+          )}
         </div>
       </div>
       )}
@@ -15053,7 +15077,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [partialRides, setPartialRides] = useState<any[]>([]);
   const [dashboardBookings, setDashboardBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'search' | 'history' | 'wallet' | 'support' | 'profile'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'history' | 'wallet' | 'travel' | 'support' | 'profile'>('search');
   const [paymentBooking, setPaymentBooking] = useState<Booking | null>(null);
   const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
@@ -15557,8 +15581,8 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       const customEvent = event as CustomEvent<{ role?: string; tab?: string }>;
       const targetTab = customEvent.detail?.tab;
       if (!targetTab) return;
-      if (['search', 'history', 'wallet', 'support', 'profile'].includes(targetTab)) {
-        setActiveTab(targetTab as 'search' | 'history' | 'wallet' | 'support' | 'profile');
+      if (['search', 'history', 'wallet', 'travel', 'support', 'profile'].includes(targetTab)) {
+        setActiveTab(targetTab as 'search' | 'history' | 'wallet' | 'travel' | 'support' | 'profile');
       }
     };
     window.addEventListener(APP_NAV_HOME_EVENT, handleHomeNavigation);
@@ -17275,19 +17299,39 @@ const finalizeTravelerDashboardRazorpayPayment = async (
         <>
           <MapFirstDashboardShell
             searchLabel="Where to?"
-            searchSubtext="Choose a destination to request an empty-leg ride"
+            searchSubtext=""
             onSearchClick={() => setShowRequestForm(true)}
+            compactSearchBar
+            compactBottomSheet
             primaryAction={(
               <button
                 onClick={() => setShowRequestForm(true)}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-mairide-accent px-5 py-3 text-sm font-bold text-white shadow-lg shadow-mairide-accent/20 transition-all hover:bg-mairide-primary"
+                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full bg-mairide-accent px-5 py-3 text-sm font-bold text-white shadow-lg shadow-mairide-accent/20 transition-all hover:bg-mairide-primary"
               >
                 <Plus className="h-5 w-5" />
                 Request a Ride
               </button>
             )}
-            sheetTitle="Find your next ride"
-            sheetBody="Set your route and fare once. Matching drivers, route alerts, and negotiations continue below without changing the booking logic."
+            sheetContent={(
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('traveler-available-rides')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className="rounded-2xl bg-mairide-bg px-4 py-3 text-left transition-colors hover:bg-orange-50"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Available Rides</p>
+                  <p className="mt-1 text-2xl font-black text-mairide-primary">{rides.length + partialRides.length}</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('traveler-my-requests')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className="rounded-2xl bg-mairide-bg px-4 py-3 text-left transition-colors hover:bg-orange-50"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">My Requests</p>
+                  <p className="mt-1 text-2xl font-black text-mairide-primary">{travelerRequests.filter(isUnifiedRideActive).length}</p>
+                </button>
+              </div>
+            )}
           >
             {travelerMapReady ? (
               <GoogleMap
@@ -17333,22 +17377,17 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             )}
           </MapFirstDashboardShell>
 
-          <RouteAlertsTicker
-            alerts={travelerRouteAlerts}
-            title="Geo-tagged route watch"
-            actionLabel="Report Route Issue"
-            onAction={() => setShowTravelerRouteAlertModal(true)}
-          />
-
           {protectionSandboxVisible && <RideProtectionBadgeStrip />}
 
-          {travelTrackingAccessAllowed && (
-            <PassengerTravelTrackingPanel profile={profile} config={config || {}} />
-          )}
-
-          <div className="mb-8">
-            {activeTravelerSessionBooking ? (
-              <div className="space-y-5">
+          {activeTravelerSessionBooking && (
+            <>
+              <RouteAlertsTicker
+                alerts={travelerRouteAlerts}
+                title="Geo-tagged route watch"
+                actionLabel="Report Route Issue"
+                onAction={() => setShowTravelerRouteAlertModal(true)}
+              />
+              <div className="mb-8 space-y-5">
                 <NegotiationCommunicationPanel
                   booking={activeTravelerSessionBooking}
                   viewerRole="consumer"
@@ -17362,16 +17401,8 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                   onSubmit={handleTravelerRouteAlertSubmit}
                 />
               </div>
-            ) : (
-              <div className="rounded-[28px] border border-mairide-secondary bg-white p-6 shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Ride session tools</p>
-                <h3 className="mt-3 text-xl font-black tracking-tight text-mairide-primary">Private translator and route reporting unlock after a match.</h3>
-                <p className="mt-2 text-sm text-mairide-secondary">
-                  Once a driver and traveler are linked to the same live booking, mAIRide opens a private translated communication thread and lets both sides post geotagged route evidence for that ride only.
-                </p>
-              </div>
-            )}
-          </div>
+            </>
+          )}
 
           <RouteAlertComposerModal
             booking={showTravelerRouteAlertModal ? travelerRouteAlertDraftBooking : null}
@@ -17427,7 +17458,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </div>
           </div>
 
-          <div className="mb-8 flex items-center justify-between gap-3">
+          <div id="traveler-my-requests" className="mb-8 flex items-center justify-between gap-3 scroll-mt-28">
             <h2 className="text-xl font-bold text-mairide-primary">Traveler Ride Requests</h2>
           </div>
 
@@ -17463,7 +17494,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </div>
           )}
 
-          <div className="space-y-6">
+          <div id="traveler-available-rides" className="space-y-6 scroll-mt-28">
             <h2 className="text-xl font-bold text-mairide-primary flex items-center">
               <Clock className="w-5 h-5 mr-2 text-mairide-accent" />
               Available Rides
@@ -18102,6 +18133,19 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
       {activeTab === 'history' && <MyBookings profile={profile} />}
       {activeTab === 'wallet' && <WalletDashboard profile={profile} />}
+      {activeTab === 'travel' && (
+        travelTrackingAccessAllowed ? (
+          <PassengerTravelTrackingPanel profile={profile} config={config || {}} />
+        ) : (
+          <div className="rounded-[28px] border border-mairide-secondary bg-white p-6 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Travel utilities</p>
+            <h2 className="mt-3 text-2xl font-black tracking-tight text-mairide-primary">Train and flight tracking is staged.</h2>
+            <p className="mt-2 text-sm leading-6 text-mairide-secondary">
+              This utility is controlled by the Super Admin rollout switch and will appear here when enabled for your account.
+            </p>
+          </div>
+        )
+      )}
       {activeTab === 'support' && <SupportSystem profile={profile} />}
       {activeTab === 'profile' && <UserSelfProfilePanel profile={profile} />}
       {paymentBooking && (
