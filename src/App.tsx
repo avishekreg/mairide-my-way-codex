@@ -746,6 +746,7 @@ const TRIP_SESSION_STALE_AFTER_MS = 60_000;
 const TRIP_SIGNAL_UPDATE_INTERVAL_MS = 3_000;
 const LOCATION_DB_UPDATE_INTERVAL_MS = 10_000;
 const INTERNAL_DEBUG_LOG_KEY = 'mairide_internal_debug_events';
+const ROUTE_ALERT_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 type FirestoreFetchState<T> = {
   data: T;
@@ -1718,6 +1719,7 @@ const AdminMaiPayControlDesk = ({
 }) => {
   const safeConfig = config || {};
   const [maiPayMasterEnabled, setMaiPayMasterEnabled] = useState(isMaiPayMasterEnabled(safeConfig));
+  const [travelIntelEnabled, setTravelIntelEnabled] = useState(Boolean(safeConfig.trackingServicesEnabled));
   const [serviceCatalog, setServiceCatalog] = useState<MaiPayServiceCatalogState>(getMaiPayServiceCatalog(safeConfig));
   const [sandboxFeatureCatalog, setSandboxFeatureCatalog] = useState<SandboxFeatureCatalogState>(getSandboxFeatureCatalog(safeConfig));
   const [serviceSettings, setServiceSettings] = useState<MaiPayServiceSettingsState>(getMaiPayServiceSettings(safeConfig));
@@ -1762,6 +1764,7 @@ const AdminMaiPayControlDesk = ({
 
   useEffect(() => {
     setMaiPayMasterEnabled(isMaiPayMasterEnabled(config));
+    setTravelIntelEnabled(Boolean(config?.trackingServicesEnabled));
     setServiceCatalog(getMaiPayServiceCatalog(config));
     setSandboxFeatureCatalog(getSandboxFeatureCatalog(config));
     setServiceSettings(getMaiPayServiceSettings(config));
@@ -1773,7 +1776,8 @@ const AdminMaiPayControlDesk = ({
     nextCatalog: MaiPayServiceCatalogState,
     nextSettings: MaiPayServiceSettingsState = serviceSettings,
     nextCustomServices: MaiPayServiceDefinition[] = customServices,
-    nextSandboxFeatures: SandboxFeatureCatalogState = sandboxFeatureCatalog
+    nextSandboxFeatures: SandboxFeatureCatalogState = sandboxFeatureCatalog,
+    nextTravelIntelEnabled: boolean = travelIntelEnabled
   ) => {
     setIsSavingMaiPayConfig(true);
     try {
@@ -1786,6 +1790,7 @@ const AdminMaiPayControlDesk = ({
         maipayServiceSettings: nextSettings,
         maipayCustomServices: nextCustomServices,
         sandboxFeatureCatalog: nextSandboxFeatures,
+        trackingServicesEnabled: nextTravelIntelEnabled,
         liveMoneyWalletAddOnEnabled: Boolean(safeConfig.liveMoneyWalletAddOnEnabled),
         integrationSandboxUserIds: [],
         integrationSandboxEmails: STRICT_SANDBOX_EMAILS,
@@ -1797,6 +1802,7 @@ const AdminMaiPayControlDesk = ({
       setServiceSettings(nextSettings);
       setCustomServices(nextCustomServices);
       setSandboxFeatureCatalog(nextSandboxFeatures);
+      setTravelIntelEnabled(nextTravelIntelEnabled);
     } catch (error) {
       showAppDialog(getApiErrorMessage(error, 'We could not save MaiPay controls right now.'), 'error', 'MaiPay save failed');
     } finally {
@@ -1823,6 +1829,17 @@ const AdminMaiPayControlDesk = ({
       [featureId]: !sandboxFeatureCatalog[featureId],
     };
     void saveMaiPayConfig(maiPayMasterEnabled, serviceCatalog, serviceSettings, customServices, nextSandboxFeatures);
+  };
+
+  const handleTravelIntelToggle = () => {
+    void saveMaiPayConfig(
+      maiPayMasterEnabled,
+      serviceCatalog,
+      serviceSettings,
+      customServices,
+      sandboxFeatureCatalog,
+      !travelIntelEnabled
+    );
   };
 
   const handleAddCustomService = () => {
@@ -1989,7 +2006,7 @@ const AdminMaiPayControlDesk = ({
               <span className="text-white">{STRICT_SANDBOX_EMAILS.join(' · ')}</span>
             </div>
           </div>
-          <div className="grid min-w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:min-w-[420px]">
+          <div className="grid min-w-full grid-cols-1 gap-3 sm:grid-cols-3 lg:min-w-[520px]">
             <div className={cn(
               "rounded-3xl border px-5 py-4",
               paymentDmtPublicStatus ? "border-green-300 bg-green-500/15 text-green-100" : "border-white/15 bg-white/10 text-white/75"
@@ -2006,10 +2023,22 @@ const AdminMaiPayControlDesk = ({
             </div>
             <button
               type="button"
+              onClick={handleTravelIntelToggle}
+              disabled={isSavingMaiPayConfig}
+              className={cn(
+                "rounded-3xl border px-5 py-4 text-left transition disabled:opacity-60",
+                travelIntelEnabled ? "border-green-300 bg-green-500/15 text-green-100" : "border-white/15 bg-white/10 text-white/75"
+              )}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-widest">Travel Intel</p>
+              <p className="mt-2 text-lg font-black">{travelIntelEnabled ? 'Live Enabled' : 'Demo / Sandbox'}</p>
+            </button>
+            <button
+              type="button"
               onClick={handleMasterToggle}
               disabled={isSavingMaiPayConfig}
               className={cn(
-                "sm:col-span-2 rounded-3xl px-5 py-4 text-left text-sm font-black transition disabled:opacity-60",
+                "sm:col-span-3 rounded-3xl px-5 py-4 text-left text-sm font-black transition disabled:opacity-60",
                 maiPayMasterEnabled
                   ? "bg-white text-mairide-primary hover:bg-white/90"
                   : "bg-mairide-accent text-white hover:bg-mairide-accent/90"
@@ -3363,6 +3392,7 @@ const ENTRY_FLOW_VERSION = 'entry-v2';
 const LOCATION_DISCLOSURE_SEEN_KEY = `mairide_location_disclosure_seen_${ENTRY_FLOW_VERSION}`;
 const LANGUAGE_DISCLOSURE_SEEN_KEY = `mairide_language_disclosure_seen_${ENTRY_FLOW_VERSION}`;
 const COOKIE_DISCLOSURE_SESSION_KEY = `mairide_cookie_disclosure_session_${ENTRY_FLOW_VERSION}`;
+const INVESTOR_DEMO_SESSION_KEY = 'mairide_investor_demo_mode_v1';
 const REGISTRATION_CAMERA_PERMISSION_KEY_PREFIX = 'mairide_registration_camera_prompted_v1';
 const REGISTRATION_LOCATION_PERMISSION_KEY_PREFIX = 'mairide_registration_location_prompted_v1';
 const isAndroidAppRuntime = () => isAndroidWebViewLikeRuntime();
@@ -3386,6 +3416,30 @@ const safeStorageSet = (storageType: 'local' | 'session', key: string, value: st
     // Ignore storage-write failures in restricted browsers
   }
 };
+const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const storage = storageType === 'local' ? window.localStorage : window.sessionStorage;
+    storage.removeItem(key);
+  } catch {
+    // Ignore storage-remove failures in restricted browsers
+  }
+};
+
+const isInvestorDemoModeEnabled = () => {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get('investor_demo') || params.get('demo');
+  if (requested === '0' || requested === 'false' || requested === 'off') {
+    safeStorageRemove('session', INVESTOR_DEMO_SESSION_KEY);
+    return false;
+  }
+  if (requested === '1' || requested === 'true' || requested === 'investor') {
+    safeStorageSet('session', INVESTOR_DEMO_SESSION_KEY, 'active');
+    return true;
+  }
+  return safeStorageGet('session', INVESTOR_DEMO_SESSION_KEY) === 'active';
+};
 
 const BrandWordmark = ({
   className = '',
@@ -3406,15 +3460,6 @@ const BrandLockup = ({
 }: {
   wordmarkClassName?: string;
 }) => <BrandWordmark className={cn('text-mairide-primary', wordmarkClassName)} />;
-const safeStorageRemove = (storageType: 'local' | 'session', key: string) => {
-  if (typeof window === 'undefined') return;
-  try {
-    const storage = storageType === 'local' ? window.localStorage : window.sessionStorage;
-    storage.removeItem(key);
-  } catch {
-    // Ignore storage-remove failures in restricted browsers
-  }
-};
 const getCrossDomainCookieDomain = () => {
   if (typeof window === 'undefined') return '';
   return window.location.hostname.endsWith('mairide.in') ? '; domain=.mairide.in' : '';
@@ -5067,6 +5112,7 @@ const useSpeechToText = (
 ) => {
   const recognitionRef = useRef<BrowserSpeechRecognitionInstance | null>(null);
   const lastTranscriptRef = useRef('');
+  const sessionTranscriptRef = useRef('');
   const [isListening, setIsListening] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const isSupported = Boolean(getSpeechRecognitionConstructor());
@@ -5091,6 +5137,7 @@ const useSpeechToText = (
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
     lastTranscriptRef.current = '';
+    sessionTranscriptRef.current = '';
 
     recognition.onresult = (event) => {
       const nextFinalTranscripts: string[] = [];
@@ -5102,7 +5149,7 @@ const useSpeechToText = (
       const normalizedTranscript = nextFinalTranscripts.join(' ').trim();
       if (normalizedTranscript && normalizedTranscript !== lastTranscriptRef.current) {
         lastTranscriptRef.current = normalizedTranscript;
-        onTranscript(normalizedTranscript);
+        sessionTranscriptRef.current = normalizedTranscript;
       }
     };
 
@@ -5114,8 +5161,13 @@ const useSpeechToText = (
     };
 
     recognition.onend = () => {
+      const finalTranscript = sessionTranscriptRef.current.trim();
+      if (finalTranscript) {
+        onTranscript(finalTranscript);
+      }
       recognitionRef.current = null;
       lastTranscriptRef.current = '';
+      sessionTranscriptRef.current = '';
       setIsListening(false);
     };
 
@@ -5390,11 +5442,31 @@ const buildRouteAlerts = ({
   return alerts.slice(0, 3);
 };
 
+const prepareUploadImageDataUrl = async (
+  dataUrl: string,
+  label: string,
+  maxEdge = 1440,
+  quality = 0.78
+) => {
+  if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+    throw new Error(`${label} is missing or invalid.`);
+  }
+  const normalizedImage = await compressDataUrlImage(dataUrl, maxEdge, quality);
+  if (!normalizedImage.startsWith('data:image/')) {
+    throw new Error(`${label} compression failed.`);
+  }
+  return normalizedImage;
+};
+
 const uploadRouteAlertImage = async (base64: string, userId: string) => {
-  const normalizedImage = await compressDataUrlImage(base64, 1440, 0.78);
+  const normalizedImage = await prepareUploadImageDataUrl(base64, 'Route alert image');
   const imageRef = storageRef(storage, `route-alerts/${userId}/${Date.now()}.jpg`);
   await uploadString(imageRef, normalizedImage, 'data_url');
-  return getDownloadURL(imageRef);
+  const downloadUrl = await getDownloadURL(imageRef);
+  if (!downloadUrl) {
+    throw new Error('Route alert image upload did not return a download URL.');
+  }
+  return downloadUrl;
 };
 
 const fetchRecentRouteAlertReports = async () => {
@@ -6669,21 +6741,21 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               href={PUBLIC_ANDROID_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white/85 p-2 pr-3 shadow-sm transition hover:bg-white"
+              className="inline-flex items-center gap-2 rounded-xl px-2 py-1.5 text-mairide-secondary transition hover:bg-white/70 hover:text-mairide-primary"
               aria-label="Scan QR code to download the mAIRide Android app"
             >
-              <span className="rounded-xl bg-white p-1 shadow-inner">
+              <span className="rounded-lg bg-white p-1 shadow-sm">
                 <img
                   src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
                   alt="QR code to download the mAIRide Android app"
-                  className="h-14 w-14"
-                  width={56}
-                  height={56}
+                  className="h-11 w-11"
+                  width={44}
+                  height={44}
                   loading="lazy"
                 />
               </span>
-              <span className="max-w-[86px] text-left text-[9px] font-bold uppercase leading-3 tracking-widest text-mairide-secondary">
-                Scan Android
+              <span className="max-w-[92px] text-left text-[10px] font-bold leading-3 tracking-wide">
+                Scan to download
               </span>
             </a>
           </div>
@@ -11220,6 +11292,69 @@ const RouteAlertsTicker = ({
   );
 };
 
+const MapFirstDashboardShell = ({
+  searchLabel,
+  searchSubtext,
+  onSearchClick,
+  primaryAction,
+  secondaryAction,
+  sheetTitle,
+  sheetBody,
+  children,
+}: {
+  searchLabel: string;
+  searchSubtext: string;
+  onSearchClick?: () => void;
+  primaryAction?: React.ReactNode;
+  secondaryAction?: React.ReactNode;
+  sheetTitle: string;
+  sheetBody: string;
+  children: React.ReactNode;
+}) => (
+  <section className="relative -mx-4 -mt-4 mb-8 overflow-hidden bg-mairide-primary md:-mx-8 md:-mt-8">
+    <div className="relative min-h-[calc(100vh-96px)]">
+      <div className="absolute inset-0 bg-mairide-bg">{children}</div>
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(244,247,249,0.88)_0%,rgba(244,247,249,0.34)_22%,rgba(244,247,249,0)_48%,rgba(244,247,249,0.76)_100%)]" />
+
+      <div className="absolute left-4 right-4 top-4 z-10 mx-auto max-w-3xl md:top-6">
+        <div className="flex items-center gap-3 rounded-[28px] border border-mairide-secondary bg-white/95 p-3 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-mairide-primary text-white">
+            <Search className="h-5 w-5" />
+          </div>
+          <button
+            type="button"
+            onClick={onSearchClick}
+            className="min-w-0 flex-1 text-left"
+          >
+            <p className="truncate text-lg font-black tracking-tight text-mairide-primary">{searchLabel}</p>
+            <p className="truncate text-sm text-mairide-secondary">{searchSubtext}</p>
+          </button>
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            {primaryAction}
+            {secondaryAction}
+          </div>
+        </div>
+      </div>
+
+      <div className="absolute inset-x-0 bottom-0 z-10">
+        <div className="mx-auto max-w-3xl rounded-t-[34px] border border-mairide-secondary bg-white/96 p-5 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl md:mb-6 md:rounded-[34px]">
+          <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-mairide-secondary/50" />
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-black tracking-tight text-mairide-primary">{sheetTitle}</h2>
+              <p className="mt-1 text-sm leading-relaxed text-mairide-secondary">{sheetBody}</p>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 sm:hidden">
+              {primaryAction}
+              {secondaryAction}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
 const DashboardTranslatorCard = ({
   title,
   description,
@@ -11571,12 +11706,30 @@ const RouteAlertComposer = ({
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       showAppDialog('Please upload an image for route validation.', 'warning');
+      event.target.value = '';
       return;
     }
-    const dataUrl = await fileToDataUrl(file);
-    const normalized = await compressDataUrlImage(dataUrl, 1440, 0.78);
-    setPhotoDataUrl(normalized);
-    setPhotoName(file.name);
+    if (file.size > ROUTE_ALERT_MAX_IMAGE_BYTES) {
+      showAppDialog('Route alert photos must be below 8 MB. Please choose a smaller image.', 'warning');
+      event.target.value = '';
+      return;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const normalized = await compressDataUrlImage(dataUrl, 1440, 0.78);
+      if (!normalized.startsWith('data:image/')) {
+        throw new Error('Invalid compressed image.');
+      }
+      setPhotoDataUrl(normalized);
+      setPhotoName(file.name);
+    } catch (error) {
+      console.error('Route alert image preparation failed:', error);
+      setPhotoDataUrl('');
+      setPhotoName('');
+      showAppDialog('We could not prepare that image. Please capture or select the photo again.', 'error');
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const handleSubmit = async () => {
@@ -11648,7 +11801,16 @@ const RouteAlertComposer = ({
         <label className="flex min-h-[120px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-mairide-secondary bg-mairide-bg p-4 text-center transition-colors hover:border-mairide-accent">
           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileChange} />
           {photoDataUrl ? (
-            <img src={photoDataUrl} alt="Route alert preview" className="h-24 w-full rounded-xl object-cover" />
+            <img
+              src={photoDataUrl}
+              alt="Route alert preview"
+              className="h-24 w-full rounded-xl object-cover"
+              onError={() => {
+                setPhotoDataUrl('');
+                setPhotoName('');
+                showAppDialog('The selected image preview failed. Please choose the photo again.', 'warning');
+              }}
+            />
           ) : (
             <>
               <Upload className="h-6 w-6 text-mairide-accent" />
@@ -13016,8 +13178,12 @@ const MyBookings = ({ profile }: { profile: UserProfile }) => {
   ) => {
     const { baseFee, gstAmount } = calculateServiceFee(booking.fare, config || undefined);
     const receiptRef = storageRef(storage, `payments/${booking.id}/consumer-${Date.now()}.jpg`);
-    await uploadString(receiptRef, payload.receiptDataUrl, 'data_url');
+    const receiptImage = await prepareUploadImageDataUrl(payload.receiptDataUrl, 'Traveler payment proof');
+    await uploadString(receiptRef, receiptImage, 'data_url');
     const receiptUrl = await getDownloadURL(receiptRef);
+    if (!receiptUrl) {
+      throw new Error('Traveler payment proof upload did not return a receipt URL.');
+    }
     await updateDoc(doc(db, 'bookings', booking.id), {
       feePaid: true,
       paymentStatus: 'proof_submitted',
@@ -14516,8 +14682,12 @@ const BookingRequests = ({ profile }: { profile: UserProfile }) => {
   ) => {
     const { baseFee, gstAmount } = calculateServiceFee(booking.fare, config || undefined);
     const receiptRef = storageRef(storage, `payments/${booking.id}/driver-${Date.now()}.jpg`);
-    await uploadString(receiptRef, payload.receiptDataUrl, 'data_url');
+    const receiptImage = await prepareUploadImageDataUrl(payload.receiptDataUrl, 'Driver payment proof');
+    await uploadString(receiptRef, receiptImage, 'data_url');
     const receiptUrl = await getDownloadURL(receiptRef);
+    if (!receiptUrl) {
+      throw new Error('Driver payment proof upload did not return a receipt URL.');
+    }
     await updateDoc(doc(db, 'bookings', booking.id), {
       driverFeePaid: true,
       paymentStatus: 'proof_submitted',
@@ -16901,8 +17071,20 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       });
       translatedText = String(data?.translatedText || sourceText).trim() || sourceText;
       provider = data?.provider === 'gemini' ? 'gemini' : 'fallback';
-    } catch {
-      translatedText = sourceText;
+      if (
+        payload.sourceLanguage !== payload.targetLanguage &&
+        (provider !== 'gemini' || translatedText === sourceText)
+      ) {
+        showAppDialog('Translation Unavailable. Please try again in a moment before sending this note.', 'warning', 'Translator unavailable');
+        return;
+      }
+    } catch (error) {
+      showAppDialog(
+        getApiErrorMessage(error, 'Translation Unavailable. Please try again in a moment before sending this note.'),
+        'warning',
+        'Translator unavailable'
+      );
+      return;
     }
 
     const message = buildCommunicationMessage({
@@ -16937,8 +17119,12 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
     try {
       const { baseFee, gstAmount } = calculateServiceFee(booking.fare, config || undefined);
       const receiptRef = storageRef(storage, `payments/${booking.id}/consumer-${Date.now()}.jpg`);
-      await uploadString(receiptRef, payload.receiptDataUrl, 'data_url');
+      const receiptImage = await prepareUploadImageDataUrl(payload.receiptDataUrl, 'Traveler payment proof');
+      await uploadString(receiptRef, receiptImage, 'data_url');
       const receiptUrl = await getDownloadURL(receiptRef);
+      if (!receiptUrl) {
+        throw new Error('Traveler payment proof upload did not return a receipt URL.');
+      }
       await updateDoc(doc(db, 'bookings', booking.id), {
         feePaid: true,
         paymentStatus: 'proof_submitted',
@@ -17095,10 +17281,10 @@ const finalizeTravelerDashboardRazorpayPayment = async (
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8">
+    <div className="max-w-7xl mx-auto p-4 md:p-8">
       {activeTab === 'search' && (
         <>
-          <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+          <div className="hidden">
             <div className="flex flex-col gap-2">
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
                 {firstName}
@@ -17117,7 +17303,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </button>
           </div>
 
-          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="hidden">
             <div className="rounded-[28px] border border-mairide-secondary bg-white p-5 shadow-sm">
               <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Nearby cabs ready</p>
               <p className="mt-3 text-3xl font-black tracking-tight text-mairide-primary">{nearbyAvailableCabCount}</p>
@@ -17136,6 +17322,64 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               <p className="mt-2 text-sm text-mairide-secondary">Open or negotiating traveler threads being tracked live.</p>
             </div>
           </div>
+
+          <MapFirstDashboardShell
+            searchLabel="Where to?"
+            searchSubtext="Choose a destination to request an empty-leg ride"
+            onSearchClick={() => setShowRequestForm(true)}
+            primaryAction={(
+              <button
+                onClick={() => setShowRequestForm(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-mairide-accent px-5 py-3 text-sm font-bold text-white shadow-lg shadow-mairide-accent/20 transition-all hover:bg-mairide-primary"
+              >
+                <Plus className="h-5 w-5" />
+                Request a Ride
+              </button>
+            )}
+            sheetTitle="Find your next ride"
+            sheetBody="Set your route and fare once. Matching drivers, route alerts, and negotiations continue below without changing the booking logic."
+          >
+            {(loadError || authFailure) ? (
+              <div className="flex h-full min-h-[calc(100vh-96px)] flex-col items-center justify-center bg-red-50 p-8 text-center">
+                <AlertCircle className="mb-4 h-12 w-12 text-red-500" />
+                <h3 className="mb-2 text-xl font-bold text-red-900">Google Maps Error Detected</h3>
+                <p className="text-red-700">{loadError ? loadError.message : "Authentication Failure (Check Referrer Restrictions)"}</p>
+              </div>
+            ) : GOOGLE_MAPS_API_KEY && isLoaded && window.google ? (
+              <GoogleMap
+                mapContainerStyle={{ width: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
+                center={userLocation || { lat: 26.1433, lng: 91.7385 }}
+                zoom={userLocation ? 13 : 7}
+                options={{
+                  disableDefaultUI: true,
+                  zoomControl: true,
+                  styles: [
+                    { "featureType": "poi", "elementType": "all", "stylers": [{ "visibility": "off" }] },
+                    { "featureType": "road", "elementType": "all", "stylers": [{ "saturation": -70 }, { "lightness": 20 }] },
+                    { "featureType": "water", "elementType": "geometry.fill", "stylers": [{ "color": "#c8d7d4" }] },
+                  ],
+                }}
+              >
+                {userLocation && (
+                  <Marker
+                    position={userLocation}
+                    icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
+                    title="You"
+                  />
+                )}
+                {drivers.filter(d => d.location && typeof d.location.lat === 'number' && typeof d.location.lng === 'number').map(driver => (
+                  <Marker
+                    key={driver.uid}
+                    position={{ lat: driver.location!.lat, lng: driver.location!.lng }}
+                    icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/car.png' }}
+                    title={driver.displayName}
+                  />
+                ))}
+              </GoogleMap>
+            ) : (
+              <div className="h-full min-h-[calc(100vh-96px)] bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
+            )}
+          </MapFirstDashboardShell>
 
           <RouteAlertsTicker
             alerts={travelerRouteAlerts}
@@ -17231,7 +17475,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             </div>
           </div>
 
-          <div id="consumer-live-map" className="mb-12 overflow-hidden rounded-[32px] border border-mairide-secondary bg-white shadow-xl">
+          <div id="consumer-live-map" className="hidden">
             <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-mairide-secondary/70">
               <div>
                 <h2 className="text-xl font-bold text-mairide-primary flex items-center">
@@ -20137,8 +20381,20 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
       });
       translatedText = String(data?.translatedText || sourceText).trim() || sourceText;
       provider = data?.provider === 'gemini' ? 'gemini' : 'fallback';
-    } catch {
-      translatedText = sourceText;
+      if (
+        payload.sourceLanguage !== payload.targetLanguage &&
+        (provider !== 'gemini' || translatedText === sourceText)
+      ) {
+        showAppDialog('Translation Unavailable. Please try again in a moment before sending this note.', 'warning', 'Translator unavailable');
+        return;
+      }
+    } catch (error) {
+      showAppDialog(
+        getApiErrorMessage(error, 'Translation Unavailable. Please try again in a moment before sending this note.'),
+        'warning',
+        'Translator unavailable'
+      );
+      return;
     }
 
     const message = buildCommunicationMessage({
@@ -20177,8 +20433,12 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
     try {
       const { baseFee, gstAmount } = calculateServiceFee(booking.fare, config || undefined);
       const receiptRef = storageRef(storage, `payments/${booking.id}/driver-${Date.now()}.jpg`);
-      await uploadString(receiptRef, payload.receiptDataUrl, 'data_url');
+      const receiptImage = await prepareUploadImageDataUrl(payload.receiptDataUrl, 'Driver payment proof');
+      await uploadString(receiptRef, receiptImage, 'data_url');
       const receiptUrl = await getDownloadURL(receiptRef);
+      if (!receiptUrl) {
+        throw new Error('Driver payment proof upload did not return a receipt URL.');
+      }
       await updateDoc(doc(db, 'bookings', booking.id), {
         driverFeePaid: true,
         paymentStatus: 'proof_submitted',
@@ -20521,10 +20781,10 @@ const finalizeDriverDashboardRazorpayPayment = async (
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8">
+    <div className="max-w-7xl mx-auto p-4 md:p-8">
       {activeTab === 'dashboard' && (
         <>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+          <div className="hidden">
             <div className="flex flex-col gap-2">
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-mairide-secondary">
                 {firstName}
@@ -20567,6 +20827,96 @@ const finalizeDriverDashboardRazorpayPayment = async (
               </button>
             </div>
           </div>
+
+          <MapFirstDashboardShell
+            searchLabel="Where are you heading?"
+            searchSubtext={isOnline ? "Post an empty-leg offer from your route" : "Go online to start accepting live demand"}
+            onSearchClick={() => {
+              if (!isOnline) {
+                void toggleOnline();
+                return;
+              }
+              setLinkedTravelerRequestId(null);
+              setShowOfferForm(true);
+            }}
+            primaryAction={(
+              <button 
+                onClick={() => {
+                  if (!isOnline) {
+                    alert('Please switch online first to offer a ride.');
+                    return;
+                  }
+                  setLinkedTravelerRequestId(null);
+                  setShowOfferForm(true);
+                }}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-4 text-sm font-bold shadow-xl transition-all",
+                  isOnline
+                    ? "bg-mairide-accent text-white shadow-mairide-accent/20 hover:bg-white hover:text-mairide-primary"
+                    : "bg-white/70 text-mairide-primary opacity-80"
+                )}
+                disabled={!isOnline}
+              >
+                <Plus className="h-5 w-5" />
+                Offer a Ride
+              </button>
+            )}
+            secondaryAction={(
+              <button 
+                onClick={toggleOnline}
+                className={cn(
+                  "inline-flex items-center justify-center gap-3 rounded-2xl px-6 py-4 text-sm font-bold shadow-xl transition-all",
+                  isOnline ? "bg-green-600 text-white shadow-green-900/20" : "bg-white/90 text-mairide-primary"
+                )}
+              >
+                <span className={cn("h-3 w-3 rounded-full", isOnline ? "bg-white animate-pulse" : "bg-mairide-primary")} />
+                {isOnline ? 'You are Online' : 'Go Online'}
+              </button>
+            )}
+            sheetTitle={isOnline ? "You are live on the map" : "Go online to publish rides"}
+            sheetBody="Traveler demand, route-watch alerts, and negotiation cards remain connected below. This preview only changes the dashboard surface."
+          >
+            {GOOGLE_MAPS_API_KEY && isLoaded && window.google ? (
+              <GoogleMap
+                mapContainerStyle={{ width: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
+                center={userLocation || { lat: 26.1433, lng: 91.7385 }}
+                zoom={userLocation ? 13 : 7}
+                options={{
+                  disableDefaultUI: true,
+                  zoomControl: true,
+                  styles: [
+                    { "featureType": "poi", "elementType": "all", "stylers": [{ "visibility": "off" }] },
+                    { "featureType": "road", "elementType": "all", "stylers": [{ "saturation": -70 }, { "lightness": 20 }] },
+                    { "featureType": "water", "elementType": "geometry.fill", "stylers": [{ "color": "#c8d7d4" }] },
+                  ],
+                }}
+              >
+                {userLocation && (
+                  <Marker 
+                    position={userLocation} 
+                    icon={{
+                      url: 'https://maps.google.com/mapfiles/ms/icons/car.png',
+                      scaledSize: (isLoaded && window.google) ? new window.google.maps.Size(32, 32) : undefined
+                    }}
+                    title="You"
+                  />
+                )}
+                {consumers.filter(c => c.location && typeof c.location.lat === 'number' && typeof c.location.lng === 'number').map(consumer => (
+                  <Marker
+                    key={consumer.uid}
+                    position={{ lat: consumer.location!.lat, lng: consumer.location!.lng }}
+                    icon={{
+                      url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+                      scaledSize: (isLoaded && window.google) ? new window.google.maps.Size(24, 24) : undefined
+                    }}
+                    title={consumer.displayName}
+                  />
+                ))}
+              </GoogleMap>
+            ) : (
+              <div className="h-full min-h-[calc(100vh-96px)] bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
+            )}
+          </MapFirstDashboardShell>
 
           <RouteAlertsTicker
             alerts={driverRouteAlerts}
@@ -21186,7 +21536,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+          <div className="hidden">
             <div className="bg-white p-6 rounded-3xl border border-mairide-secondary shadow-sm">
               <p className="text-sm text-mairide-secondary mb-1">Total Earnings</p>
               <h3 className="text-2xl font-black text-mairide-primary">{formatCurrency(profile.driverDetails?.totalEarnings || 0)}</h3>
@@ -21256,7 +21606,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             </div>
           </div>
 
-          <div className="mb-12 overflow-hidden rounded-[32px] border border-mairide-secondary bg-white shadow-xl">
+          <div className="hidden">
             <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-mairide-secondary/70">
               <div>
                 <h2 className="text-xl font-bold text-mairide-primary flex items-center">
@@ -24340,6 +24690,8 @@ const AdminDashboard = ({
   type UsersInsightView = 'drivers' | 'travelers' | 'onlineDrivers' | 'onlineTravelers' | 'activeTrips' | 'openOffers' | null;
   type AdminTab = 'dashboard' | 'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b' | 'maipay';
   const adminTabIds: AdminTab[] = ['dashboard', 'users', 'support', 'verification', 'profile', 'rides', 'revenue', 'transactions', 'config', 'analytics', 'security', 'map', 'capacity', 'mobile', 'b2b', 'maipay'];
+  const investorDemoMode = isInvestorDemoModeEnabled();
+  const investorDemoAllowedTabs: AdminTab[] = ['dashboard', 'map', 'capacity', 'mobile'];
   const resolveAdminTab = (value: unknown): AdminTab =>
     adminTabIds.includes(value as AdminTab) ? (value as AdminTab) : 'dashboard';
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -24363,6 +24715,7 @@ const AdminDashboard = ({
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (blockInvestorAdminMutation('Password reset')) return;
     if (!resetPasswordUser || !newAdminPassword) return;
 
     setIsResetting(true);
@@ -24394,6 +24747,7 @@ const AdminDashboard = ({
   };
 
   const handleGenerateResetLink = async (targetUser: UserProfile) => {
+    if (blockInvestorAdminMutation('Password reset link generation')) return;
     setIsGeneratingResetLink(targetUser.uid);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
@@ -24461,6 +24815,23 @@ const AdminDashboard = ({
   const adminTransactionsCacheKey = `mairide_admin_transactions_cache_${profile.uid}`;
   const lastAdminLocationWriteRef = useRef(0);
   const isPageVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
+  const blockInvestorAdminMutation = (action: string) => {
+    if (!investorDemoMode) return false;
+    setAdminNotice({
+      title: 'Investor Demo Mode is read-only',
+      message: `${action} is locked for this demo session. Traveler and driver ride flows remain fully interactive, but admin mutations are disabled.`,
+      tone: 'info',
+    });
+    return true;
+  };
+
+  useEffect(() => {
+    if (!investorDemoMode) return;
+    if (!investorDemoAllowedTabs.includes(activeTab)) {
+      setActiveTab('dashboard');
+      setIsB2BNavOpen(false);
+    }
+  }, [activeTab, investorDemoMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -24673,6 +25044,7 @@ const AdminDashboard = ({
   }, []);
 
   const handleAdminForceCancelRide = async (booking: any) => {
+    if (blockInvestorAdminMutation('Force cancel')) return;
     const rideId = booking.rideId || booking.ride_id || booking.data?.rideId || '';
     const actionId = rideId || booking.id;
 
@@ -24763,6 +25135,7 @@ const AdminDashboard = ({
 
       const now = Date.now();
       if (now - lastAdminLocationWriteRef.current < LOCATION_DB_UPDATE_INTERVAL_MS) return;
+      if (investorDemoMode) return;
       lastAdminLocationWriteRef.current = now;
       updateDoc(doc(db, 'users', profile.uid), {
         location: {
@@ -25090,6 +25463,7 @@ const AdminDashboard = ({
       : `Manage and monitor platform ${activeTab} details.`;
 
   const handleVerifyDriver = async (userId: string, status: 'approved' | 'rejected') => {
+    if (blockInvestorAdminMutation('Driver verification changes')) return;
     if (!selectedDriver || selectedDriver.verificationStatus !== 'pending') {
       alert('Only pending driver applications can be reviewed here.');
       return;
@@ -25126,6 +25500,7 @@ const AdminDashboard = ({
   };
 
   const handleUpdateRole = async (userId: string, newRole: 'consumer' | 'driver' | 'admin') => {
+    if (blockInvestorAdminMutation('User role changes')) return;
     try {
       await updateDoc(doc(db, 'users', userId), { role: newRole });
     } catch (error) {
@@ -25134,6 +25509,7 @@ const AdminDashboard = ({
   };
 
   const handleDeleteUser = async (userId: string) => {
+    if (blockInvestorAdminMutation('User deletion')) return;
     try {
       const headers = await getAdminRequestHeaders(profile.email);
       await axios.post(adminApiPath('delete-user'), { uid: userId }, { headers });
@@ -25155,6 +25531,7 @@ const AdminDashboard = ({
 
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (blockInvestorAdminMutation('User profile edits')) return;
     if (!editingUser) return;
     const normalizedPhone = editingUser.phoneNumber ? toIndianPhoneStorage(editingUser.phoneNumber) : '';
     if (editingUser.phoneNumber && !normalizedPhone) {
@@ -25179,6 +25556,7 @@ const AdminDashboard = ({
   };
 
   const handleUpdateStatus = async (userId: string, newStatus: 'active' | 'inactive') => {
+    if (blockInvestorAdminMutation('User status changes')) return;
     try {
       await updateDoc(doc(db, 'users', userId), { status: newStatus });
     } catch (error) {
@@ -25188,6 +25566,7 @@ const AdminDashboard = ({
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (blockInvestorAdminMutation('Manual user creation')) return;
     const normalizedEmail = normalizeEmailValue(newUser.email);
     const normalizedPhone = newUser.phoneNumber ? toIndianPhoneStorage(newUser.phoneNumber) : '';
     if (!normalizedEmail || !newUser.displayName || !newUser.password) {
@@ -25330,7 +25709,10 @@ const AdminDashboard = ({
             { id: 'support', label: 'Support', icon: LifeBuoy, roles: ['super_admin', 'support'] },
             { id: 'security', label: 'Security', icon: Lock, roles: ['super_admin'] },
             { id: 'profile', label: 'Profile', icon: UserIcon, roles: ['super_admin', 'support', 'finance', 'compliance'] },
-          ].filter(item => item.roles.includes(effectiveAdminRole)).map(item => {
+          ].filter(item =>
+            item.roles.includes(effectiveAdminRole)
+            && (!investorDemoMode || investorDemoAllowedTabs.includes(item.id as AdminTab))
+          ).map(item => {
             if (item.id === 'b2b') {
               return (
                 <div key={item.id} className="space-y-2">
@@ -25464,6 +25846,14 @@ const AdminDashboard = ({
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12">
           <div className="max-w-7xl mx-auto">
+            {investorDemoMode && (
+              <div className="mb-6 rounded-[28px] border border-blue-200 bg-blue-50 p-5 text-blue-800 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-[0.28em]">Investor Demo Mode</p>
+                <p className="mt-2 text-sm font-semibold leading-relaxed">
+                  Admin is read-only for this session. High-level monitoring remains visible, while user edits, approvals, force-cancel actions, financial ledgers, and configuration changes are locked. Traveler and driver ride flows remain fully interactive for the demo.
+                </p>
+              </div>
+            )}
             <div className="mb-12 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h2 className="text-4xl font-black text-mairide-primary tracking-tighter capitalize mb-2">
@@ -25487,6 +25877,7 @@ const AdminDashboard = ({
                       icon: Wallet,
                       tone: 'bg-red-50 text-red-600',
                       actionLabel: 'Open MaiPay desk',
+                      targetTab: 'maipay' as AdminTab,
                       onClick: () => setActiveTab('maipay' as typeof activeTab),
                     },
                     {
@@ -25496,6 +25887,7 @@ const AdminDashboard = ({
                       icon: Car,
                       tone: 'bg-orange-50 text-orange-600',
                       actionLabel: 'Open rides desk',
+                      targetTab: 'rides' as AdminTab,
                       onClick: () => setActiveTab('rides' as typeof activeTab),
                     },
                     {
@@ -25505,6 +25897,7 @@ const AdminDashboard = ({
                       icon: ShieldCheck,
                       tone: 'bg-blue-50 text-blue-600',
                       actionLabel: 'Review approvals',
+                      targetTab: 'verification' as AdminTab,
                       onClick: () => setActiveTab('verification' as typeof activeTab),
                     },
                     {
@@ -25514,6 +25907,7 @@ const AdminDashboard = ({
                       icon: IndianRupee,
                       tone: 'bg-emerald-50 text-emerald-600',
                       actionLabel: 'Open revenue',
+                      targetTab: 'revenue' as AdminTab,
                       onClick: () => setActiveTab('revenue' as typeof activeTab),
                     },
                     {
@@ -25523,13 +25917,20 @@ const AdminDashboard = ({
                       icon: TrendingUp,
                       tone: 'bg-purple-50 text-purple-600',
                       actionLabel: 'Inspect health',
+                      targetTab: 'capacity' as AdminTab,
                       onClick: () => setActiveTab('capacity' as typeof activeTab),
                     },
                   ].map((card) => (
                     <button
                       key={card.label}
                       type="button"
-                      onClick={card.onClick}
+                      onClick={() => {
+                        if (investorDemoMode && !investorDemoAllowedTabs.includes(card.targetTab)) {
+                          blockInvestorAdminMutation(`${card.label} drill-down`);
+                          return;
+                        }
+                        card.onClick();
+                      }}
                       className="rounded-[32px] border border-mairide-secondary bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg"
                     >
                       <div className={cn("mb-4 flex h-12 w-12 items-center justify-center rounded-2xl", card.tone)}>
@@ -25574,7 +25975,13 @@ const AdminDashboard = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setActiveTab('transactions' as typeof activeTab)}
+                        onClick={() => {
+                          if (investorDemoMode) {
+                            blockInvestorAdminMutation('Transaction ledger drill-down');
+                            return;
+                          }
+                          setActiveTab('transactions' as typeof activeTab);
+                        }}
                         className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-5 text-left transition-all hover:bg-white hover:shadow-md"
                       >
                         <div className="flex items-center gap-3">

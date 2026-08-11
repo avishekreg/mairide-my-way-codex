@@ -42,17 +42,17 @@ export default async function translateHandler(req: Request, res: Response) {
       translatedText: text,
       sourceLanguage,
       targetLanguage,
-      provider: "fallback",
+      provider: "passthrough",
     });
   }
 
   const apiKey = getApiKey();
   if (!apiKey) {
-    return res.status(200).json({
-      translatedText: text,
+    return res.status(503).json({
+      error: "Translation Unavailable",
+      code: "TRANSLATION_PROVIDER_NOT_CONFIGURED",
       sourceLanguage,
       targetLanguage,
-      provider: "fallback",
     });
   }
 
@@ -75,11 +75,11 @@ export default async function translateHandler(req: Request, res: Response) {
 
     const translatedText = String(response.text || "").trim();
     if (!translatedText) {
-      return res.status(200).json({
-        translatedText: text,
+      return res.status(502).json({
+        error: "Translation Unavailable",
+        code: "TRANSLATION_EMPTY_RESPONSE",
         sourceLanguage,
         targetLanguage,
-        provider: "fallback",
       });
     }
 
@@ -90,12 +90,12 @@ export default async function translateHandler(req: Request, res: Response) {
       provider: "gemini",
     });
   } catch (error: any) {
-    console.warn("Translation fallback engaged:", error?.message || error);
-    return res.status(200).json({
-      translatedText: text,
+    console.warn("Translation provider failed:", error?.message || error);
+    return res.status(502).json({
+      error: "Translation Unavailable",
+      code: "TRANSLATION_PROVIDER_FAILED",
       sourceLanguage,
       targetLanguage,
-      provider: "fallback",
     });
   }
 }
