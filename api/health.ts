@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
-import { handleTravelIntel } from "./_lib/travelIntel.js";
 
 const CONFIG_LOOKUP_TIMEOUT_MS = 2500;
 
@@ -208,10 +207,6 @@ export default async function handler(req: any, res: any) {
         serverTime: new Date().toISOString(),
         ...(await buildStampPayload()),
       });
-    }
-
-    if (action === "travel-intel") {
-      return handleTravelIntel(req, res);
     }
 
     if (action === "resolve-phone-login") {
