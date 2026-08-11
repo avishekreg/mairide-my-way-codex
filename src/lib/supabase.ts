@@ -1,11 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { supabaseAuthStorage } from './capacitorAuthStorage';
 
+const PROD_SUPABASE_URL = 'https://jcgoccsdlrjnratpaeje.supabase.co';
+const PROD_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ29jY3NkbHJqbnJhdHBhZWplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTkwMTQsImV4cCI6MjA5MDUzNTAxNH0.iPIawKCThu7lYMoGrWAyRDVvQPf5YICP7Ap_XOwAOrw';
+
 const resolveSupabaseRuntimeTarget = () => {
-  return {
-    url: import.meta.env.VITE_SUPABASE_URL || '',
-    anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-  };
+  // Hard lock every runtime (web + installed app + local dev) to main production Supabase.
+  // Staging project has been retired.
+  return { url: PROD_SUPABASE_URL, anonKey: PROD_SUPABASE_ANON_KEY };
 };
 
 const { url: supabaseUrl, anonKey: supabaseAnonKey } = resolveSupabaseRuntimeTarget();
