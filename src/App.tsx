@@ -11317,17 +11317,20 @@ const MapFirstDashboardShell = ({
   compactBottomSheet?: boolean;
   sheetContent?: React.ReactNode;
 }) => (
-  <section className="relative -mx-4 -mt-4 mb-8 overflow-hidden bg-mairide-primary md:-mx-8 md:-mt-8">
-    <div className="relative min-h-[calc(100vh-96px)]">
-      <div className="absolute inset-0 z-0 pointer-events-auto bg-mairide-bg">{children}</div>
+  <section className={cn(
+    "relative -mx-4 -mt-4 w-full max-w-full overflow-hidden overflow-x-hidden bg-mairide-primary md:-mx-8 md:-mt-8",
+    compactBottomSheet ? "mb-3" : "mb-8"
+  )}>
+    <div className="relative min-h-[calc(100vh-96px)] w-full max-w-full overflow-hidden">
+      <div className="absolute inset-0 z-0 w-full max-w-full overflow-hidden pointer-events-auto bg-mairide-bg">{children}</div>
       <div className="pointer-events-none absolute inset-0 z-[1] bg-[linear-gradient(180deg,rgba(244,247,249,0.88)_0%,rgba(244,247,249,0.34)_22%,rgba(244,247,249,0)_48%,rgba(244,247,249,0.76)_100%)]" />
 
       <div className={cn(
         "pointer-events-none absolute left-4 right-4 z-10 mx-auto",
         topControlsOnly
-          ? "top-20 z-20 max-w-xl"
+          ? "top-16 z-20 max-w-xl"
           : compactSearchBar
-            ? "top-20 max-w-3xl md:top-24"
+            ? "top-16 max-w-3xl"
             : "top-4 max-w-3xl md:top-6"
       )}>
         {topControlsOnly ? (
@@ -11373,7 +11376,7 @@ const MapFirstDashboardShell = ({
         <div
           className={cn(
             "pointer-events-auto mx-auto max-w-3xl overflow-y-auto overscroll-contain rounded-t-[34px] border border-mairide-secondary bg-white/96 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl [touch-action:pan-y] md:rounded-[34px]",
-            compactBottomSheet ? "h-[17vh] max-h-[17vh] p-3" : "max-h-[46vh] p-5"
+            compactBottomSheet ? "h-[15vh] max-h-[15vh] p-2.5" : "max-h-[46vh] p-5"
           )}
           onWheel={(event) => event.stopPropagation()}
           onTouchMove={(event) => event.stopPropagation()}
@@ -17295,6 +17298,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
   return (
     <div className={cn(
+      "relative w-full max-w-full overflow-x-hidden",
       activeTab === 'search'
         ? "relative min-h-[calc(100vh-4rem)] bg-mairide-bg"
         : "max-w-4xl mx-auto p-4 md:p-8"
@@ -17317,29 +17321,29 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               </button>
             )}
             sheetContent={(
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-available-rides')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="rounded-2xl bg-mairide-bg px-4 py-2.5 text-left transition-colors hover:bg-orange-50"
+                  className="rounded-2xl bg-mairide-bg px-3 py-2 text-left transition-colors hover:bg-orange-50"
                 >
-                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-mairide-secondary">Available Rides</p>
-                  <p className="mt-0.5 text-xl font-black leading-none text-mairide-primary">{rides.length + partialRides.length}</p>
+                  <p className="text-[8px] font-bold uppercase tracking-[0.14em] text-mairide-secondary">Available Rides</p>
+                  <p className="mt-0.5 text-lg font-black leading-none text-mairide-primary">{rides.length + partialRides.length}</p>
                 </button>
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-my-requests')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="rounded-2xl bg-mairide-bg px-4 py-2.5 text-left transition-colors hover:bg-orange-50"
+                  className="rounded-2xl bg-mairide-bg px-3 py-2 text-left transition-colors hover:bg-orange-50"
                 >
-                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-mairide-secondary">My Requests</p>
-                  <p className="mt-0.5 text-xl font-black leading-none text-mairide-primary">{travelerRequests.filter(isUnifiedRideActive).length}</p>
+                  <p className="text-[8px] font-bold uppercase tracking-[0.14em] text-mairide-secondary">My Requests</p>
+                  <p className="mt-0.5 text-lg font-black leading-none text-mairide-primary">{travelerRequests.filter(isUnifiedRideActive).length}</p>
                 </button>
               </div>
             )}
           >
             {travelerMapReady ? (
               <GoogleMap
-                mapContainerStyle={{ width: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
+                mapContainerStyle={{ width: '100%', maxWidth: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
                 center={travelerMapCenter}
                 zoom={userLocation ? 13 : 7}
                 options={{
@@ -20676,6 +20680,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
   );
   return (
     <div className={cn(
+      "relative w-full max-w-full overflow-x-hidden",
       activeTab === 'dashboard'
         ? "relative min-h-[calc(100vh-4rem)] bg-mairide-bg"
         : "max-w-4xl mx-auto p-4 md:p-8"
@@ -20734,7 +20739,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
           >
             {driverMapReady ? (
               <GoogleMap
-                mapContainerStyle={{ width: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
+                mapContainerStyle={{ width: '100%', maxWidth: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
                 center={driverMapCenter}
                 zoom={userLocation ? 13 : 7}
                 options={{
