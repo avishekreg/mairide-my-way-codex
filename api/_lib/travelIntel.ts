@@ -1,9 +1,8 @@
-import type { Request, Response } from "express";
-import { canUseControlledFeature, getGlobalAppConfig } from "./_lib/featureAccess.js";
+import { canUseControlledFeature, getGlobalAppConfig } from "./featureAccess.js";
 
 type TravelIntelMode = "track-train" | "track-flight";
 
-function getAction(req: Request): TravelIntelMode | "" {
+function getAction(req: any): TravelIntelMode | "" {
   const fromQuery = req.query?.action;
   const action = Array.isArray(fromQuery) ? fromQuery[0] : fromQuery || req.body?.action || "";
   return action === "track-train" || action === "track-flight" ? action : "";
@@ -21,26 +20,12 @@ function normalizeRequester(body: any) {
 
 function buildDemoResult(mode: TravelIntelMode, identifier: string, travelDate: string) {
   const checkedAt = new Date().toISOString();
-  if (mode === "track-train") {
-    return {
-      status: "staged",
-      title: `Demo train status · ${identifier}`,
-      summary:
-        "Travel Intel is running in demo/sandbox mode. Live train provider data will appear here once the admin enables a configured provider.",
-      checkedAt,
-      details: [
-        { label: "Travel date", value: travelDate },
-        { label: "Platform mode", value: "Demo / Sandbox" },
-        { label: "Provider", value: "Not connected" },
-      ],
-    };
-  }
-
+  const label = mode === "track-train" ? "train" : "flight";
   return {
     status: "staged",
-    title: `Demo flight status · ${identifier}`,
+    title: `Demo ${label} status · ${identifier}`,
     summary:
-      "Travel Intel is running in demo/sandbox mode. Live flight provider data will appear here once the admin enables a configured provider.",
+      `Travel Intel is running in demo/sandbox mode. Live ${label} provider data will appear here once the admin enables a configured provider.`,
     checkedAt,
     details: [
       { label: "Travel date", value: travelDate },
@@ -91,7 +76,7 @@ async function fetchProviderResult({
   }
 }
 
-export default async function travelIntelHandler(req: Request, res: Response) {
+export async function handleTravelIntel(req: any, res: any) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed." });
@@ -129,14 +114,13 @@ export default async function travelIntelHandler(req: Request, res: Response) {
     }
 
     try {
-      const liveResult = await fetchProviderResult({
+      return res.status(200).json(await fetchProviderResult({
         baseUrl: providerUrl,
         apiKey,
         mode: action,
         identifier,
         travelDate,
-      });
-      return res.status(200).json(liveResult);
+      }));
     } catch (providerError: any) {
       console.warn("Travel Intel provider fallback:", providerError?.message || providerError);
       return res.status(200).json({

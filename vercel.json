@@ -83,6 +83,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/travel-intel",
+      "destination": "/api/health?action=travel-intel"
+    },
+    {
       "source": "/terms",
       "has": [
         {
