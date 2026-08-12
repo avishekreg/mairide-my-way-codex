@@ -67,8 +67,10 @@ jobs:
 
       - name: Verify Google Maps key is baked into the Android web bundle
         run: |
-          if ! rg -q 'AIza[0-9A-Za-z_-]{20,}' dist/assets/main-*.js; then
+          if ! grep -R -E -q 'AIza[0-9A-Za-z_-]{20,}' dist/assets/; then
             echo "Google Maps API key is missing from dist. Android maps will be blank."
+            echo "VITE_GOOGLE_MAPS_API_KEY length: ${#VITE_GOOGLE_MAPS_API_KEY}"
+            ls -la dist/assets || true
             exit 1
           fi
           echo "Google Maps API key present in web bundle."
