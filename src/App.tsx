@@ -9338,10 +9338,21 @@ const findUserProfileByPhone = async (value: string) => {
           await handleProfileSetup(result.user, undefined, undefined, false);
         } catch (error: any) {
           console.error('Login Error:', error);
+          const rawMessage = String(error?.message || error || '');
+          const lowered = rawMessage.toLowerCase();
           if (error?.message === 'NOT_REGISTERED' || error?.code === 'auth/user-not-found') {
             setNotRegisteredError(true);
+          } else if (
+            lowered.includes('failed to fetch') ||
+            lowered.includes('networkerror') ||
+            lowered.includes('network request failed') ||
+            lowered.includes('load failed') ||
+            lowered.includes('cors') ||
+            lowered.includes('offline')
+          ) {
+            alert('Unable to connect to login server. Please check your network.');
           } else {
-            alert(String(error?.message || 'Invalid credentials'));
+            alert(rawMessage || 'Invalid credentials');
           }
         } finally {
           // NEVER leave the Login button stuck on "Processing..."
@@ -9351,10 +9362,21 @@ const findUserProfileByPhone = async (value: string) => {
       }
     } catch (error: any) {
       console.error('Login Error:', error);
+      const rawMessage = String(error?.message || error || '');
+      const lowered = rawMessage.toLowerCase();
       if (error?.message === 'NOT_REGISTERED' || error?.code === 'auth/user-not-found') {
         setNotRegisteredError(true);
+      } else if (
+        lowered.includes('failed to fetch') ||
+        lowered.includes('networkerror') ||
+        lowered.includes('network request failed') ||
+        lowered.includes('load failed') ||
+        lowered.includes('cors') ||
+        lowered.includes('offline')
+      ) {
+        alert('Unable to connect to login server. Please check your network.');
       } else {
-        alert(String(error?.message || 'Invalid credentials'));
+        alert(rawMessage || 'Invalid credentials');
       }
     } finally {
       setIsLoading(false);
