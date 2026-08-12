@@ -25,13 +25,11 @@ const config: CapacitorConfig = {
     ],
   },
   plugins: {
+    // Do NOT globally patch window.fetch — that combination with remote
+    // server.url has caused Android WebView fatal crashes on cold start.
+    // Login still uses explicit CapacitorHttp.post() where needed.
     CapacitorHttp: {
-      enabled: true,
-    },
-    GoogleAuth: {
-      scopes: ['profile', 'email'],
-      serverClientId: GOOGLE_WEB_CLIENT_ID,
-      forceCodeForRefreshToken: false,
+      enabled: false,
     },
     GoogleSignIn: {
       scopes: ['profile', 'email'],

@@ -11827,20 +11827,26 @@ const MapFirstDashboardShell = ({
         )}
       >
         {topControlsOnly ? (
-          <div className="pointer-events-auto absolute left-1/2 top-0 z-20 flex w-[min(100%,24rem)] max-w-full -translate-x-1/2 flex-row flex-wrap items-center justify-center gap-2 rounded-full bg-white/90 px-2 py-1 shadow-lg shadow-mairide-primary/10 backdrop-blur-md sm:w-fit sm:px-3">
-            {primaryAction}
-            {secondaryAction}
+          <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-2 rounded-full bg-white/92 px-2 py-2 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl sm:w-fit sm:max-w-full">
+            {secondaryAction ? (
+              <div className="min-w-0 flex-1 sm:flex-none">{secondaryAction}</div>
+            ) : null}
+            <div className="min-w-0 shrink">{primaryAction}</div>
           </div>
         ) : compactSearchBar ? (
           <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-2 rounded-full bg-white/92 px-2 py-2 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl sm:w-fit sm:max-w-full">
-            <button
-              type="button"
-              onClick={onSearchClick}
-              className="inline-flex min-w-0 flex-1 items-center gap-2 rounded-full px-3 py-2.5 text-left transition-colors hover:bg-mairide-bg sm:flex-none sm:gap-3 sm:px-4 sm:py-3"
-            >
-              <Search className="h-5 w-5 shrink-0 text-mairide-primary" />
-              <span className="truncate text-sm font-black tracking-tight text-mairide-primary sm:text-base">{searchLabel}</span>
-            </button>
+            {secondaryAction ? (
+              <div className="min-w-0 flex-1 sm:flex-none">{secondaryAction}</div>
+            ) : (
+              <button
+                type="button"
+                onClick={onSearchClick}
+                className="inline-flex min-w-0 flex-1 items-center gap-2 rounded-full px-3 py-2.5 text-left transition-colors hover:bg-mairide-bg sm:flex-none sm:gap-3 sm:px-4 sm:py-3"
+              >
+                <Search className="h-5 w-5 shrink-0 text-mairide-primary" />
+                <span className="truncate text-sm font-black tracking-tight text-mairide-primary sm:text-base">{searchLabel}</span>
+              </button>
+            )}
             <div className="min-w-0 shrink">{primaryAction}</div>
           </div>
         ) : (
@@ -21792,7 +21798,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
           <MapFirstDashboardShell
             searchLabel="Where are you heading?"
             searchSubtext={isOnline ? "Post an empty-leg offer from your route" : "Go online to start accepting live demand"}
-            topControlsOnly
+            compactSearchBar
             showBottomSheet={false}
             onSearchClick={() => {
               if (!isOnline) {
@@ -21802,8 +21808,28 @@ const finalizeDriverDashboardRazorpayPayment = async (
               setLinkedTravelerRequestId(null);
               setShowOfferForm(true);
             }}
+            secondaryAction={(
+              <button
+                type="button"
+                onClick={() => {
+                  void toggleOnline();
+                }}
+                className="inline-flex min-w-0 flex-1 items-center gap-2 rounded-full px-3 py-2.5 text-left transition-colors hover:bg-mairide-bg sm:flex-none sm:gap-3 sm:px-4 sm:py-3"
+              >
+                <span
+                  className={cn(
+                    "h-2.5 w-2.5 shrink-0 rounded-full",
+                    isOnline ? "bg-green-600 animate-pulse" : "bg-mairide-secondary"
+                  )}
+                />
+                <span className="truncate text-sm font-black tracking-tight text-mairide-primary sm:text-base">
+                  {isOnline ? 'Online' : 'Offline'}
+                </span>
+              </button>
+            )}
             primaryAction={(
               <button
+                type="button"
                 onClick={() => {
                   if (!isOnline) {
                     alert('Please switch online first to offer a ride.');
@@ -21813,27 +21839,15 @@ const finalizeDriverDashboardRazorpayPayment = async (
                   setShowOfferForm(true);
                 }}
                 className={cn(
-                  "inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-black shadow-xl transition-all sm:h-12 sm:gap-2 sm:px-5 sm:text-sm",
+                  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2.5 text-xs font-bold shadow-lg transition-all sm:gap-2 sm:px-5 sm:py-3 sm:text-sm",
                   isOnline
                     ? "bg-mairide-accent text-white shadow-mairide-accent/20 hover:bg-mairide-primary"
-                    : "cursor-not-allowed bg-mairide-secondary text-mairide-primary opacity-80"
+                    : "cursor-not-allowed bg-mairide-secondary text-mairide-primary opacity-80 shadow-none"
                 )}
                 disabled={!isOnline}
               >
                 <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
                 <span className="truncate">Offer a Ride</span>
-              </button>
-            )}
-            secondaryAction={(
-              <button
-                onClick={toggleOnline}
-                className={cn(
-                  "inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-black shadow-xl transition-all sm:h-12 sm:gap-2 sm:px-5 sm:text-sm",
-                  isOnline ? "bg-green-600 text-white shadow-green-900/20" : "bg-white text-mairide-primary"
-                )}
-              >
-                <span className={cn("h-2.5 w-2.5 rounded-full", isOnline ? "bg-white animate-pulse" : "bg-mairide-primary")} />
-                {isOnline ? 'Online' : 'Offline'}
               </button>
             )}
             sheetTitle=""

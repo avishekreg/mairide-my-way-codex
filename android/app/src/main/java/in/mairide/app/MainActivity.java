@@ -7,7 +7,11 @@ import io.capawesome.capacitorjs.plugins.googlesignin.GoogleSignInPlugin;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        registerPlugin(GoogleSignInPlugin.class);
+        try {
+            registerPlugin(GoogleSignInPlugin.class);
+        } catch (Throwable ignored) {
+            // Plugin may already be auto-registered; never block cold start.
+        }
         super.onCreate(savedInstanceState);
     }
 }

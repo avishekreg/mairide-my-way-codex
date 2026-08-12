@@ -82,8 +82,14 @@ jobs:
             appName: 'MaiRide',
             webDir: 'dist',
             plugins: {
+              // Keep CapHttp opt-in only. Global fetch patching crashes some Android WebViews
+              // when server.url loads the live site.
               CapacitorHttp: {
-                enabled: true,
+                enabled: false,
+              },
+              GoogleSignIn: {
+                scopes: ['profile', 'email'],
+                serverClientId: '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com',
               },
               PushNotifications: {
                 presentationOptions: ['badge', 'sound', 'alert'],
@@ -110,6 +116,31 @@ jobs:
 
       - name: Sync Android platform
         run: npx cap sync android
+
+      - name: Harden MainActivity Google Sign-In registration
+        run: |
+          MAIN_ACTIVITY="android/app/src/main/java/in/mairide/app/MainActivity.java"
+          mkdir -p "$(dirname "$MAIN_ACTIVITY")"
+          cat > "$MAIN_ACTIVITY" <<'EOF'
+          package in.mairide.app;
+
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+          import io.capawesome.capacitorjs.plugins.googlesignin.GoogleSignInPlugin;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  try {
+                      registerPlugin(GoogleSignInPlugin.class);
+                  } catch (Throwable ignored) {
+                      // Plugin may already be auto-registered; never block cold start.
+                  }
+                  super.onCreate(savedInstanceState);
+              }
+          }
+          EOF
+          echo "MainActivity hardened for Google Sign-In."
 
       - name: Inject Android runtime permissions
         run: |
