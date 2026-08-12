@@ -137,6 +137,12 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
+import {
+  SESSION_RESTORE_TIMEOUT_MS,
+  hardResetToLogin,
+  purgeLocalAuthSession,
+  retrySessionRestore,
+} from './lib/sessionRecovery';
 
 type BrowserSpeechRecognitionAlternative = {
   transcript: string;
@@ -3441,7 +3447,7 @@ const buildAndroidQrUrl = (apkUrl: string) =>
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v3.0.1-beta+build.248';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'V3.5.0';
 const APP_NAV_HOME_EVENT = 'mairide:navigate-home';
 const APP_NAV_TAB_EVENT = 'mairide:navigate-tab';
 const APP_DIALOG_EVENT = 'mairide:dialog';
@@ -6946,16 +6952,37 @@ const LoadingScreen = ({
   onSignOut?: () => void;
 }) => {
   const releaseVersion = String(releaseVersionProp || '').trim() || APP_VERSION;
-  const [recoveryVisible, setRecoveryVisible] = useState(false);
+  const [recoveryVisible, setRecoveryVisible] = useState(Boolean(showRecovery));
 
   useEffect(() => {
     if (!showRecovery) {
       setRecoveryVisible(false);
       return;
     }
-    const timer = window.setTimeout(() => setRecoveryVisible(true), 4500);
-    return () => window.clearTimeout(timer);
+    setRecoveryVisible(true);
+    // Auto-escape hung session restore: purge stale tokens and return to login.
+    // Intentionally omit onSignOut from deps so a new function identity does not reset the timer.
+    const autoReset = window.setTimeout(() => {
+      purgeLocalAuthSession();
+      void Promise.resolve(onSignOut?.()).finally(() => {
+        hardResetToLogin();
+      });
+    }, SESSION_RESTORE_TIMEOUT_MS);
+    return () => window.clearTimeout(autoReset);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- arm once while recovery mode is active
   }, [showRecovery]);
+
+  const handleRetry = () => {
+    // Re-initiate auth check with a clean transport path.
+    retrySessionRestore();
+  };
+
+  const handleBackToLogin = () => {
+    purgeLocalAuthSession();
+    void Promise.resolve(onSignOut?.()).finally(() => {
+      hardResetToLogin();
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#1F2D38] px-6 text-white">
@@ -6975,24 +7002,18 @@ const LoadingScreen = ({
         <div className="mt-8 flex w-full max-w-sm flex-col gap-3">
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={handleRetry}
             className="rounded-2xl bg-[#E97A2E] px-5 py-3 text-sm font-black text-white"
           >
             Retry
           </button>
-          {onSignOut ? (
-            <button
-              type="button"
-              onClick={() => {
-                void Promise.resolve(onSignOut()).finally(() => {
-                  window.location.reload();
-                });
-              }}
-              className="rounded-2xl border border-white/25 px-5 py-3 text-sm font-bold text-white"
-            >
-              Back to login
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={handleBackToLogin}
+            className="rounded-2xl border border-white/25 px-5 py-3 text-sm font-bold text-white"
+          >
+            Back to login
+          </button>
         </div>
       ) : null}
     </div>
