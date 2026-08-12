@@ -222,9 +222,9 @@ const isLocalDevFirestoreMode = () => {
 const resolveApiBaseUrl = () => {
   if (typeof window === 'undefined') return '';
 
-  // Native Capacitor shells always call production APIs directly.
-  // Local assets may be served under a spoofed hostname (rides.mairide.in) for Maps referrer
-  // compatibility — same-origin /api would miss the real Vercel backend.
+  // Native Capacitor shells always call production APIs over the real network.
+  // Never use window.location.origin here — the WebView host is localhost (bundled
+  // assets), and spoofing rides.mairide.in previously trapped /api in Cap's local server.
   try {
     if (typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform()) {
       return WEB_API_ORIGIN_FALLBACK;
@@ -322,15 +322,22 @@ const buildOriginCandidates = (path?: string) => {
   const currentOrigin = String(window.location.origin || '');
   const normalizedPath = String(path || '').toLowerCase();
   const isAuthPath = normalizedPath.startsWith('/api/auth');
+  const isNativeShell = (() => {
+    try {
+      return typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
+    } catch {
+      return false;
+    }
+  })();
 
-  if (isAndroidWebViewLikeRuntime() && isAuthPath) {
-    // Android WebView auth is sensitive to host-level HTML fallbacks/challenges.
-    // Prefer the canonical public domain, then fall back to the Vercel deployment.
+  // Native shells must never use the WebView origin (localhost or a spoofed host).
+  // Those requests are answered by Capacitor's local asset server, not Vercel.
+  if (isNativeShell || (isAndroidWebViewLikeRuntime() && isAuthPath)) {
     return Array.from(new Set([WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER].filter(Boolean)));
   }
 
   const appPreferred = isAndroidWebViewLikeRuntime()
-    ? [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER, currentOrigin, primary]
+    ? [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER, primary]
     : [currentOrigin, primary, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
   return Array.from(
     new Set(appPreferred.filter(Boolean))
@@ -6445,7 +6452,34 @@ const signInWithDirectSupabasePassword = async (email: string, password: string)
         return data;
       }
     } catch {
-      // Fall through to hydrated session object below.
+      // Fall through — try reading the seeded storage session below.
+    }
+
+    // Native shells cannot rely on location.reload() to pick up a seeded session.
+    // Prefer getSession from storage; if that fails on native, surface a hard error.
+    try {
+      const { data: existing } = await withRejectingTimeout(
+        supabase.auth.getSession(),
+        5000,
+        'Login session verification timed out. Please retry.'
+      );
+      if (existing?.session?.access_token) {
+        return existing;
+      }
+    } catch {
+      // Continue to native/web divergence below.
+    }
+
+    const isNative = (() => {
+      try {
+        return typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
+      } catch {
+        return false;
+      }
+    })();
+
+    if (isNative) {
+      throw new Error('Login session could not be established. Please retry.');
     }
 
     return {
@@ -9306,84 +9340,10 @@ const findUserProfileByPhone = async (value: string) => {
         // Email/Password Login
         if (isAndroidWebViewRuntime) {
           const loginEmail = normalizeEmailValue(normalizedUsername);
-          // Race native Supabase HTTP with same-origin Vercel proxy. Whichever
-          // returns a session first wins — WebView stalls and upstream hangs
-          // should not block both paths serially.
-          const persistProxySession = async () => {
-            // Node function in iad1 — bom1 Edge/Node cannot reach supabase.co from India.
-            const fallbackResponse = await fetchWithOriginFailover('/api/auth?action=password-login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: loginEmail, password }),
-              cache: 'no-store',
-            });
-            const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
-            const accessToken = String(fallbackData?.session?.access_token || '');
-            const refreshToken = String(fallbackData?.session?.refresh_token || '');
-
-            if (!accessToken || !refreshToken) {
-              throw new Error('Login session could not be established.');
-            }
-
-            // Seed localStorage immediately; setSession can hang on Preferences.
-            try {
-              if (typeof window !== 'undefined' && window.localStorage) {
-                const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
-                const existingRaw = window.localStorage.getItem(storageKey);
-                const existing = existingRaw ? JSON.parse(existingRaw) : {};
-                window.localStorage.setItem(
-                  storageKey,
-                  JSON.stringify({
-                    ...existing,
-                    access_token: accessToken,
-                    refresh_token: refreshToken,
-                    token_type: 'bearer',
-                    expires_in: 3600,
-                    expires_at: Math.floor(Date.now() / 1000) + 3600,
-                    user: fallbackData?.user || existing?.user || null,
-                  })
-                );
-              }
-            } catch {
-              // Continue with setSession.
-            }
-
-            try {
-              const { error: setSessionError } = await withRejectingTimeout(
-                supabase.auth.setSession({
-                  access_token: accessToken,
-                  refresh_token: refreshToken,
-                }),
-                8000,
-                'Login session setup timed out. Please retry.'
-              );
-              if (setSessionError) {
-                // Still reload if tokens were seeded — auth bootstrap can pick them up.
-                console.warn('setSession after proxy login:', setSessionError.message);
-              }
-            } catch (sessionError) {
-              console.warn('setSession after proxy login timed out', sessionError);
-            }
-          };
-
-          const directAttempt = signInWithDirectSupabasePassword(loginEmail, password).then(() => 'direct' as const);
-          const proxyAttempt = persistProxySession().then(() => 'proxy' as const);
-
-          try {
-            await Promise.any([directAttempt, proxyAttempt]);
-          } catch (aggregateError: any) {
-            const errors = Array.isArray(aggregateError?.errors) ? aggregateError.errors : [aggregateError];
-            const firstUseful =
-              errors.find((err: any) => {
-                const msg = String(err?.message || '').toLowerCase();
-                return msg && !msg.includes('timed out') && !msg.includes('timeout');
-              }) || errors[0];
-            throw firstUseful instanceof Error
-              ? firstUseful
-              : new Error(String(firstUseful?.message || 'Failed to login'));
-          }
-
-          window.location.reload();
+          // Native only: CapacitorHttp → Supabase token grant. Do not race a WebView
+          // fetch proxy, and do not location.reload() (that previously escaped the
+          // bundled shell when hostname/allowNavigation pointed at the live domain).
+          await signInWithDirectSupabasePassword(loginEmail, password);
           return;
         }
 
@@ -29290,7 +29250,11 @@ const App = () => {
         const profileDocId = mappedPhoneProfileId || u.uid;
 
         try {
-          const snapshot = await getDoc(doc(db, 'users', profileDocId));
+          const snapshot = await withRejectingTimeout(
+            getDoc(doc(db, 'users', profileDocId)),
+            12000,
+            'Profile lookup timed out. Please retry.'
+          );
           if (!active || generation !== authResolveGenerationRef.current) return;
           if (snapshot.exists()) {
             const resolvedProfile = snapshot.data() as UserProfile;

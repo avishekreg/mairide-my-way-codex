@@ -3,9 +3,14 @@
  * Generates capacitor.config.ts for Android CI builds.
  * HAS_ANDROID_FIREBASE=1 keeps PushNotifications; otherwise omit it.
  *
- * hostname is set to rides.mairide.in so local WebView assets share the same
- * HTTPS origin as production (Google Maps API key referrer restrictions).
- * The app still forces API calls to https://rides.mairide.in via resolveApiBaseUrl().
+ * IMPORTANT: Do NOT set server.hostname to rides.mairide.in (or any live API host).
+ * Spoofing the production host makes same-origin fetches hit Capacitor's local asset
+ * server, and allowNavigation + location.reload() can escape the bundled shell into
+ * a remote white-screen state after login.
+ *
+ * Keep default localhost + https scheme. Maps key is baked at build time; Google Cloud
+ * HTTP referrers must allow https://localhost/* for the WebView Maps JS API.
+ * API calls always target https://rides.mairide.in via resolveApiBaseUrl().
  */
 import { writeFileSync } from 'node:fs';
 
@@ -34,10 +39,9 @@ const config: CapacitorConfig = {
 ${pushBlock}  },
   server: {
     androidScheme: 'https',
-    hostname: 'rides.mairide.in',
+    // Default Capacitor host. Never spoof the live API domain here.
     cleartext: false,
     allowNavigation: [
-      'rides.mairide.in',
       'www.mairide.in',
       'mairide.in',
       'jcgoccsdlrjnratpaeje.supabase.co',
