@@ -3403,9 +3403,9 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
-const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
-const TRACKED_ANDROID_APK_URL = '/api/analytics?action=android-download';
-const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/api/analytics?action=android-download';
+const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android.apk';
+const TRACKED_ANDROID_APK_URL = '/downloads/mairide-android.apk';
+const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/downloads/mairide-android.apk';
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(PUBLIC_ANDROID_DOWNLOAD_URL)}`;
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';

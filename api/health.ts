@@ -171,7 +171,7 @@ export default async function handler(req: any, res: any) {
           normalizeConfigString(configData.androidUpdateUrl) ||
           normalizeConfigString(configData.androidStoreUrl) ||
           normalizeConfigString(process.env.MAIRIDE_ANDROID_APK_URL) ||
-          "https://downloads.mairide.in/mairide-android.apk",
+          "https://rides.mairide.in/downloads/mairide-android.apk",
         iosUpdateUrl:
           normalizeConfigString(configData.iosUpdateUrl) ||
           normalizeConfigString(configData.iosStoreUrl) ||

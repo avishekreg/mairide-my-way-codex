@@ -22,8 +22,8 @@
   <main class="wrap">
     <section class="card">
       <h1>Get MaiRide on Android</h1>
-      <p>Download the Android installer directly from mairide.in.</p>
-      <a id="apk-download" class="btn btn-secondary" href="/api/analytics?action=android-download" target="_blank" rel="noopener noreferrer">
+      <p>Download the Android installer directly. The file is optimized for a fast start and small device footprint.</p>
+      <a id="apk-download" class="btn btn-secondary" href="./mairide-android.apk" download="mairide-android.apk">
         Download APK
       </a>
       <a id="apk-chrome" class="btn btn-primary" style="margin-left:10px" href="#">
@@ -41,8 +41,8 @@
   </main>
   <script>
     (function () {
-      var SITE_ORIGIN = window.location.origin || 'https://www.mairide.in';
-      var apkPath = SITE_ORIGIN + '/api/analytics?action=android-download&t=' + Date.now();
+      var SITE_ORIGIN = window.location.origin || 'https://rides.mairide.in';
+      var apkPath = SITE_ORIGIN + '/downloads/mairide-android.apk';
       var apkDownload = document.getElementById('apk-download');
       var apkChrome = document.getElementById('apk-chrome');
       var status = document.getElementById('apk-status');
@@ -62,6 +62,12 @@
         }
       }
       applyApkUrl(apkPath);
+      fetch('/api/analytics?action=event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metricKey: 'android_apk_download_started', units: 'page_view', data: { source: 'android_download_page' } }),
+        keepalive: true
+      }).catch(function () {});
 
       var params = new URLSearchParams(window.location.search);
       if (params.get('autostart') === '1') {

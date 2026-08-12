@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
 const ANDROID_APK_URL =
-  process.env.MAIRIDE_ANDROID_APK_URL || "https://downloads.mairide.in/mairide-android.apk";
+  process.env.MAIRIDE_ANDROID_APK_URL || "https://rides.mairide.in/downloads/mairide-android.apk";
 
 const ALLOWED_METRICS = new Set([
   "app_opened",
