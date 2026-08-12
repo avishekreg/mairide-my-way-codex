@@ -6357,21 +6357,24 @@ const signInWithDirectSupabasePassword = async (email: string, password: string)
   };
 
   const requestPasswordGrant = async () => {
-    const useNativeHttp =
-      typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
+    const canUseNativeHttp =
+      typeof CapacitorHttp?.post === 'function' &&
+      (
+        (typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform()) ||
+        (typeof Capacitor?.getPlatform === 'function' && Capacitor.getPlatform() === 'android')
+      );
 
-    if (useNativeHttp) {
+    if (canUseNativeHttp) {
       // Native HTTP bypasses Android WebView networking stalls to supabase.co.
       const nativeResponse = await withRejectingTimeout(
         CapacitorHttp.post({
           url: tokenUrl,
           headers: authHeaders,
-          // String body is more reliable across Capacitor Android WebView bridges.
-          data: JSON.stringify(authBody),
-          connectTimeout: SUPABASE_PASSWORD_GRANT_TIMEOUT_MS,
-          readTimeout: SUPABASE_PASSWORD_GRANT_TIMEOUT_MS,
+          data: authBody,
+          connectTimeout: Math.min(SUPABASE_PASSWORD_GRANT_TIMEOUT_MS, 12000),
+          readTimeout: Math.min(SUPABASE_PASSWORD_GRANT_TIMEOUT_MS, 12000),
         }),
-        SUPABASE_PASSWORD_GRANT_TIMEOUT_MS + 2000,
+        14000,
         'Authentication service timed out. Please retry.'
       );
 
@@ -9161,8 +9164,8 @@ const findUserProfileByPhone = async (value: string) => {
           // returns a session first wins — WebView stalls and upstream hangs
           // should not block both paths serially.
           const persistProxySession = async () => {
-            // Dedicated Edge function — Vercel Node in bom1 cannot reach supabase.co at all.
-            const fallbackResponse = await fetchWithOriginFailover('/api/password-login', {
+            // Node function in iad1 — bom1 Edge/Node cannot reach supabase.co from India.
+            const fallbackResponse = await fetchWithOriginFailover('/api/auth?action=password-login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: loginEmail, password }),
@@ -9259,7 +9262,7 @@ const findUserProfileByPhone = async (value: string) => {
             throw loginError;
           }
 
-          const fallbackResponse = await fetchWithOriginFailover('/api/password-login', {
+          const fallbackResponse = await fetchWithOriginFailover('/api/auth?action=password-login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

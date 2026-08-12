@@ -238,6 +238,7 @@ export default async function handler(req: any, res: any) {
       deployId: String(process.env.VERCEL_DEPLOYMENT_ID || "").trim(),
       env: String(process.env.VERCEL_ENV || process.env.NODE_ENV || "").trim(),
       vercelUrl: String(process.env.VERCEL_URL || "").trim(),
+      region: String(process.env.VERCEL_REGION || "").trim(),
       builtAt: new Date().toISOString(),
     });
     if (action === "app-version") {
