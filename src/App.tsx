@@ -9161,11 +9161,13 @@ const findUserProfileByPhone = async (value: string) => {
           // returns a session first wins — WebView stalls and upstream hangs
           // should not block both paths serially.
           const persistProxySession = async () => {
-            const fallbackResponse = await postAuthAction(
-              'password-login',
-              { email: loginEmail, password },
-              '/api/auth?action=password-login'
-            );
+            // Dedicated Edge function — Vercel Node in bom1 cannot reach supabase.co at all.
+            const fallbackResponse = await fetchWithOriginFailover('/api/password-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: loginEmail, password }),
+              cache: 'no-store',
+            });
             const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
             const accessToken = String(fallbackData?.session?.access_token || '');
             const refreshToken = String(fallbackData?.session?.refresh_token || '');
@@ -9257,11 +9259,15 @@ const findUserProfileByPhone = async (value: string) => {
             throw loginError;
           }
 
-          const fallbackResponse = await postAuthAction(
-            'password-login',
-            { email: normalizeEmailValue(normalizedUsername), password },
-            '/api/auth?action=password-login'
-          );
+          const fallbackResponse = await fetchWithOriginFailover('/api/password-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: normalizeEmailValue(normalizedUsername),
+              password,
+            }),
+            cache: 'no-store',
+          });
           const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
           const accessToken = String(fallbackData?.session?.access_token || '');
           const refreshToken = String(fallbackData?.session?.refresh_token || '');
