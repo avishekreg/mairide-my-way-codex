@@ -9,18 +9,18 @@ const GOOGLE_WEB_CLIENT_ID =
   '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com';
 
 /**
- * Android/iOS shells load the bundled web assets (no remote server.url).
- * Remote server.url + Firebase Messaging without google-services.json was
- * crashing cold starts on device; APIs still target https://rides.mairide.in
- * via resolveApiBaseUrl() when the WebView host is localhost/capacitor.
+ * Native Android shell: load the live HTTPS app origin so API + map tiles
+ * share the same secure host (fixes Network Error / blocked tiles in WebView).
+ * Local production web deploy remains separate — this only affects the APK WebView.
  */
 const config: CapacitorConfig = {
   appId: "in.mairide.app",
   appName: "MaiRide",
   webDir: "dist",
   server: {
+    url: "https://rides.mairide.in",
     androidScheme: "https",
-    cleartext: false,
+    cleartext: true,
     allowNavigation: [
       "rides.mairide.in",
       "www.mairide.in",
@@ -30,7 +30,14 @@ const config: CapacitorConfig = {
       "accounts.google.com",
       "*.googleapis.com",
       "*.gstatic.com",
+      "*.tile.openstreetmap.org",
+      "*.openstreetmap.org",
+      "*.mapbox.com",
+      "api.mapbox.com",
     ],
+  },
+  android: {
+    allowMixedContent: true,
   },
   plugins: {
     CapacitorHttp: {

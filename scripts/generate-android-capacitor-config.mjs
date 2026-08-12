@@ -3,11 +3,8 @@
  * Generates capacitor.config.ts for Android CI builds.
  * HAS_ANDROID_FIREBASE=1 keeps PushNotifications; otherwise omit it.
  *
- * LOCKED to known-good APK 342 (093016b) shell config:
- * - CapHttp.enabled = false (explicit CapHttp.post still used for login)
- * - NO server.hostname spoof of rides.mairide.in (that caused white-screen)
- * - NO remote server.url
- * Maps key is supplied at Vite build time via VITE_GOOGLE_MAPS_API_KEY.
+ * Production native shell loads https://rides.mairide.in so API + map tiles
+ * share the live HTTPS origin (fixes Network Error / blocked tiles in WebView).
  */
 import { writeFileSync } from 'node:fs';
 
@@ -25,18 +22,10 @@ const config: CapacitorConfig = {
   appId: 'in.mairide.app',
   appName: 'MaiRide',
   webDir: 'dist',
-  plugins: {
-    CapacitorHttp: {
-      enabled: false,
-    },
-    GoogleSignIn: {
-      scopes: ['profile', 'email'],
-      serverClientId: '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com',
-    },
-${pushBlock}  },
   server: {
+    url: 'https://rides.mairide.in',
     androidScheme: 'https',
-    cleartext: false,
+    cleartext: true,
     allowNavigation: [
       'rides.mairide.in',
       'www.mairide.in',
@@ -46,8 +35,24 @@ ${pushBlock}  },
       'accounts.google.com',
       '*.googleapis.com',
       '*.gstatic.com',
+      '*.tile.openstreetmap.org',
+      '*.openstreetmap.org',
+      '*.mapbox.com',
+      'api.mapbox.com',
     ],
   },
+  android: {
+    allowMixedContent: true,
+  },
+  plugins: {
+    CapacitorHttp: {
+      enabled: false,
+    },
+    GoogleSignIn: {
+      scopes: ['profile', 'email'],
+      serverClientId: '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com',
+    },
+${pushBlock}  },
 };
 
 export default config;

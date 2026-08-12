@@ -1,13 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme">
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:largeHeap="true">
+
+        <!--
+          WebView Content-Security Policy allowance for map tiles / APIs.
+          Remote shell loads https://rides.mairide.in; this documents the
+          required connect-src hosts for Android network policy alignment:
+          'self' https://*.mairide.in https://*.supabase.co
+          https://*.tile.openstreetmap.org https://*.mapbox.com
+          https://*.googleapis.com https://*.gstatic.com
+        -->
+        <meta-data
+            android:name="in.mairide.app.WEBVIEW_CONNECT_SRC"
+            android:value="'self' https://*.mairide.in https://*.supabase.co https://*.tile.openstreetmap.org https://*.mapbox.com https://*.googleapis.com https://*.gstatic.com" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
@@ -31,11 +52,8 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"></meta-data>
+                android:resource="@xml/file_paths" />
         </provider>
     </application>
 
-    <!-- Permissions -->
-
-    <uses-permission android:name="android.permission.INTERNET" />
 </manifest>

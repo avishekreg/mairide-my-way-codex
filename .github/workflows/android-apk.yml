@@ -101,18 +101,22 @@ jobs:
       - name: Generate Capacitor config
         run: node scripts/generate-android-capacitor-config.mjs
 
-      - name: Guard against spoofed production Capacitor hostname
+      - name: Guard Capacitor production WebView mapping
         run: |
           if grep -n "hostname:.*rides\\.mairide\\.in" capacitor.config.ts; then
             echo "Refusing to build: Capacitor hostname must not spoof rides.mairide.in"
-            echo "That setting traps /api in the local asset server and white-screens after login."
+            echo "Use server.url instead of hostname spoofing."
             exit 1
           fi
-          if grep -n "server\\.url" capacitor.config.ts; then
-            echo "Refusing to build: remote server.url is not allowed for Android APKs"
+          if ! grep -n "url: 'https://rides.mairide.in'" capacitor.config.ts && ! grep -n 'url: "https://rides.mairide.in"' capacitor.config.ts; then
+            echo "Refusing to build: server.url must be https://rides.mairide.in"
             exit 1
           fi
-          echo "Capacitor config hostname/server.url guards passed."
+          if ! grep -n "allowMixedContent: true" capacitor.config.ts; then
+            echo "Refusing to build: android.allowMixedContent must be true"
+            exit 1
+          fi
+          echo "Capacitor production WebView mapping guards passed."
 
       - name: Add Android platform
         run: npx cap add android
@@ -129,8 +133,8 @@ jobs:
             cat "$CFG"
             exit 1
           fi
-          if grep -n '"url"[[:space:]]*:' "$CFG" | grep -i 'rides.mairide.in\\|http'; then
-            echo "Refusing to package: synced Capacitor config contains remote server url"
+          if ! grep -n '"url"[[:space:]]*:[[:space:]]*"https://rides.mairide.in"' "$CFG"; then
+            echo "Refusing to package: synced Capacitor config missing https://rides.mairide.in server.url"
             cat "$CFG"
             exit 1
           fi

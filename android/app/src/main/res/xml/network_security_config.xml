@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Allow HTTPS map/API hosts and cleartext fallbacks for WebView tile loads. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">mairide.in</domain>
+        <domain includeSubdomains="true">supabase.co</domain>
+        <domain includeSubdomains="true">googleapis.com</domain>
+        <domain includeSubdomains="true">gstatic.com</domain>
+        <domain includeSubdomains="true">openstreetmap.org</domain>
+        <domain includeSubdomains="true">tile.openstreetmap.org</domain>
+        <domain includeSubdomains="true">mapbox.com</domain>
+    </domain-config>
+</network-security-config>
