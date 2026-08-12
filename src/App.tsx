@@ -9315,157 +9315,46 @@ const findUserProfileByPhone = async (value: string) => {
           throw new Error(data.Details || 'Failed to send OTP');
         }
       } else {
-        // Email/Password Login
-        if (isAndroidWebViewRuntime) {
-          const loginEmail = normalizeEmailValue(normalizedUsername);
-          // Race native Supabase HTTP with same-origin Vercel proxy. Whichever
-          // returns a session first wins — WebView stalls and upstream hangs
-          // should not block both paths serially.
-          const persistProxySession = async () => {
-            // Node function in iad1 — bom1 Edge/Node cannot reach supabase.co from India.
-            const fallbackResponse = await fetchWithOriginFailover('/api/auth?action=password-login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: loginEmail, password }),
-              cache: 'no-store',
-            });
-            const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
-            const accessToken = String(fallbackData?.session?.access_token || '');
-            const refreshToken = String(fallbackData?.session?.refresh_token || '');
-
-            if (!accessToken || !refreshToken) {
-              throw new Error('Login session could not be established.');
-            }
-
-            // Seed localStorage immediately; setSession can hang on Preferences.
-            try {
-              if (typeof window !== 'undefined' && window.localStorage) {
-                const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
-                const existingRaw = window.localStorage.getItem(storageKey);
-                const existing = existingRaw ? JSON.parse(existingRaw) : {};
-                window.localStorage.setItem(
-                  storageKey,
-                  JSON.stringify({
-                    ...existing,
-                    access_token: accessToken,
-                    refresh_token: refreshToken,
-                    token_type: 'bearer',
-                    expires_in: 3600,
-                    expires_at: Math.floor(Date.now() / 1000) + 3600,
-                    user: fallbackData?.user || existing?.user || null,
-                  })
-                );
-              }
-            } catch {
-              // Continue with setSession.
-            }
-
-            try {
-              const { error: setSessionError } = await withRejectingTimeout(
-                supabase.auth.setSession({
-                  access_token: accessToken,
-                  refresh_token: refreshToken,
-                }),
-                8000,
-                'Login session setup timed out. Please retry.'
-              );
-              if (setSessionError) {
-                // Still reload if tokens were seeded — auth bootstrap can pick them up.
-                console.warn('setSession after proxy login:', setSessionError.message);
-              }
-            } catch (sessionError) {
-              console.warn('setSession after proxy login timed out', sessionError);
-            }
-          };
-
-          const directAttempt = signInWithDirectSupabasePassword(loginEmail, password).then(() => 'direct' as const);
-          const proxyAttempt = persistProxySession().then(() => 'proxy' as const);
-
-          try {
-            await Promise.any([directAttempt, proxyAttempt]);
-          } catch (aggregateError: any) {
-            const errors = Array.isArray(aggregateError?.errors) ? aggregateError.errors : [aggregateError];
-            const firstUseful =
-              errors.find((err: any) => {
-                const msg = String(err?.message || '').toLowerCase();
-                return msg && !msg.includes('timed out') && !msg.includes('timeout');
-              }) || errors[0];
-            throw firstUseful instanceof Error
-              ? firstUseful
-              : new Error(String(firstUseful?.message || 'Failed to login'));
-          }
-
-          window.location.reload();
-          return;
-        }
-
+        // Email/Password Login — direct Supabase SDK with guaranteed Processing reset.
+        const loginEmail = normalizeEmailValue(normalizedUsername);
         try {
-          const result = await withRejectingTimeout(
-            signInWithEmailAndPassword(auth, normalizeEmailValue(normalizedUsername), password),
-            SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
-            'Authentication service timed out. Please retry.'
-          );
-          await withRejectingTimeout(
-            handleProfileSetup(result.user, undefined, undefined, false),
-            PROFILE_SETUP_TIMEOUT_MS,
-            'Login profile setup timed out. Please retry.'
-          );
-        } catch (loginError: any) {
-          const loginMessage = String(loginError?.message || "").toLowerCase();
-          const canUseServerFallback =
-            loginMessage.includes("failed to fetch") ||
-            loginMessage.includes("network") ||
-            loginMessage.includes("timed out") ||
-            loginMessage.includes("timeout");
-
-          if (!canUseServerFallback) {
-            throw loginError;
-          }
-
-          const fallbackResponse = await fetchWithOriginFailover('/api/auth?action=password-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: normalizeEmailValue(normalizedUsername),
-              password,
-            }),
-            cache: 'no-store',
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: loginEmail,
+            password,
           });
-          const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
-          const accessToken = String(fallbackData?.session?.access_token || '');
-          const refreshToken = String(fallbackData?.session?.refresh_token || '');
 
-          if (!accessToken || !refreshToken) {
-            throw new Error('Login session could not be established.');
+          if (error) {
+            console.error('Login Error:', error);
+            alert(error.message || 'Invalid credentials');
+            return;
+          }
+          if (!data?.user) {
+            console.error('Login Error: Supabase returned no user');
+            alert('Invalid credentials');
+            return;
           }
 
-          const { error: setSessionError } = await withRejectingTimeout(
-            supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            }),
-            SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
-            'Login session setup timed out. Please retry.'
-          );
-
-          if (setSessionError) {
-            throw new Error(setSessionError.message || 'Failed to set login session.');
+          const result = await signInWithEmailAndPassword(auth, loginEmail, password);
+          await handleProfileSetup(result.user, undefined, undefined, false);
+        } catch (error: any) {
+          console.error('Login Error:', error);
+          if (error?.message === 'NOT_REGISTERED' || error?.code === 'auth/user-not-found') {
+            setNotRegisteredError(true);
+          } else {
+            alert(String(error?.message || 'Invalid credentials'));
           }
-
-          window.location.reload();
-          return;
+        } finally {
+          // NEVER leave the Login button stuck on "Processing..."
+          setIsLoading(false);
         }
+        return;
       }
     } catch (error: any) {
-      console.error("Login Error:", error);
-      if (error.code === 'auth/operation-not-allowed') {
-        alert("Authentication method not enabled. Please check Firebase Console.");
-      } else if (error.code === 'auth/wrong-password') {
-        alert("Incorrect password. Please try again.");
-      } else if (error.message === "NOT_REGISTERED" || error.code === 'auth/user-not-found') {
+      console.error('Login Error:', error);
+      if (error?.message === 'NOT_REGISTERED' || error?.code === 'auth/user-not-found') {
         setNotRegisteredError(true);
       } else {
-        alert(error.message || "Invalid credentials.");
+        alert(String(error?.message || 'Invalid credentials'));
       }
     } finally {
       setIsLoading(false);
