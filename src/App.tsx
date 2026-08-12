@@ -6366,7 +6366,8 @@ const signInWithDirectSupabasePassword = async (email: string, password: string)
         CapacitorHttp.post({
           url: tokenUrl,
           headers: authHeaders,
-          data: authBody,
+          // String body is more reliable across Capacitor Android WebView bridges.
+          data: JSON.stringify(authBody),
           connectTimeout: SUPABASE_PASSWORD_GRANT_TIMEOUT_MS,
           readTimeout: SUPABASE_PASSWORD_GRANT_TIMEOUT_MS,
         }),
@@ -6425,6 +6426,12 @@ const signInWithDirectSupabasePassword = async (email: string, password: string)
       globalThis.clearTimeout(timer);
     }
   };
+
+  // Native: CapacitorHttp only. Do not fall through to SDK fetch (same WebView stall).
+  if (typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform()) {
+    const grantPayload = await requestPasswordGrant();
+    return await persistGrantedSession(grantPayload);
+  }
 
   try {
     const grantPayload = await requestPasswordGrant();
@@ -9150,27 +9157,10 @@ const findUserProfileByPhone = async (value: string) => {
         // Email/Password Login
         if (isAndroidWebViewRuntime) {
           const loginEmail = normalizeEmailValue(normalizedUsername);
-          // Prefer direct Supabase in Android WebView. The server proxy path is a slow
-          // fallback only — never race it, or a 404/504 can win the Promise.race and
-          // surface a raw Vercel NOT_FOUND modal.
-          try {
-            await signInWithDirectSupabasePassword(loginEmail, password);
-            window.location.reload();
-            return;
-          } catch (directError: any) {
-            const directMessage = String(directError?.message || '').toLowerCase();
-            // Only use the slow Vercel proxy when the device cannot reach Supabase at all.
-            // Timeouts usually mean the proxy will also fail, so don't stack another 20s wait.
-            const canUseServerFallback =
-              directMessage.includes('failed to fetch') ||
-              directMessage.includes('network') ||
-              directMessage.includes('load failed') ||
-              directMessage.includes('offline');
-
-            if (!canUseServerFallback) {
-              throw directError;
-            }
-
+          // Race native Supabase HTTP with same-origin Vercel proxy. Whichever
+          // returns a session first wins — WebView stalls and upstream hangs
+          // should not block both paths serially.
+          const persistProxySession = async () => {
             const fallbackResponse = await postAuthAction(
               'password-login',
               { email: loginEmail, password },
@@ -9184,22 +9174,64 @@ const findUserProfileByPhone = async (value: string) => {
               throw new Error('Login session could not be established.');
             }
 
-            const { error: setSessionError } = await withRejectingTimeout(
-              supabase.auth.setSession({
-                access_token: accessToken,
-                refresh_token: refreshToken,
-              }),
-              SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
-              'Login session setup timed out. Please retry.'
-            );
-
-            if (setSessionError) {
-              throw new Error(setSessionError.message || 'Failed to set login session.');
+            // Seed localStorage immediately; setSession can hang on Preferences.
+            try {
+              const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
+              const existingRaw = window.localStorage.getItem(storageKey);
+              const existing = existingRaw ? JSON.parse(existingRaw) : {};
+              window.localStorage.setItem(
+                storageKey,
+                JSON.stringify({
+                  ...existing,
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                  token_type: 'bearer',
+                  expires_in: 3600,
+                  expires_at: Math.floor(Date.now() / 1000) + 3600,
+                  user: fallbackData?.user || existing?.user || null,
+                })
+              );
+            } catch {
+              // Continue with setSession.
             }
 
-            window.location.reload();
-            return;
+            try {
+              const { error: setSessionError } = await withRejectingTimeout(
+                supabase.auth.setSession({
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                }),
+                8000,
+                'Login session setup timed out. Please retry.'
+              );
+              if (setSessionError) {
+                // Still reload if tokens were seeded — auth bootstrap can pick them up.
+                console.warn('setSession after proxy login:', setSessionError.message);
+              }
+            } catch (sessionError) {
+              console.warn('setSession after proxy login timed out', sessionError);
+            }
+          };
+
+          const directAttempt = signInWithDirectSupabasePassword(loginEmail, password).then(() => 'direct' as const);
+          const proxyAttempt = persistProxySession().then(() => 'proxy' as const);
+
+          try {
+            await Promise.any([directAttempt, proxyAttempt]);
+          } catch (aggregateError: any) {
+            const errors = Array.isArray(aggregateError?.errors) ? aggregateError.errors : [aggregateError];
+            const firstUseful =
+              errors.find((err: any) => {
+                const msg = String(err?.message || '').toLowerCase();
+                return msg && !msg.includes('timed out') && !msg.includes('timeout');
+              }) || errors[0];
+            throw firstUseful instanceof Error
+              ? firstUseful
+              : new Error(String(firstUseful?.message || 'Failed to login'));
           }
+
+          window.location.reload();
+          return;
         }
 
         try {

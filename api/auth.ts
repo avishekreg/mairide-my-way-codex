@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
+import https from "node:https";
+import { URL } from "node:url";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
 const DRIVER_JOINING_BONUS = 500;
@@ -9,7 +11,7 @@ const TIER2_REWARD = 5;
 const EMAIL_OTP_SESSION_PREFIX = "emailotp_";
 const PASSWORD_RESET_SESSION_PREFIX = "pwdreset_";
 const PASSWORD_RESET_TOKEN_PREFIX = "pwdtoken_";
-const SUPABASE_AUTH_TIMEOUT_MS = 12000;
+const SUPABASE_AUTH_TIMEOUT_MS = 15000;
 const EXTERNAL_FETCH_TIMEOUT_MS = 15000;
 const inMemoryOtpSessions = new Map<string, {
   email: string;
@@ -109,6 +111,74 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Force IPv4 HTTPS JSON calls. Vercel/undici fetch to supabase.co can hang on IPv6
+ * paths in some regions; Node https + family:4 avoids that stall.
+ */
+function httpsJsonRequest(
+  targetUrl: string,
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    timeoutMs?: number;
+  } = {}
+): Promise<{ status: number; json: any; ms: number }> {
+  const timeoutMs = options.timeoutMs ?? SUPABASE_AUTH_TIMEOUT_MS;
+  const method = String(options.method || "GET").toUpperCase();
+  const headers = { ...(options.headers || {}) };
+  const body = options.body || "";
+  const parsed = new URL(targetUrl);
+  const started = Date.now();
+
+  if (body && !headers["Content-Length"] && !headers["content-length"]) {
+    headers["Content-Length"] = String(Buffer.byteLength(body));
+  }
+  if (!headers.Connection && !headers.connection) {
+    headers.Connection = "close";
+  }
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: `${parsed.pathname}${parsed.search}`,
+        method,
+        headers,
+        family: 4,
+        timeout: timeoutMs,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          let json: any = {};
+          try {
+            json = text ? JSON.parse(text) : {};
+          } catch {
+            json = { raw: text };
+          }
+          resolve({ status: res.statusCode || 0, json, ms: Date.now() - started });
+        });
+      }
+    );
+
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Authentication service timed out. Please retry."));
+    });
+    req.on("error", (error) => {
+      reject(error);
+    });
+
+    if (body) req.write(body);
+    req.end();
+  });
 }
 
 function isAuthTimeoutError(error: unknown) {
@@ -1187,24 +1257,88 @@ async function handlePasswordLogin(req: any, res: any) {
       return res.status(500).json({ error: "Supabase runtime config is incomplete." });
     }
 
-    const loginResponse = await fetchWithTimeout(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-      },
-      body: JSON.stringify({ email, password }),
-    });
+    const tokenUrl = `${supabaseUrl}/auth/v1/token?grant_type=password`;
+    const authHeaders = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      apikey: anonKey,
+      Authorization: `Bearer ${anonKey}`,
+    };
+    const authBody = JSON.stringify({ email, password });
 
-    const payload = await loginResponse.json().catch(() => ({}));
-    if (!loginResponse.ok) {
+    let payload: any = {};
+    let status = 0;
+    let upstreamMs = 0;
+    let upstreamPath = "https-ipv4";
+
+    try {
+      const ipv4Result = await httpsJsonRequest(tokenUrl, {
+        method: "POST",
+        headers: authHeaders,
+        body: authBody,
+        timeoutMs: SUPABASE_AUTH_TIMEOUT_MS,
+      });
+      status = ipv4Result.status;
+      payload = ipv4Result.json || {};
+      upstreamMs = ipv4Result.ms;
+    } catch (ipv4Error: any) {
+      console.warn("Password login IPv4 https failed, trying fetch fallback:", ipv4Error?.message || ipv4Error);
+      upstreamPath = "fetch-fallback";
+      try {
+        const loginResponse = await fetchWithTimeout(tokenUrl, {
+          method: "POST",
+          headers: authHeaders,
+          body: authBody,
+        });
+        payload = await loginResponse.json().catch(() => ({}));
+        status = loginResponse.status || 0;
+      } catch (fetchError: any) {
+        console.warn("Password login fetch failed, trying supabase-js:", fetchError?.message || fetchError);
+        upstreamPath = "supabase-js";
+        const anonClient = createClient(supabaseUrl, anonKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
+        const sdkStarted = Date.now();
+        const { data, error: sdkError } = await Promise.race([
+          anonClient.auth.signInWithPassword({ email, password }),
+          new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error("Authentication service timed out. Please retry.")),
+              SUPABASE_AUTH_TIMEOUT_MS
+            );
+          }),
+        ]);
+        upstreamMs = Date.now() - sdkStarted;
+        if (sdkError) {
+          return res.status(400).json({
+            error: sdkError.message || "Invalid login credentials",
+            upstreamPath,
+            upstreamMs,
+          });
+        }
+        return res.status(200).json({
+          session: {
+            access_token: data?.session?.access_token || "",
+            refresh_token: data?.session?.refresh_token || "",
+          },
+          user: data?.user || data?.session?.user || null,
+          upstreamPath,
+          upstreamMs,
+        });
+      }
+    }
+
+    if (status < 200 || status >= 300) {
       const msg =
         payload?.error_description ||
         payload?.msg ||
         payload?.error ||
         "Invalid login credentials";
-      return res.status(loginResponse.status || 400).json({ error: String(msg) });
+      return res.status(status || 400).json({
+        error: String(msg),
+        upstreamPath,
+        upstreamMs,
+      });
     }
 
     return res.status(200).json({
@@ -1213,6 +1347,8 @@ async function handlePasswordLogin(req: any, res: any) {
         refresh_token: payload?.refresh_token || "",
       },
       user: payload?.user || null,
+      upstreamPath,
+      upstreamMs,
     });
   } catch (error: any) {
     console.error("Password login fallback failed:", error);

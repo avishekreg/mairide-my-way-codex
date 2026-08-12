@@ -1,4 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
+import https from "node:https";
+import { URL } from "node:url";
 import { getRuntimeSupabaseConfig } from "./_lib/supabaseRuntime.js";
 
 const CONFIG_LOOKUP_TIMEOUT_MS = 2500;
@@ -53,6 +55,51 @@ async function withTimeout<T>(promise: Promise<T>, fallback: T, ms = CONFIG_LOOK
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function httpsProbe(targetUrl: string, headers: Record<string, string>, timeoutMs = 8000) {
+  const parsed = new URL(targetUrl);
+  const started = Date.now();
+  return new Promise<{ ok: boolean; status: number; ms: number; error?: string; bodyPreview?: string }>((resolve) => {
+    const req = https.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: `${parsed.pathname}${parsed.search}`,
+        method: "GET",
+        headers: { ...headers, Connection: "close" },
+        family: 4,
+        timeout: timeoutMs,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          resolve({
+            ok: (res.statusCode || 0) > 0 && (res.statusCode || 0) < 500,
+            status: res.statusCode || 0,
+            ms: Date.now() - started,
+            bodyPreview: text.slice(0, 120),
+          });
+        });
+      }
+    );
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ ok: false, status: 0, ms: Date.now() - started, error: "timeout" });
+    });
+    req.on("error", (error: any) => {
+      resolve({
+        ok: false,
+        status: 0,
+        ms: Date.now() - started,
+        error: error?.message || String(error),
+      });
+    });
+    req.end();
+  });
 }
 
 function isApprovedDriver(row: any) {
@@ -211,6 +258,50 @@ export default async function handler(req: any, res: any) {
         status: "ok",
         serverTime: new Date().toISOString(),
         ...(await buildStampPayload()),
+      });
+    }
+
+    if (action === "supabase-egress") {
+      const { supabaseUrl, anonKey } = getRuntimeSupabaseConfig(req);
+      const authHealthUrl = `${supabaseUrl}/auth/v1/health`;
+      const restUrl = `${supabaseUrl}/rest/v1/app_config?select=id&limit=1`;
+      const headers = {
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        Accept: "application/json",
+      };
+      const [authProbe, restProbe, fetchAuthProbe] = await Promise.all([
+        httpsProbe(authHealthUrl, headers),
+        httpsProbe(restUrl, headers),
+        (async () => {
+          const started = Date.now();
+          try {
+            const response = await fetch(authHealthUrl, {
+              headers,
+              signal: AbortSignal.timeout(8000),
+            });
+            const text = await response.text();
+            return {
+              ok: response.status > 0 && response.status < 500,
+              status: response.status,
+              ms: Date.now() - started,
+              bodyPreview: text.slice(0, 120),
+            };
+          } catch (error: any) {
+            return {
+              ok: false,
+              status: 0,
+              ms: Date.now() - started,
+              error: error?.message || String(error),
+            };
+          }
+        })(),
+      ]);
+      return res.status(200).json({
+        supabaseUrl,
+        ipv4AuthHealth: authProbe,
+        ipv4Rest: restProbe,
+        fetchAuthHealth: fetchAuthProbe,
       });
     }
 
