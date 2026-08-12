@@ -411,7 +411,8 @@
         <p class="mt-5 max-w-md text-sm leading-6 text-white/62" data-i18n="footerBody">A transparent empty-leg cab aggregator for smarter travelers, fairer drivers, and cleaner highways.</p>
         <div class="mt-6 flex flex-wrap items-center gap-4">
           <a
-            href="./downloads/android.html"
+            id="android-app-download"
+            href="https://downloads.mairide.in/mairide-android-340.apk"
             class="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
             aria-label="Download mAIRide for Android"
           >
@@ -435,12 +436,14 @@
       <div class="md:flex md:justify-center">
         <div class="inline-flex flex-wrap items-center justify-center gap-4">
           <a
-            href="https://downloads.mairide.in/mairide-android.apk"
+            id="android-qr-link"
+            href="https://downloads.mairide.in/mairide-android-340.apk"
             aria-label="Scan QR code to download the mAIRide Android app"
             class="rounded-3xl bg-white p-3 shadow-sm"
           >
             <img
-              src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&amp;margin=12&amp;format=svg&amp;data=https%3A%2F%2Fdownloads.mairide.in%2Fmairide-android.apk"
+              id="android-qr-image"
+              src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&amp;margin=12&amp;format=svg&amp;data=https%3A%2F%2Fdownloads.mairide.in%2Fmairide-android-340.apk"
               alt="QR code to download the mAIRide Android app"
               class="h-28 w-28"
               width="112"
@@ -450,7 +453,7 @@
           </a>
           <div class="max-w-[170px] text-left">
             <p class="text-sm font-black leading-5 text-white">Scan for Android</p>
-            <p class="mt-1 text-xs font-semibold leading-5 text-white/60">Direct APK download</p>
+            <p id="android-qr-caption" class="mt-1 text-xs font-semibold leading-5 text-white/60">Direct APK download</p>
           </div>
         </div>
       </div>
@@ -1677,6 +1680,41 @@
     };
 
     document.getElementById('cookiePreferencesButton').addEventListener('click', () => showCookiePrompt(true));
+
+    (function syncAndroidDownloadLinks() {
+      var DEFAULT_APK = 'https://downloads.mairide.in/mairide-android-340.apk';
+      var appLink = document.getElementById('android-app-download');
+      var qrLink = document.getElementById('android-qr-link');
+      var qrImage = document.getElementById('android-qr-image');
+      var caption = document.getElementById('android-qr-caption');
+
+      function applyApkUrl(url, versionLabel) {
+        if (!url) return;
+        if (appLink) appLink.setAttribute('href', url);
+        if (qrLink) qrLink.setAttribute('href', url);
+        if (qrImage) {
+          qrImage.setAttribute(
+            'src',
+            'https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=' + encodeURIComponent(url)
+          );
+        }
+        if (caption) {
+          caption.textContent = versionLabel
+            ? ('Direct APK · ' + versionLabel)
+            : 'Direct APK download';
+        }
+      }
+
+      applyApkUrl(DEFAULT_APK, 'build.340');
+      fetch('./downloads/android-update.json?t=' + Date.now(), { cache: 'no-store' })
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (data) {
+          var nextUrl = data && data.apkUrl ? String(data.apkUrl).trim() : '';
+          var version = data && data.appVersion ? String(data.appVersion).trim() : '';
+          if (nextUrl) applyApkUrl(nextUrl, version);
+        })
+        .catch(function () {});
+    })();
     document.getElementById('cookieRejectButton').addEventListener('click', () => {
       applyConsent({ preferences: false, analytics: false, marketing: false });
     });

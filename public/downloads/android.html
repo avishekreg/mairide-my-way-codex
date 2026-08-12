@@ -22,14 +22,14 @@
   <main class="wrap">
     <section class="card">
       <h1>Get MaiRide on Android</h1>
-      <p>Download the latest signed Android installer. This page always resolves the current release from the live update feed.</p>
-      <a id="apk-download" class="btn btn-secondary" href="https://downloads.mairide.in/mairide-android.apk" download="mairide-android.apk">
+      <p>Tap Download APK to start the installer immediately. This page always uses the live Android release feed.</p>
+      <a id="apk-download" class="btn btn-secondary" href="https://downloads.mairide.in/mairide-android-340.apk" download="mairide-android.apk">
         Download APK
       </a>
-      <a id="apk-chrome" class="btn btn-primary" style="margin-left:10px" href="https://downloads.mairide.in/mairide-android.apk">
+      <a id="apk-chrome" class="btn btn-primary" style="margin-left:10px" href="https://downloads.mairide.in/mairide-android-340.apk">
         Open in Chrome
       </a>
-      <p id="apk-meta">Resolving latest Android build…</p>
+      <p id="apk-meta">Latest installer: https://downloads.mairide.in/mairide-android-340.apk</p>
       <h2 style="margin-top:24px">If APK install is blocked</h2>
       <ol>
         <li>Open Android Settings → Security.</li>
@@ -42,7 +42,7 @@
   </main>
   <script>
     (function () {
-      var FALLBACK_APK = 'https://downloads.mairide.in/mairide-android.apk';
+      var FALLBACK_APK = 'https://downloads.mairide.in/mairide-android-340.apk';
       var apkDownload = document.getElementById('apk-download');
       var apkChrome = document.getElementById('apk-chrome');
       var status = document.getElementById('apk-status');
@@ -58,12 +58,10 @@
             'intent://' + hostPath + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + fallbackUrl + ';end';
           apkChrome.setAttribute('href', intentUrl);
         }
-        if (meta) {
-          meta.textContent = info || ('Latest installer: ' + url);
-        }
+        if (meta) meta.textContent = info || ('Latest installer: ' + url);
       }
 
-      applyApkUrl(FALLBACK_APK, 'Using CDN fallback while checking for the newest build…');
+      applyApkUrl(FALLBACK_APK, 'Latest installer: ' + FALLBACK_APK);
 
       fetch('/downloads/android-update.json?t=' + Date.now(), { cache: 'no-store' })
         .then(function (response) { return response.ok ? response.json() : null; })
@@ -71,12 +69,10 @@
           var nextUrl = data && data.apkUrl ? String(data.apkUrl).trim() : '';
           var version = data && data.appVersion ? String(data.appVersion).trim() : '';
           if (nextUrl) {
-            applyApkUrl(nextUrl, version ? ('Latest build: ' + version) : ('Latest installer: ' + nextUrl));
+            applyApkUrl(nextUrl, version ? ('Latest build: ' + version + ' · ' + nextUrl) : ('Latest installer: ' + nextUrl));
           }
         })
-        .catch(function () {
-          if (meta) meta.textContent = 'Using CDN fallback installer.';
-        });
+        .catch(function () {});
 
       fetch('/api/analytics?action=event', {
         method: 'POST',

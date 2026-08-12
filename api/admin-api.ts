@@ -1995,7 +1995,7 @@ async function fetchAndroidUpdateMetadata(configData: Record<string, any>) {
       status: "unavailable",
       updateUrl,
       appVersion: configData.appVersion || null,
-      apkUrl: process.env.MAIRIDE_ANDROID_APK_URL || "https://downloads.mairide.in/mairide-android.apk",
+      apkUrl: process.env.MAIRIDE_ANDROID_APK_URL || "https://downloads.mairide.in/mairide-android-340.apk",
       buildSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
       builtAt: null,
       error: error?.name === "AbortError" ? "Metadata request timed out" : error?.message || "Metadata unavailable",

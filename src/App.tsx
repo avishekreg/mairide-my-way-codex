@@ -3422,9 +3422,11 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
-const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
-const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://downloads.mairide.in/mairide-android.apk';
-const PUBLIC_ANDROID_DOWNLOAD_QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(PUBLIC_ANDROID_DOWNLOAD_URL)}`;
+const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android-340.apk';
+const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://downloads.mairide.in/mairide-android-340.apk';
+const buildAndroidQrUrl = (apkUrl: string) =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(apkUrl)}`;
+const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v3.0.1-beta+build.248';
@@ -7131,7 +7133,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               Get it on iOS
             </a>
             <a
-              href={PUBLIC_ANDROID_DOWNLOAD_URL}
+              href={androidDownloadUrl || PUBLIC_ANDROID_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex w-32 flex-col items-center justify-center rounded-2xl border border-mairide-secondary bg-white/90 p-2 shadow-sm transition hover:bg-white"
@@ -7139,7 +7141,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
             >
               <span className="relative flex h-24 w-24 items-center justify-center rounded-xl bg-white p-1 shadow-inner">
                 <img
-                  src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
+                  src={buildAndroidQrUrl(androidDownloadUrl || PUBLIC_ANDROID_DOWNLOAD_URL)}
                   alt="QR code to download the mAIRide Android app"
                   className="h-24 w-24"
                   width={96}
