@@ -1,6 +1,6 @@
 /**
- * Isolated session recovery helpers for stuck "Starting your session…" states.
- * Keeps auth storage purge out of core Supabase client factories.
+ * Session boot / login coordination.
+ * Keeps guest boot non-blocking and prevents recovery timers from racing login submit.
  */
 
 const SUPABASE_AUTH_STORAGE_KEY = 'sb-jcgoccsdlrjnratpaeje-auth-token';
@@ -13,7 +13,29 @@ const SESSION_HINT_KEYS = [
   'mairide_phone_login_number',
 ];
 
+/** Guest boot must resolve to Login within this window — no "Starting your session…" flicker. */
+export const SESSION_BOOT_FAIL_FAST_MS = 300;
 export const SESSION_RESTORE_TIMEOUT_MS = 5000;
+
+let interactiveLoginDepth = 0;
+let bootGeneration = 0;
+
+export const beginInteractiveLogin = () => {
+  interactiveLoginDepth += 1;
+  bootGeneration += 1; // invalidate any in-flight boot session probe
+};
+
+export const endInteractiveLogin = () => {
+  interactiveLoginDepth = Math.max(0, interactiveLoginDepth - 1);
+};
+
+export const isInteractiveLoginActive = () => interactiveLoginDepth > 0;
+
+export const getAuthBootGeneration = () => bootGeneration;
+
+export const cancelBackgroundSessionBoot = () => {
+  bootGeneration += 1;
+};
 
 export const purgeLocalAuthSession = () => {
   if (typeof window === 'undefined') return;
@@ -36,7 +58,6 @@ export const purgeLocalAuthSession = () => {
   }
 
   try {
-    // Remove any leftover Supabase auth keys for this project.
     const localKeys: string[] = [];
     for (let i = 0; i < window.localStorage.length; i += 1) {
       const key = window.localStorage.key(i);
@@ -61,6 +82,7 @@ export const purgeLocalAuthSession = () => {
 };
 
 export const hardResetToLogin = () => {
+  if (isInteractiveLoginActive()) return; // never wipe tokens mid-login
   purgeLocalAuthSession();
   if (typeof window === 'undefined') return;
   try {
@@ -80,4 +102,29 @@ export const hardResetToLogin = () => {
 export const retrySessionRestore = () => {
   if (typeof window === 'undefined') return;
   window.location.reload();
+};
+
+/**
+ * Non-blocking session probe for app boot.
+ * Resolves null within failFastMs when no usable token is available yet.
+ */
+export const probeSessionFast = async <T,>(
+  getSession: () => Promise<T | null>,
+  failFastMs: number = SESSION_BOOT_FAIL_FAST_MS
+): Promise<T | null> => {
+  const generation = bootGeneration;
+  try {
+    const result = await Promise.race([
+      Promise.resolve()
+        .then(() => getSession())
+        .then((session) => (generation === bootGeneration ? session : null)),
+      new Promise<null>((resolve) => {
+        window.setTimeout(() => resolve(null), failFastMs);
+      }),
+    ]);
+    if (generation !== bootGeneration || isInteractiveLoginActive()) return null;
+    return result;
+  } catch {
+    return null;
+  }
 };

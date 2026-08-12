@@ -138,8 +138,13 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { cn, formatCurrency, calculateServiceFee } from './lib/utils';
 import {
-  SESSION_RESTORE_TIMEOUT_MS,
+  SESSION_BOOT_FAIL_FAST_MS,
+  beginInteractiveLogin,
+  cancelBackgroundSessionBoot,
+  endInteractiveLogin,
   hardResetToLogin,
+  isInteractiveLoginActive,
+  probeSessionFast,
   purgeLocalAuthSession,
   retrySessionRestore,
 } from './lib/sessionRecovery';
@@ -6959,17 +6964,11 @@ const LoadingScreen = ({
       setRecoveryVisible(false);
       return;
     }
-    setRecoveryVisible(true);
-    // Auto-escape hung session restore: purge stale tokens and return to login.
-    // Intentionally omit onSignOut from deps so a new function identity does not reset the timer.
-    const autoReset = window.setTimeout(() => {
-      purgeLocalAuthSession();
-      void Promise.resolve(onSignOut?.()).finally(() => {
-        hardResetToLogin();
-      });
-    }, SESSION_RESTORE_TIMEOUT_MS);
-    return () => window.clearTimeout(autoReset);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- arm once while recovery mode is active
+    // Show recovery actions after a short wait — never auto-purge (that races login submit).
+    const timer = window.setTimeout(() => {
+      if (!isInteractiveLoginActive()) setRecoveryVisible(true);
+    }, 1500);
+    return () => window.clearTimeout(timer);
   }, [showRecovery]);
 
   const handleRetry = () => {
@@ -9315,8 +9314,10 @@ const findUserProfileByPhone = async (value: string) => {
           throw new Error(data.Details || 'Failed to send OTP');
         }
       } else {
-        // Email/Password Login — direct Supabase SDK with guaranteed Processing reset.
+        // Email/Password Login — atomic submit; cancel background session boot so it cannot deadlock Processing.
         const loginEmail = normalizeEmailValue(normalizedUsername);
+        beginInteractiveLogin();
+        cancelBackgroundSessionBoot();
         try {
           const { data, error } = await supabase.auth.signInWithPassword({
             email: loginEmail,
@@ -9334,8 +9335,25 @@ const findUserProfileByPhone = async (value: string) => {
             return;
           }
 
-          const result = await signInWithEmailAndPassword(auth, loginEmail, password);
-          await handleProfileSetup(result.user, undefined, undefined, false);
+          const accessToken = String(data.session?.access_token || '');
+          const compatUser = {
+            uid: data.user.id,
+            email: data.user.email || loginEmail,
+            phoneNumber: (data.user as any).phone || null,
+            displayName:
+              String(data.user.user_metadata?.full_name || data.user.user_metadata?.name || '').trim() || null,
+            photoURL: String(data.user.user_metadata?.avatar_url || '').trim() || null,
+            emailVerified: Boolean(data.user.email_confirmed_at),
+            isAnonymous: data.user.is_anonymous === true,
+            providerData: [],
+            getIdToken: async () => {
+              const sessionResult = await supabase.auth.getSession();
+              return String(sessionResult.data.session?.access_token || accessToken || '');
+            },
+          } as unknown as User;
+
+          (auth as any).currentUser = compatUser;
+          await handleProfileSetup(compatUser, undefined, undefined, false);
         } catch (error: any) {
           console.error('Login Error:', error);
           const rawMessage = String(error?.message || error || '');
@@ -9355,7 +9373,8 @@ const findUserProfileByPhone = async (value: string) => {
             alert(rawMessage || 'Invalid credentials');
           }
         } finally {
-          // NEVER leave the Login button stuck on "Processing..."
+          endInteractiveLogin();
+          // NEVER leave the Login button stuck on Processing.
           setIsLoading(false);
         }
         return;
@@ -28798,7 +28817,8 @@ const App = () => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [partnerProfile, setPartnerProfile] = useState<B2BPartner | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Login-first: never flash Starting your session on cold boot.
+  const [loading, setLoading] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>(() => {
     if (typeof window === 'undefined') return 'login';
     const mode = new URLSearchParams(window.location.search).get('mode');
@@ -29214,10 +29234,26 @@ const App = () => {
       }, timeoutMs);
     };
 
-    armLoadingWatchdog('boot');
+    // Non-blocking guest probe: if no session in 300ms, stay on clean Login (no session screen).
+    void probeSessionFast(async () => {
+      const { data } = await supabase.auth.getSession();
+      return data.session;
+    }, SESSION_BOOT_FAIL_FAST_MS).then((session) => {
+      if (!active || isInteractiveLoginActive()) return;
+      if (!session) {
+        setLoading(false);
+        setUser(null);
+      }
+    });
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (!active) return;
+      // Interactive login owns the UI — ignore boot/loading flips that deadlock Processing.
+      if (isInteractiveLoginActive() && !u) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
       armLoadingWatchdog(u ? `auth:${u.uid}` : 'auth:signed_out');
       const cached = resolvedAuthProfileRef.current;
       const isSameResolvedUser =
@@ -29233,11 +29269,17 @@ const App = () => {
         return;
       }
 
-      // Avoid flicker loops: only raise loading when the authenticated principal actually changes.
+      // Only show session hydrate screen when an authenticated user appears — never on guest boot.
       if (cached.authUid !== u?.uid) {
-        setLoading(true);
-        setProfile(null);
-        setPartnerProfile(null);
+        if (u) {
+          setLoading(true);
+          setProfile(null);
+          setPartnerProfile(null);
+        } else {
+          setLoading(false);
+          setProfile(null);
+          setPartnerProfile(null);
+        }
       }
 
       const generation = ++authResolveGenerationRef.current;
@@ -30210,7 +30252,8 @@ const App = () => {
     );
   }
 
-  if (loading) return withAppConfigProvider(<ErrorBoundary><LoadingScreen releaseVersion={releaseVersion} showRecovery onSignOut={handleLogout} />{cookieConsentManager}</ErrorBoundary>);
+  // Authenticated hydrate only — never block cold start / login form behind session boot UI.
+  if (loading && user) return withAppConfigProvider(<ErrorBoundary><LoadingScreen releaseVersion={APP_VERSION} showRecovery onSignOut={handleLogout} />{cookieConsentManager}</ErrorBoundary>);
 
   // Authenticated-but-unhydrated sessions are handled above (silent sign-out → clean Login).
   // Do not surface signup / Not Registered UI from boot.
@@ -30373,10 +30416,11 @@ const App = () => {
 
   // Authenticated session still hydrating profile — keep LoadingScreen.
   // Never force the Not Registered signup modal during boot/hydration.
-  if (user && !profile && !partnerProfile) {
+  // Skip this screen during interactive login submit (AuthPage owns Processing UI).
+  if (user && !profile && !partnerProfile && !isInteractiveLoginActive()) {
     return withAppConfigProvider(
       <ErrorBoundary>
-        <LoadingScreen releaseVersion={releaseVersion} showRecovery onSignOut={handleLogout} />
+        <LoadingScreen releaseVersion={APP_VERSION} showRecovery onSignOut={handleLogout} />
         {cookieConsentManager}
       </ErrorBoundary>
     );
