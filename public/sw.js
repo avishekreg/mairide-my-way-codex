@@ -1,5 +1,5 @@
-const CACHE_NAME = "mairide-shell-v4";
-const SHELL_FILES = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE_NAME = "mairide-shell-v5";
+const SHELL_FILES = ["/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -35,25 +35,11 @@ self.addEventListener("fetch", (event) => {
   const isNavigationRequest = event.request.mode === "navigate";
   const pathname = requestUrl.pathname || "";
 
-  // Never cache API responses to avoid stale auth/login states.
-  if (isSameOrigin && pathname.startsWith("/api/")) {
-    return;
-  }
-
-  if (isNavigationRequest) {
-    event.respondWith(
-      fetch(event.request, { cache: "no-store" })
-        .then((response) => {
-          if (response && response.status === 200) {
-            const responseClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put("/index.html", responseClone).catch(() => {});
-            });
-          }
-          return response;
-        })
-        .catch(() => caches.match("/index.html").then((cached) => cached || caches.match("/")))
-    );
+  // Never cache API responses or HTML shell documents (prevents stale login bundles).
+  if (isSameOrigin && (pathname.startsWith("/api/") || isNavigationRequest || pathname === "/" || pathname.endsWith(".html"))) {
+    if (isNavigationRequest) {
+      event.respondWith(fetch(event.request, { cache: "no-store" }));
+    }
     return;
   }
 
@@ -61,8 +47,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Cache only static assets; avoid caching dynamic document/data endpoints.
-  const isStaticAsset = /\.(js|css|svg|png|jpg|jpeg|webp|gif|ico|woff|woff2|ttf|json)$/i.test(pathname);
+  // Cache only hashed static assets.
+  const isStaticAsset = /\.(js|css|svg|png|jpg|jpeg|webp|gif|ico|woff|woff2|ttf)$/i.test(pathname);
   if (!isStaticAsset) {
     return;
   }
@@ -77,10 +63,7 @@ self.addEventListener("fetch", (event) => {
         return response;
       })
       .catch(() =>
-        caches.match(event.request).then((cached) => {
-          if (cached) return cached;
-          return caches.match("/index.html");
-        })
+        caches.match(event.request).then((cached) => cached || Response.error())
       )
   );
 });

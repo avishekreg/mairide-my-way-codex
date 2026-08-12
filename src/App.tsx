@@ -330,6 +330,11 @@ const looksLikeHtmlText = (value: string) => {
   return normalized.startsWith('<!doctype') || normalized.startsWith('<html') || normalized.includes('<head') || normalized.includes('<body');
 };
 
+const looksLikeVercelNotFoundText = (value: string) => {
+  const normalized = String(value || '').toLowerCase();
+  return normalized.includes('not_found') || normalized.includes('the page could not be found');
+};
+
 const isHtmlResponse = (response: Response) => {
   const contentType = String(response.headers.get('content-type') || '').toLowerCase();
   return contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
@@ -379,28 +384,30 @@ const fetchAuthWithTimeout = async (url: string, requestInit: RequestInit, timeo
 const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) => {
   const origins = buildOriginCandidates(path);
   let lastError: any = null;
+  let lastResponse: Response | null = null;
 
   for (const origin of origins) {
     const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-    const targetUrl = `${normalizedOrigin}${path}`;
+    const targetUrl = `${normalizedOrigin}${path.startsWith('/') ? path : `/${path}`}`;
+    // Always prefer query-style auth routes on every origin.
+    const safeUrl = targetUrl.replace(/\/api\/auth\/([^/?#]+)\/?$/i, '/api/auth?action=$1');
     try {
-      const response = await fetchAuthWithTimeout(targetUrl, requestInit);
+      const response = await fetchAuthWithTimeout(safeUrl, requestInit);
+      lastResponse = response;
       if (requestInit.method?.toUpperCase() === 'POST') {
         if (isHtmlResponse(response)) {
           continue;
         }
         try {
           const textProbe = (await response.clone().text()).slice(0, 500);
-          if (looksLikeHtmlText(textProbe)) {
+          if (looksLikeHtmlText(textProbe) || looksLikeVercelNotFoundText(textProbe)) {
             continue;
           }
         } catch {
           // Ignore probe failures and continue with raw response handling.
         }
       }
-      if (requestInit.method?.toUpperCase() === 'POST' && isHtmlResponse(response)) {
-        // Some mobile runtimes can receive an HTML fallback page for one origin.
-        // Skip and continue with the next API origin candidate.
+      if (response.status === 404) {
         continue;
       }
       return response;
@@ -409,6 +416,7 @@ const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) =
     }
   }
 
+  if (lastResponse) return lastResponse;
   throw lastError || new Error('Failed to reach authentication service.');
 };
 
@@ -5612,21 +5620,39 @@ const secondaryActionButtonClass =
   "rounded-xl font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:shadow-sm";
 
 const normalizeDialogMessage = (input: unknown, fallback = 'A server error has occurred'): string => {
-  if (typeof input === 'string' && input.trim()) return input;
-  if (input instanceof Error && typeof input.message === 'string' && input.message.trim()) return input.message;
-  if (input && typeof input === 'object') {
+  let raw = '';
+  if (typeof input === 'string' && input.trim()) raw = input.trim();
+  else if (input instanceof Error && typeof input.message === 'string' && input.message.trim()) raw = input.message.trim();
+  else if (input && typeof input === 'object') {
     const candidate = input as Record<string, any>;
-    if (typeof candidate.message === 'string' && candidate.message.trim()) return candidate.message;
-    if (typeof candidate.error === 'string' && candidate.error.trim()) return candidate.error;
-    if (typeof candidate.code === 'string' && typeof candidate.message === 'string') return `${candidate.code}: ${candidate.message}`;
-    try {
-      const serialized = JSON.stringify(candidate);
-      if (serialized && serialized !== '{}') return serialized;
-    } catch {
-      // ignore serialization failure
+    if (typeof candidate.message === 'string' && candidate.message.trim()) raw = candidate.message.trim();
+    else if (typeof candidate.error === 'string' && candidate.error.trim()) raw = candidate.error.trim();
+    else if (typeof candidate.code === 'string' && typeof candidate.message === 'string') {
+      raw = `${candidate.code}: ${candidate.message}`.trim();
+    } else {
+      try {
+        const serialized = JSON.stringify(candidate);
+        if (serialized && serialized !== '{}') raw = serialized;
+      } catch {
+        // ignore serialization failure
+      }
     }
   }
-  return fallback;
+
+  if (!raw) return fallback;
+
+  const lowered = raw.toLowerCase();
+  if (
+    lowered.includes('not_found') ||
+    lowered.includes('the page could not be found') ||
+    lowered.includes('x-vercel-error')
+  ) {
+    return 'Login service is temporarily unavailable. Please retry in a moment.';
+  }
+  if (lowered.includes('auth_upstream_timeout') || lowered.includes('authentication service timed out')) {
+    return 'Login is taking too long. Please check your connection and retry.';
+  }
+  return raw;
 };
 
 const inferDialogTone = (message: unknown): AppDialogTone => {
@@ -8975,70 +9001,55 @@ const findUserProfileByPhone = async (value: string) => {
         // Email/Password Login
         if (isAndroidWebViewRuntime) {
           const loginEmail = normalizeEmailValue(normalizedUsername);
-          type AndroidLoginAttempt =
-            | { ok: true; source: 'direct' | 'proxy' }
-            | { ok: false; source: 'direct' | 'proxy'; error: unknown };
+          // Prefer direct Supabase in Android WebView. The server proxy path is a slow
+          // fallback only — never race it, or a 404/504 can win the Promise.race and
+          // surface a raw Vercel NOT_FOUND modal.
+          try {
+            await signInWithDirectSupabasePassword(loginEmail, password);
+            window.location.reload();
+            return;
+          } catch (directError: any) {
+            const directMessage = String(directError?.message || '').toLowerCase();
+            const canUseServerFallback =
+              directMessage.includes('failed to fetch') ||
+              directMessage.includes('network') ||
+              directMessage.includes('timed out') ||
+              directMessage.includes('timeout') ||
+              directMessage.includes('unavailable');
 
-          const directAttempt = signInWithDirectSupabasePassword(loginEmail, password)
-            .then((): AndroidLoginAttempt => ({ ok: true, source: 'direct' }))
-            .catch((error): AndroidLoginAttempt => ({ ok: false, source: 'direct', error }));
-
-          const proxyAttempt = (async (): Promise<AndroidLoginAttempt> => {
-            try {
-              const fallbackResponse = await postAuthAction(
-                'password-login',
-                { email: loginEmail, password },
-                '/api/auth?action=password-login'
-              );
-              const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
-              const accessToken = String(fallbackData?.session?.access_token || '');
-              const refreshToken = String(fallbackData?.session?.refresh_token || '');
-
-              if (!accessToken || !refreshToken) {
-                throw new Error('Login session could not be established.');
-              }
-
-              const { error: setSessionError } = await withRejectingTimeout(
-                supabase.auth.setSession({
-                  access_token: accessToken,
-                  refresh_token: refreshToken,
-                }),
-                SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
-                'Login session setup timed out. Please retry.'
-              );
-
-              if (setSessionError) {
-                throw new Error(setSessionError.message || 'Failed to set login session.');
-              }
-
-              return { ok: true, source: 'proxy' };
-            } catch (error) {
-              return { ok: false, source: 'proxy', error };
+            if (!canUseServerFallback) {
+              throw directError;
             }
-          })();
 
-          const firstAttempt = await Promise.race([directAttempt, proxyAttempt]);
-          if (!firstAttempt.ok) {
-            const secondAttempt = firstAttempt.source === 'direct' ? await proxyAttempt : await directAttempt;
-            if (!secondAttempt.ok) {
-              const firstError = 'error' in firstAttempt ? firstAttempt.error : undefined;
-              const secondError = 'error' in secondAttempt ? secondAttempt.error : undefined;
-              console.warn('Android login failed through both auth paths.', {
-                firstSource: firstAttempt.source,
-                firstError,
-                secondSource: secondAttempt.source,
-                secondError,
-              });
-              throw (
-                secondError ||
-                firstError ||
-                new Error('Authentication service timed out. Please retry.')
-              );
+            const fallbackResponse = await postAuthAction(
+              'password-login',
+              { email: loginEmail, password },
+              '/api/auth?action=password-login'
+            );
+            const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
+            const accessToken = String(fallbackData?.session?.access_token || '');
+            const refreshToken = String(fallbackData?.session?.refresh_token || '');
+
+            if (!accessToken || !refreshToken) {
+              throw new Error('Login session could not be established.');
             }
+
+            const { error: setSessionError } = await withRejectingTimeout(
+              supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              }),
+              SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
+              'Login session setup timed out. Please retry.'
+            );
+
+            if (setSessionError) {
+              throw new Error(setSessionError.message || 'Failed to set login session.');
+            }
+
+            window.location.reload();
+            return;
           }
-
-          window.location.reload();
-          return;
         }
 
         try {

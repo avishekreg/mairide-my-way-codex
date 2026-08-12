@@ -9,7 +9,7 @@ const TIER2_REWARD = 5;
 const EMAIL_OTP_SESSION_PREFIX = "emailotp_";
 const PASSWORD_RESET_SESSION_PREFIX = "pwdreset_";
 const PASSWORD_RESET_TOKEN_PREFIX = "pwdtoken_";
-const SUPABASE_AUTH_TIMEOUT_MS = 25000;
+const SUPABASE_AUTH_TIMEOUT_MS = 12000;
 const EXTERNAL_FETCH_TIMEOUT_MS = 15000;
 const inMemoryOtpSessions = new Map<string, {
   email: string;

@@ -87,8 +87,9 @@ jobs:
               },
             },
             server: {
-              url: 'https://www.mairide.in',
-              cleartext: false
+              url: 'https://rides.mairide.in',
+              cleartext: false,
+              allowNavigation: ['rides.mairide.in', 'www.mairide.in', 'mairide.in'],
             }
           };
 
