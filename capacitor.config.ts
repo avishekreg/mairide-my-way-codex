@@ -9,10 +9,9 @@ const GOOGLE_WEB_CLIENT_ID =
   '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com';
 
 /**
- * Android/iOS shells load the bundled web assets (no remote server.url).
- * Remote server.url + Firebase Messaging without google-services.json was
- * crashing cold starts on device; APIs still target https://rides.mairide.in
- * via resolveApiBaseUrl() when the WebView host is localhost/capacitor.
+ * Android/iOS shells load bundled web assets (no remote server.url).
+ * hostname matches production so Maps API key referrer restrictions work.
+ * API calls still target https://rides.mairide.in via resolveApiBaseUrl().
  */
 const config: CapacitorConfig = {
   appId: "in.mairide.app",
@@ -20,6 +19,7 @@ const config: CapacitorConfig = {
   webDir: "dist",
   server: {
     androidScheme: "https",
+    hostname: "rides.mairide.in",
     cleartext: false,
     allowNavigation: [
       "rides.mairide.in",

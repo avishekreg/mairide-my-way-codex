@@ -221,6 +221,18 @@ const isLocalDevFirestoreMode = () => {
 
 const resolveApiBaseUrl = () => {
   if (typeof window === 'undefined') return '';
+
+  // Native Capacitor shells always call production APIs directly.
+  // Local assets may be served under a spoofed hostname (rides.mairide.in) for Maps referrer
+  // compatibility — same-origin /api would miss the real Vercel backend.
+  try {
+    if (typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform()) {
+      return WEB_API_ORIGIN_FALLBACK;
+    }
+  } catch {
+    // Fall through to host-based detection.
+  }
+
   const protocol = String(window.location.protocol || '').toLowerCase();
   const hostname = String(window.location.hostname || '').toLowerCase();
   const isHttpLike = protocol === 'http:' || protocol === 'https:';
@@ -3422,8 +3434,8 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
-const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android-340.apk';
-const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://downloads.mairide.in/mairide-android-340.apk';
+const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
+const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://downloads.mairide.in/mairide-android.apk';
 const buildAndroidQrUrl = (apkUrl: string) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(apkUrl)}`;
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
@@ -5706,6 +5718,15 @@ const normalizeDialogMessage = (input: unknown, fallback = 'A server error has o
   }
   if (lowered.includes('auth_upstream_timeout') || lowered.includes('authentication service timed out')) {
     return 'Login is taking too long. Please check your connection and retry.';
+  }
+  if (
+    lowered.includes('network error') ||
+    lowered.includes('failed to fetch') ||
+    lowered.includes('networkerror') ||
+    lowered.includes('load failed') ||
+    lowered.includes('the internet connection appears to be offline')
+  ) {
+    return 'Network error. Please check your internet connection and retry.';
   }
   return raw;
 };
