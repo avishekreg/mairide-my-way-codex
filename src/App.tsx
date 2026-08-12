@@ -6116,9 +6116,19 @@ const trackPlatformUsageEvent = async (
 const registerMobilePushDevice = async (profile: UserProfile, releaseVersion: string) => {
   if (!isMobileAppRuntime() || profile.role === 'admin') return () => {};
 
+  // Plugin may be stripped from Android builds that lack google-services.json.
+  if (
+    typeof PushNotifications?.checkPermissions !== 'function' ||
+    typeof PushNotifications?.register !== 'function'
+  ) {
+    console.warn('Push notifications plugin unavailable in this native build.');
+    return () => {};
+  }
+
   const platform = isIosAppRuntime() ? 'ios' : 'android';
   const runtime = platform === 'ios' ? 'ios_app' : 'android_app';
 
+  try {
   const permission = await PushNotifications.checkPermissions();
   const nextPermission = permission.receive === 'prompt'
     ? await PushNotifications.requestPermissions()
@@ -6191,6 +6201,10 @@ const registerMobilePushDevice = async (profile: UserProfile, releaseVersion: st
     void receivedHandle.remove();
     void actionHandle.remove();
   };
+  } catch (error) {
+    console.warn('Push notifications setup failed:', error);
+    return () => {};
+  }
 };
 
 const getSessionUserId = async () => {
@@ -11687,7 +11701,7 @@ const useDeferredDashboardSurface = () => {
     const frameId = window.requestAnimationFrame(() => {
       timeoutId = window.setTimeout(() => {
         if (!cancelled) setReady(true);
-      }, 160);
+      }, 700);
     });
 
     return () => {
@@ -29535,10 +29549,18 @@ const App = () => {
     }
   }, [profile, updateTravelerAvatar]);
 
+  const shouldLoadGoogleMaps = Boolean(
+    GOOGLE_MAPS_API_KEY &&
+    !loading &&
+    Boolean(profile || partnerProfile)
+  );
+
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-    libraries: LIBRARIES
+    // Defer Maps JS until after auth resolves. Loading Maps during Android cold
+    // start / login has been linked to WebView process deaths on low-RAM devices.
+    googleMapsApiKey: shouldLoadGoogleMaps ? GOOGLE_MAPS_API_KEY : '',
+    libraries: LIBRARIES,
   });
 
   const [authFailure, setAuthFailure] = useState(false);

@@ -4,17 +4,22 @@ import type { CapacitorConfig } from "@capacitor/cli";
 loadEnv({ path: '.env.local', override: false });
 loadEnv({ path: '.env', override: false });
 
-const RIDES_APP_ORIGIN = "https://rides.mairide.in";
 const GOOGLE_WEB_CLIENT_ID =
   process.env.VITE_GOOGLE_CLIENT_ID ||
   '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com';
 
+/**
+ * Android/iOS shells load the bundled web assets (no remote server.url).
+ * Remote server.url + Firebase Messaging without google-services.json was
+ * crashing cold starts on device; APIs still target https://rides.mairide.in
+ * via resolveApiBaseUrl() when the WebView host is localhost/capacitor.
+ */
 const config: CapacitorConfig = {
   appId: "in.mairide.app",
   appName: "MaiRide",
   webDir: "dist",
   server: {
-    url: RIDES_APP_ORIGIN,
+    androidScheme: "https",
     cleartext: false,
     allowNavigation: [
       "rides.mairide.in",
@@ -22,12 +27,12 @@ const config: CapacitorConfig = {
       "mairide.in",
       "jcgoccsdlrjnratpaeje.supabase.co",
       "*.supabase.co",
+      "accounts.google.com",
+      "*.googleapis.com",
+      "*.gstatic.com",
     ],
   },
   plugins: {
-    // Do NOT globally patch window.fetch — that combination with remote
-    // server.url has caused Android WebView fatal crashes on cold start.
-    // Login still uses explicit CapacitorHttp.post() where needed.
     CapacitorHttp: {
       enabled: false,
     },

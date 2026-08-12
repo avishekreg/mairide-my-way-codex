@@ -72,9 +72,34 @@ jobs:
           rm -rf dist/downloads
           du -sh dist dist/* 2>/dev/null | sort -hr | head -40
 
+      - name: Strip push plugin when Firebase config is missing
+        env:
+          ANDROID_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "Firebase google-services secret present — keeping push notifications plugin."
+            echo "HAS_ANDROID_FIREBASE=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "No ANDROID_GOOGLE_SERVICES_JSON_BASE64 — removing @capacitor/push-notifications before native sync."
+          echo "HAS_ANDROID_FIREBASE=0" >> "$GITHUB_ENV"
+          npm uninstall @capacitor/push-notifications
+          echo "Push notifications plugin removed to prevent FirebaseInitProvider crashes without google-services.json."
+
       - name: Generate Capacitor config
         run: |
-          cat > capacitor.config.ts <<'EOF'
+          if [ "${HAS_ANDROID_FIREBASE}" = "1" ]; then
+            PUSH_PLUGIN_BLOCK=$(cat <<'PUSH'
+              PushNotifications: {
+                presentationOptions: ['badge', 'sound', 'alert'],
+              },
+          PUSH
+            )
+          else
+            PUSH_PLUGIN_BLOCK=""
+          fi
+
+          cat > capacitor.config.ts <<EOF
           import type { CapacitorConfig } from '@capacitor/cli';
 
           const config: CapacitorConfig = {
@@ -82,8 +107,6 @@ jobs:
             appName: 'MaiRide',
             webDir: 'dist',
             plugins: {
-              // Keep CapHttp opt-in only. Global fetch patching crashes some Android WebViews
-              // when server.url loads the live site.
               CapacitorHttp: {
                 enabled: false,
               },
@@ -91,12 +114,12 @@ jobs:
                 scopes: ['profile', 'email'],
                 serverClientId: '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com',
               },
-              PushNotifications: {
-                presentationOptions: ['badge', 'sound', 'alert'],
-              },
+              ${PUSH_PLUGIN_BLOCK}
             },
             server: {
-              url: 'https://rides.mairide.in',
+              // Bundle local web assets. Remote server.url was crashing Android cold starts
+              // when paired with Firebase Messaging without google-services.json.
+              androidScheme: 'https',
               cleartext: false,
               allowNavigation: [
                 'rides.mairide.in',
@@ -104,6 +127,9 @@ jobs:
                 'mairide.in',
                 'jcgoccsdlrjnratpaeje.supabase.co',
                 '*.supabase.co',
+                'accounts.google.com',
+                '*.googleapis.com',
+                '*.gstatic.com',
               ],
             }
           };
@@ -111,13 +137,16 @@ jobs:
           export default config;
           EOF
 
+          echo "Generated capacitor.config.ts (firebase=${HAS_ANDROID_FIREBASE})"
+          cat capacitor.config.ts
+
       - name: Add Android platform
         run: npx cap add android
 
       - name: Sync Android platform
         run: npx cap sync android
 
-      - name: Inject Android runtime permissions
+      - name: Inject Android runtime permissions and crash guards
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ ! -f "$MANIFEST" ]; then
@@ -135,7 +164,23 @@ jobs:
             fi
           done
 
-          echo "Injected Android runtime permissions into generated manifest."
+          # Give WebView / Maps more headroom on low-RAM devices.
+          if ! grep -q 'android:largeHeap' "$MANIFEST"; then
+            sed -i 's/<application /<application android:largeHeap="true" /' "$MANIFEST"
+          fi
+
+          # If Firebase is not configured, disable auto-init hooks that can crash on launch.
+          if [ "${HAS_ANDROID_FIREBASE}" != "1" ]; then
+            if ! grep -q 'firebase_messaging_auto_init_enabled' "$MANIFEST"; then
+              sed -i '/<application /a\        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />' "$MANIFEST"
+            fi
+            if ! grep -q 'firebase_analytics_collection_enabled' "$MANIFEST"; then
+              sed -i '/<application /a\        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />' "$MANIFEST"
+            fi
+          fi
+
+          echo "Injected Android runtime permissions and crash guards into generated manifest."
+          rg -n "largeHeap|firebase_|CAMERA|ACCESS_FINE_LOCATION|MessagingService|FirebaseInitProvider" "$MANIFEST" || true
 
       - name: Configure Firebase services for Android push
         env:
@@ -143,7 +188,7 @@ jobs:
         run: |
           if [ -z "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" ]; then
             echo "ANDROID_GOOGLE_SERVICES_JSON_BASE64 is not configured."
-            echo "Build will continue, but live Android FCM token registration requires android/app/google-services.json."
+            echo "Push notifications remain disabled for this APK build."
             exit 0
           fi
           echo "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
