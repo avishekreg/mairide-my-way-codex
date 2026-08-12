@@ -15,6 +15,13 @@
       "maxDuration": 25
     }
   },
+  "redirects": [
+    {
+      "source": "/downloads/mairide-android.apk",
+      "destination": "https://downloads.mairide.in/mairide-android.apk",
+      "permanent": false
+    }
+  ],
   "headers": [
     {
       "source": "/sw.js",

@@ -1,0 +1,41 @@
+---
+description: Protect auth runtime, demo isolation, Safari UI checks, and local builds
+alwaysApply: true
+---
+
+# MaiRide runtime and release guards
+
+## Protected auth runtime
+
+Never modify, replace, or refactor these files unless the user explicitly asks:
+
+- `src/lib/supabase.ts`
+- `api/_lib/supabaseRuntime.ts`
+
+Do not rewrite their auth/session wiring, env loading, or client factories as part of unrelated work.
+
+## Demo account isolation
+
+Preserve `is_demo` JSON payload isolation for demo accounts.
+
+- Demo responses must keep `is_demo` (or equivalent demo markers) intact.
+- Do not mix demo payloads into live/production account flows.
+- Do not strip, rename, or bypass demo isolation when changing APIs, booking, payments, or user data paths.
+
+## WebKit / Safari UI
+
+When changing UI (layout, CSS, motion, forms, maps, modals):
+
+- Prefer CSS that works in Safari / WebKit (avoid unsupported features without fallbacks).
+- Watch for flex/grid overflow, `100vh`/`dvh`, backdrop-filter, sticky, and date/input quirks.
+- Verify mobile Safari behavior for interactive surfaces before considering UI done.
+
+## Build verification
+
+After major edits (multi-file changes, routing, API handlers, auth-adjacent work, or release packaging):
+
+```bash
+npm run build
+```
+
+Fix any syntax/type/build errors before finishing. Do not leave the tree in a non-building state.

@@ -3422,9 +3422,8 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
-const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android.apk';
-const TRACKED_ANDROID_APK_URL = '/downloads/mairide-android.apk';
-const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/downloads/mairide-android.apk';
+const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
+const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://downloads.mairide.in/mairide-android.apk';
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(PUBLIC_ANDROID_DOWNLOAD_URL)}`;
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
@@ -3870,7 +3869,17 @@ const withCacheBust = (url: string) => {
   return `${url}${separator}t=${Date.now()}`;
 };
 
-const getTrackedAndroidApkUrl = () => apiPath(TRACKED_ANDROID_APK_URL);
+const resolveLatestAndroidApkUrl = async () => {
+  try {
+    const response = await fetch(apiPath(`/downloads/android-update.json?t=${Date.now()}`), { cache: 'no-store' });
+    if (!response.ok) return LIVE_ANDROID_APK_URL;
+    const data = await response.json();
+    const nextUrl = String(data?.apkUrl || '').trim();
+    return nextUrl || LIVE_ANDROID_APK_URL;
+  } catch {
+    return LIVE_ANDROID_APK_URL;
+  }
+};
 
 const downloadAndOpenAndroidApk = async (apkUrl: string) => {
   const fallbackUrl = withCacheBust(apkUrl || LIVE_ANDROID_APK_URL);
@@ -6913,20 +6922,65 @@ const submitSupportFeedback = async (payload: { ticketId: string; rating: number
   return response.data?.ticket as SupportTicket | undefined;
 };
 
-const LoadingScreen = ({ releaseVersion: releaseVersionProp }: { releaseVersion?: string }) => {
+const LoadingScreen = ({
+  releaseVersion: releaseVersionProp,
+  showRecovery = false,
+  onSignOut,
+}: {
+  releaseVersion?: string;
+  showRecovery?: boolean;
+  onSignOut?: () => void;
+}) => {
   const releaseVersion = String(releaseVersionProp || '').trim() || APP_VERSION;
+  const [recoveryVisible, setRecoveryVisible] = useState(false);
+
+  useEffect(() => {
+    if (!showRecovery) {
+      setRecoveryVisible(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setRecoveryVisible(true), 4500);
+    return () => window.clearTimeout(timer);
+  }, [showRecovery]);
+
   return (
-    <div className="fixed inset-0 bg-mairide-bg flex flex-col items-center justify-center z-50">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#1F2D38] px-6 text-white">
       <motion.div
-        animate={{ scale: [1, 1.2, 1], rotate: [0, 360] }}
-        transition={{ duration: 2, repeat: Infinity }}
+        animate={{ scale: [1, 1.08, 1] }}
+        transition={{ duration: 1.6, repeat: Infinity }}
         className="mb-4"
       >
         <div className="flex flex-col items-center">
-          <img src={LOGO_URL} className="w-48 h-48 object-contain rounded-[22%]" alt="mAIRide Logo" />
-          <BrandLockup wordmarkClassName="mt-4 text-4xl font-black tracking-tighter" />
+          <img src={LOGO_URL} className="h-28 w-28 rounded-[22%] object-contain bg-white/10 p-3" alt="mAIRide Logo" />
+          <BrandLockup wordmarkClassName="mt-4 text-3xl font-black tracking-tighter text-white" />
         </div>
       </motion.div>
+      <p className="mt-2 text-sm font-semibold text-white/70">Starting your session…</p>
+      <p className="mt-1 text-[11px] font-bold uppercase tracking-widest text-white/40">{releaseVersion}</p>
+      {recoveryVisible ? (
+        <div className="mt-8 flex w-full max-w-sm flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-2xl bg-[#E97A2E] px-5 py-3 text-sm font-black text-white"
+          >
+            Retry
+          </button>
+          {onSignOut ? (
+            <button
+              type="button"
+              onClick={() => {
+                void Promise.resolve(onSignOut()).finally(() => {
+                  window.location.reload();
+                });
+              }}
+              className="rounded-2xl border border-white/25 px-5 py-3 text-sm font-bold text-white"
+            >
+              Back to login
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -6963,7 +7017,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
 
   const openAndroidDownload = () => {
     const runDownload = async () => {
-      const latestUrl = getTrackedAndroidApkUrl();
+      const latestUrl = await resolveLatestAndroidApkUrl();
       if (isAndroidAppRuntime()) {
         try {
           await downloadAndOpenAndroidApk(latestUrl);
@@ -7061,7 +7115,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
           ) : null}
           <div className="flex flex-row items-center justify-center gap-4">
             <a
-              href={getTrackedAndroidApkUrl()}
+              href={androidDownloadUrl || LIVE_ANDROID_APK_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex h-12 items-center rounded-xl bg-black px-5 text-sm font-bold tracking-wide text-white shadow-sm transition hover:opacity-90"
@@ -29405,26 +29459,23 @@ const App = () => {
     // Hard stop infinite logo spin on native WebView if profile resolution hangs.
     const loadingWatchdog = window.setTimeout(() => {
       if (!active) return;
-      setLoading((prev) => {
-        if (!prev) return prev;
-        recordInternalDebugEvent('auth_loading_watchdog_fired', {
-          runtime: isAndroidWebViewLikeRuntime() ? 'android_webview' : 'web',
-          authUid: resolvedAuthProfileRef.current.authUid,
-        });
-        const cached = resolvedAuthProfileRef.current;
-        if (!cached.profile && !cached.partnerProfile) {
-          // Never open Not Registered from boot watchdog — drop to clean Login.
-          setNotRegisteredError(false);
-          setAuthMode('login');
-          setUser(null);
-          setProfile(null);
-          setPartnerProfile(null);
-          resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
-          void signOut(auth).catch(() => undefined);
-        }
-        return false;
+      recordInternalDebugEvent('auth_loading_watchdog_fired', {
+        runtime: isAndroidWebViewLikeRuntime() ? 'android_webview' : 'web',
+        authUid: resolvedAuthProfileRef.current.authUid,
       });
-    }, isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 12000 : 20000);
+      const cached = resolvedAuthProfileRef.current;
+      if (!cached.profile && !cached.partnerProfile) {
+        // Never open Not Registered from boot watchdog — drop to clean Login.
+        setNotRegisteredError(false);
+        setAuthMode('login');
+        setUser(null);
+        setProfile(null);
+        setPartnerProfile(null);
+        resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
+        void signOut(auth).catch(() => undefined);
+      }
+      setLoading(false);
+    }, isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 8000 : 15000);
 
     return () => {
       active = false;
@@ -30189,7 +30240,7 @@ const App = () => {
     );
   }
 
-  if (loading) return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
+  if (loading) return withAppConfigProvider(<ErrorBoundary><LoadingScreen releaseVersion={releaseVersion} showRecovery onSignOut={handleLogout} />{cookieConsentManager}</ErrorBoundary>);
 
   // Authenticated-but-unhydrated sessions are handled above (silent sign-out → clean Login).
   // Do not surface signup / Not Registered UI from boot.
@@ -30353,7 +30404,12 @@ const App = () => {
   // Authenticated session still hydrating profile — keep LoadingScreen.
   // Never force the Not Registered signup modal during boot/hydration.
   if (user && !profile && !partnerProfile) {
-    return withAppConfigProvider(<ErrorBoundary><LoadingScreen releaseVersion={releaseVersion} />{cookieConsentManager}</ErrorBoundary>);
+    return withAppConfigProvider(
+      <ErrorBoundary>
+        <LoadingScreen releaseVersion={releaseVersion} showRecovery onSignOut={handleLogout} />
+        {cookieConsentManager}
+      </ErrorBoundary>
+    );
   }
 
   if (profile && profile.role === 'driver') {
