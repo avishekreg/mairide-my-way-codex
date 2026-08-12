@@ -88,57 +88,52 @@ jobs:
 
       - name: Generate Capacitor config
         run: |
-          if [ "${HAS_ANDROID_FIREBASE}" = "1" ]; then
-            PUSH_PLUGIN_BLOCK=$(cat <<'PUSH'
-              PushNotifications: {
-                presentationOptions: ['badge', 'sound', 'alert'],
-              },
-          PUSH
-            )
-          else
-            PUSH_PLUGIN_BLOCK=""
-          fi
+          node <<'NODE'
+          const fs = require('fs');
+          const hasFirebase = process.env.HAS_ANDROID_FIREBASE === '1';
+          const pushBlock = hasFirebase
+            ? `    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
+`
+            : '';
+          const contents = `import type { CapacitorConfig } from '@capacitor/cli';
 
-          cat > capacitor.config.ts <<EOF
-          import type { CapacitorConfig } from '@capacitor/cli';
+const config: CapacitorConfig = {
+  appId: 'in.mairide.app',
+  appName: 'MaiRide',
+  webDir: 'dist',
+  plugins: {
+    CapacitorHttp: {
+      enabled: false,
+    },
+    GoogleSignIn: {
+      scopes: ['profile', 'email'],
+      serverClientId: '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com',
+    },
+${pushBlock}  },
+  server: {
+    androidScheme: 'https',
+    cleartext: false,
+    allowNavigation: [
+      'rides.mairide.in',
+      'www.mairide.in',
+      'mairide.in',
+      'jcgoccsdlrjnratpaeje.supabase.co',
+      '*.supabase.co',
+      'accounts.google.com',
+      '*.googleapis.com',
+      '*.gstatic.com',
+    ],
+  },
+};
 
-          const config: CapacitorConfig = {
-            appId: 'in.mairide.app',
-            appName: 'MaiRide',
-            webDir: 'dist',
-            plugins: {
-              CapacitorHttp: {
-                enabled: false,
-              },
-              GoogleSignIn: {
-                scopes: ['profile', 'email'],
-                serverClientId: '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com',
-              },
-              ${PUSH_PLUGIN_BLOCK}
-            },
-            server: {
-              // Bundle local web assets. Remote server.url was crashing Android cold starts
-              // when paired with Firebase Messaging without google-services.json.
-              androidScheme: 'https',
-              cleartext: false,
-              allowNavigation: [
-                'rides.mairide.in',
-                'www.mairide.in',
-                'mairide.in',
-                'jcgoccsdlrjnratpaeje.supabase.co',
-                '*.supabase.co',
-                'accounts.google.com',
-                '*.googleapis.com',
-                '*.gstatic.com',
-              ],
-            }
-          };
-
-          export default config;
-          EOF
-
-          echo "Generated capacitor.config.ts (firebase=${HAS_ANDROID_FIREBASE})"
-          cat capacitor.config.ts
+export default config;
+`;
+          fs.writeFileSync('capacitor.config.ts', contents);
+          console.log(contents);
+          console.log('firebase=', hasFirebase);
+          NODE
 
       - name: Add Android platform
         run: npx cap add android
@@ -148,39 +143,60 @@ jobs:
 
       - name: Inject Android runtime permissions and crash guards
         run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ ! -f "$MANIFEST" ]; then
-            echo "Android manifest not found at $MANIFEST"
-            exit 1
-          fi
-
-          for permission in \
-            "android.permission.CAMERA" \
-            "android.permission.ACCESS_FINE_LOCATION" \
-            "android.permission.ACCESS_COARSE_LOCATION"
-          do
-            if ! grep -q "$permission" "$MANIFEST"; then
-              sed -i "/<application/i\\    <uses-permission android:name=\"$permission\" \\/>" "$MANIFEST"
-            fi
-          done
-
-          # Give WebView / Maps more headroom on low-RAM devices.
-          if ! grep -q 'android:largeHeap' "$MANIFEST"; then
-            sed -i 's/<application /<application android:largeHeap="true" /' "$MANIFEST"
-          fi
-
-          # If Firebase is not configured, disable auto-init hooks that can crash on launch.
-          if [ "${HAS_ANDROID_FIREBASE}" != "1" ]; then
-            if ! grep -q 'firebase_messaging_auto_init_enabled' "$MANIFEST"; then
-              sed -i '/<application /a\        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />' "$MANIFEST"
-            fi
-            if ! grep -q 'firebase_analytics_collection_enabled' "$MANIFEST"; then
-              sed -i '/<application /a\        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />' "$MANIFEST"
-            fi
-          fi
-
-          echo "Injected Android runtime permissions and crash guards into generated manifest."
-          rg -n "largeHeap|firebase_|CAMERA|ACCESS_FINE_LOCATION|MessagingService|FirebaseInitProvider" "$MANIFEST" || true
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'android/app/src/main/AndroidManifest.xml';
+          if (!fs.existsSync(path)) {
+            console.error('Android manifest not found at', path);
+            process.exit(1);
+          }
+          let xml = fs.readFileSync(path, 'utf8');
+          for (const permission of [
+            'android.permission.CAMERA',
+            'android.permission.ACCESS_FINE_LOCATION',
+            'android.permission.ACCESS_COARSE_LOCATION',
+          ]) {
+            if (!xml.includes(permission)) {
+              xml = xml.replace(
+                /<application\b/,
+                `    <uses-permission android:name="${permission}" />\n    <application`
+              );
+            }
+          }
+          if (!xml.includes('android:largeHeap')) {
+            xml = xml.replace(/<application\b/, '<application android:largeHeap="true"');
+          }
+          if (process.env.HAS_ANDROID_FIREBASE !== '1') {
+            const hooks = [
+              'firebase_messaging_auto_init_enabled',
+              'firebase_analytics_collection_enabled',
+            ];
+            for (const name of hooks) {
+              if (!xml.includes(name)) {
+                xml = xml.replace(
+                  /(<application\b[^>]*>)/,
+                  `$1\n        <meta-data android:name="${name}" android:value="false" />`
+                );
+              }
+            }
+            // Drop Capacitor MessagingService if it somehow remains without Firebase config.
+            xml = xml.replace(
+              /\s*<service[\s\S]*?com\.capacitorjs\.plugins\.pushnotifications\.MessagingService[\s\S]*?<\/service>/g,
+              ''
+            );
+          }
+          fs.writeFileSync(path, xml);
+          console.log('Patched AndroidManifest.xml');
+          for (const needle of [
+            'largeHeap',
+            'firebase_messaging_auto_init_enabled',
+            'CAMERA',
+            'MessagingService',
+            'FirebaseInitProvider',
+          ]) {
+            console.log(needle, xml.includes(needle));
+          }
+          NODE
 
       - name: Configure Firebase services for Android push
         env:
@@ -334,7 +350,18 @@ jobs:
           set -o pipefail
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace --info 2>&1 | tee /tmp/gradle-build.log
+          # Maven/Google downloads flake with "Unexpected end of file from server" on runners.
+          for attempt in 1 2 3; do
+            echo "Gradle assembleRelease attempt ${attempt}/3"
+            if ./gradlew assembleRelease --stacktrace --no-daemon 2>&1 | tee /tmp/gradle-build.log; then
+              echo "Gradle assembleRelease succeeded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Gradle attempt ${attempt} failed; retrying after backoff..."
+            sleep $((attempt * 20))
+          done
+          echo "Gradle assembleRelease failed after 3 attempts"
+          exit 1
 
       - name: Print Gradle failure context
         if: always()
