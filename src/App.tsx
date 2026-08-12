@@ -340,8 +340,9 @@ const isHtmlResponse = (response: Response) => {
   return contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
 };
 
-const AUTH_REQUEST_TIMEOUT_MS = 15000;
-const SUPABASE_CLIENT_AUTH_TIMEOUT_MS = 18000;
+const AUTH_REQUEST_TIMEOUT_MS = 20000;
+const SUPABASE_CLIENT_AUTH_TIMEOUT_MS = 25000;
+const SUPABASE_PASSWORD_GRANT_TIMEOUT_MS = 20000;
 const PROFILE_SETUP_TIMEOUT_MS = 25000;
 
 const withRejectingTimeout = async <T,>(
@@ -6291,21 +6292,89 @@ const parseApiResponse = async (response: Response, fallback: string) => {
 };
 
 const signInWithDirectSupabasePassword = async (email: string, password: string) => {
-  const { data, error } = await withRejectingTimeout(
-    supabase.auth.signInWithPassword({ email, password }),
-    SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
-    'Authentication service timed out. Please retry.'
-  );
+  const supabaseUrl = 'https://jcgoccsdlrjnratpaeje.supabase.co';
+  const supabaseAnonKey =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ29jY3NkbHJqbnJhdHBhZWplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTkwMTQsImV4cCI6MjA5MDUzNTAxNH0.iPIawKCThu7lYMoGrWAyRDVvQPf5YICP7Ap_XOwAOrw';
 
-  if (error) {
-    throw new Error(error.message || 'Failed to login');
+  const applySession = async (accessToken: string, refreshToken: string) => {
+    const { data, error: setSessionError } = await withRejectingTimeout(
+      supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      }),
+      SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
+      'Login session setup timed out. Please retry.'
+    );
+    if (setSessionError) {
+      throw new Error(setSessionError.message || 'Failed to set login session.');
+    }
+    if (!data?.session?.access_token || !data?.session?.refresh_token) {
+      throw new Error('Login session could not be established.');
+    }
+    return data;
+  };
+
+  // Raw password grant avoids Capacitor Preferences lock contention inside signInWithPassword.
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), SUPABASE_PASSWORD_GRANT_TIMEOUT_MS);
+  try {
+    const grantResponse = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ email, password }),
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    const grantPayload = await grantResponse.json().catch(() => ({}));
+    if (!grantResponse.ok) {
+      const message =
+        grantPayload?.error_description ||
+        grantPayload?.msg ||
+        grantPayload?.error ||
+        'Invalid login credentials';
+      throw new Error(String(message));
+    }
+
+    const accessToken = String(grantPayload?.access_token || '');
+    const refreshToken = String(grantPayload?.refresh_token || '');
+    if (!accessToken || !refreshToken) {
+      throw new Error('Login session could not be established.');
+    }
+    return await applySession(accessToken, refreshToken);
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Authentication service timed out. Please retry.');
+    }
+
+    const message = String(error?.message || '').toLowerCase();
+    const looksLikeTransportFailure =
+      message.includes('failed to fetch') ||
+      message.includes('network') ||
+      message.includes('load failed') ||
+      message.includes('offline');
+
+    // Only fall back to the SDK when the raw grant could not reach Supabase at all.
+    if (!looksLikeTransportFailure) {
+      throw error instanceof Error ? error : new Error(String(error?.message || 'Failed to login'));
+    }
+
+    const { data, error: sdkError } = await withRejectingTimeout(
+      supabase.auth.signInWithPassword({ email, password }),
+      SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
+      'Authentication service timed out. Please retry.'
+    );
+    if (sdkError) throw new Error(sdkError.message || 'Failed to login');
+    if (!data?.session?.access_token || !data?.session?.refresh_token) {
+      throw new Error('Login session could not be established.');
+    }
+    return data;
+  } finally {
+    globalThis.clearTimeout(timer);
   }
-
-  if (!data?.session?.access_token || !data?.session?.refresh_token) {
-    throw new Error('Login session could not be established.');
-  }
-
-  return data;
 };
 
 const hasSubmittedBookingReview = (booking: Booking, reviewerRole: 'consumer' | 'driver') =>
@@ -9010,12 +9079,13 @@ const findUserProfileByPhone = async (value: string) => {
             return;
           } catch (directError: any) {
             const directMessage = String(directError?.message || '').toLowerCase();
+            // Only use the slow Vercel proxy when the device cannot reach Supabase at all.
+            // Timeouts usually mean the proxy will also fail, so don't stack another 20s wait.
             const canUseServerFallback =
               directMessage.includes('failed to fetch') ||
               directMessage.includes('network') ||
-              directMessage.includes('timed out') ||
-              directMessage.includes('timeout') ||
-              directMessage.includes('unavailable');
+              directMessage.includes('load failed') ||
+              directMessage.includes('offline');
 
             if (!canUseServerFallback) {
               throw directError;

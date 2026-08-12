@@ -7,6 +7,8 @@ type StorageLike = {
   removeItem: (key: string) => Promise<void> | void;
 };
 
+const PREFERENCES_TIMEOUT_MS = 400;
+
 const isNativeShellRuntime = () => {
   try {
     return typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
@@ -42,6 +44,20 @@ const removeLocal = (key: string) => {
   }
 };
 
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 const buildBrowserStorage = (): StorageLike => ({
   getItem: (key: string) => readLocal(key),
   setItem: (key: string, value: string) => {
@@ -53,54 +69,39 @@ const buildBrowserStorage = (): StorageLike => ({
 });
 
 /**
- * Native WebView storage: dual-write Preferences + localStorage.
- * Android Capacitor WebViews (especially remote-url shells) can lose Preferences
- * mid-session; localStorage on the https origin is the reliable fallback.
+ * Native WebView storage:
+ * - Read/write localStorage first (sync, reliable for https://rides.mairide.in shells)
+ * - Mirror into Capacitor Preferences in the background with a short timeout
+ *   so a hung Preferences bridge cannot block Supabase sign-in.
  */
 const buildNativeHybridStorage = (): StorageLike => ({
   async getItem(key: string) {
-    let preferenceValue: string | null = null;
-    try {
-      const result = await Preferences.get({ key });
-      preferenceValue = result.value ?? null;
-    } catch {
-      preferenceValue = null;
-    }
-
     const localValue = readLocal(key);
-    if (preferenceValue != null && preferenceValue !== '') {
-      if (localValue !== preferenceValue) {
-        writeLocal(key, preferenceValue);
-      }
-      return preferenceValue;
+    if (localValue != null && localValue !== '') {
+      void withTimeout(Preferences.set({ key, value: localValue }), PREFERENCES_TIMEOUT_MS);
+      return localValue;
     }
 
-    if (localValue != null && localValue !== '') {
-      try {
-        await Preferences.set({ key, value: localValue });
-      } catch {
-        // Keep serving localStorage even if Preferences sync fails.
+    try {
+      const result = await withTimeout(Preferences.get({ key }), PREFERENCES_TIMEOUT_MS);
+      const preferenceValue = result?.value ?? null;
+      if (preferenceValue != null && preferenceValue !== '') {
+        writeLocal(key, preferenceValue);
+        return preferenceValue;
       }
-      return localValue;
+    } catch {
+      // Fall through to null.
     }
 
     return null;
   },
   async setItem(key: string, value: string) {
     writeLocal(key, value);
-    try {
-      await Preferences.set({ key, value });
-    } catch {
-      // localStorage write already applied for WebView continuity.
-    }
+    void withTimeout(Preferences.set({ key, value }), PREFERENCES_TIMEOUT_MS);
   },
   async removeItem(key: string) {
     removeLocal(key);
-    try {
-      await Preferences.remove({ key });
-    } catch {
-      // Ignore native persistence failures.
-    }
+    void withTimeout(Preferences.remove({ key }), PREFERENCES_TIMEOUT_MS);
   },
 });
 
