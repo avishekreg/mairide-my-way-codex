@@ -6,7 +6,10 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   plugins: {
     CapacitorHttp: {
-      enabled: false,
+      // Patch window.fetch through native HTTP on Android/iOS.
+      // Required so Supabase JS (and other APIs) do not hang in the WebView
+      // after CapHttp-based login. Firebase auto-init is stripped in CI.
+      enabled: true,
     },
     GoogleSignIn: {
       scopes: ['profile', 'email'],

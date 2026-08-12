@@ -382,6 +382,18 @@ const withRejectingTimeout = async <T,>(
   }
 };
 
+const safeSignOut = async (timeoutMs = 2500) => {
+  try {
+    await withRejectingTimeout(
+      signOut(auth).catch(() => undefined),
+      timeoutMs,
+      'sign-out-timeout'
+    );
+  } catch {
+    // Never block UI recovery on a hung native signOut/fetch.
+  }
+};
+
 const fetchAuthWithTimeout = async (url: string, requestInit: RequestInit, timeoutMs = AUTH_REQUEST_TIMEOUT_MS) => {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
@@ -9340,10 +9352,48 @@ const findUserProfileByPhone = async (value: string) => {
         // Email/Password Login
         if (isAndroidWebViewRuntime) {
           const loginEmail = normalizeEmailValue(normalizedUsername);
-          // Native only: CapacitorHttp → Supabase token grant. Do not race a WebView
-          // fetch proxy, and do not location.reload() (that previously escaped the
-          // bundled shell when hostname/allowNavigation pointed at the live domain).
+          // Native only: CapacitorHttp token grant + CapHttp-backed profile read.
+          // Never location.reload() — that caused remote-shell white screens.
           await signInWithDirectSupabasePassword(loginEmail, password);
+          try {
+            const sessionWrap = await withRejectingTimeout(
+              supabase.auth.getSession(),
+              5000,
+              'Login session verification timed out. Please retry.'
+            );
+            const sessionUser = sessionWrap?.data?.session?.user;
+            const accessToken = String(sessionWrap?.data?.session?.access_token || '');
+            if (sessionUser?.id) {
+              const snapshot = await withRejectingTimeout(
+                getDoc(doc(db, 'users', sessionUser.id)),
+                12000,
+                'Profile lookup timed out. Please retry.'
+              );
+              if (snapshot.exists()) {
+                const resolvedProfile = snapshot.data() as UserProfile;
+                resolvedAuthProfileRef.current = {
+                  authUid: sessionUser.id,
+                  profile: resolvedProfile,
+                  partnerProfile: null,
+                };
+                setUser({
+                  uid: sessionUser.id,
+                  email: sessionUser.email || loginEmail,
+                  displayName: resolvedProfile.displayName || sessionUser.email || 'User',
+                  photoURL: resolvedProfile.photoURL || '',
+                  phoneNumber: resolvedProfile.phoneNumber || '',
+                  emailVerified: Boolean(sessionUser.email_confirmed_at),
+                  isAnonymous: false,
+                  getIdToken: async () => accessToken,
+                } as any);
+                setProfile(resolvedProfile);
+                setPartnerProfile(null);
+                setLoading(false);
+              }
+            }
+          } catch (hydrateError) {
+            console.warn('Native post-login profile hydrate:', hydrateError);
+          }
           return;
         }
 
@@ -29164,7 +29214,7 @@ const App = () => {
       !criticalSessionResetRef.current
     ) {
       criticalSessionResetRef.current = true;
-      void signOut(auth).catch(() => undefined);
+      void safeSignOut();
     }
   }, [installedNativeVersion, mobileReleasePolicy, user]);
 
@@ -29216,11 +29266,46 @@ const App = () => {
 
     const finishAuthLoading = (generation: number) => {
       if (!active || generation !== authResolveGenerationRef.current) return;
+      clearLoadingWatchdog();
       setLoading(false);
     };
 
+    let loadingWatchdog: number | null = null;
+    const clearLoadingWatchdog = () => {
+      if (loadingWatchdog !== null) {
+        window.clearTimeout(loadingWatchdog);
+        loadingWatchdog = null;
+      }
+    };
+    const armLoadingWatchdog = (reason: string) => {
+      clearLoadingWatchdog();
+      const timeoutMs = isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 10000 : 15000;
+      loadingWatchdog = window.setTimeout(() => {
+        if (!active) return;
+        recordInternalDebugEvent('auth_loading_watchdog_fired', {
+          runtime: isAndroidWebViewLikeRuntime() ? 'android_webview' : 'web',
+          authUid: resolvedAuthProfileRef.current.authUid,
+          reason,
+        });
+        const cached = resolvedAuthProfileRef.current;
+        if (!cached.profile && !cached.partnerProfile) {
+          setNotRegisteredError(false);
+          setAuthMode('login');
+          setUser(null);
+          setProfile(null);
+          setPartnerProfile(null);
+          resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
+          void safeSignOut();
+        }
+        setLoading(false);
+      }, timeoutMs);
+    };
+
+    armLoadingWatchdog('boot');
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (!active) return;
+      armLoadingWatchdog(u ? `auth:${u.uid}` : 'auth:signed_out');
       const cached = resolvedAuthProfileRef.current;
       const isSameResolvedUser =
         Boolean(u?.uid) &&
@@ -29345,7 +29430,7 @@ const App = () => {
                     // Orphan/unhydrated session on boot: return to clean Login — never force Not Registered.
                     setNotRegisteredError(false);
                     setAuthMode('login');
-                    await signOut(auth).catch(() => undefined);
+                    await safeSignOut();
                     resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
                     setProfile(null);
                     setPartnerProfile(null);
@@ -29363,7 +29448,7 @@ const App = () => {
               if (!matchedPartner) {
                 setNotRegisteredError(false);
                 setAuthMode('login');
-                await signOut(auth).catch(() => undefined);
+                await safeSignOut();
                 resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
                 setUser(null);
               } else {
@@ -29404,7 +29489,7 @@ const App = () => {
               // Stale/anonymous session without a profile: clean Login only (no signup modal).
               setNotRegisteredError(false);
               setAuthMode('login');
-              await signOut(auth).catch(() => undefined);
+              await safeSignOut();
               resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
               setProfile(null);
               setPartnerProfile(null);
@@ -29424,7 +29509,7 @@ const App = () => {
           } else {
             setNotRegisteredError(false);
             setAuthMode('login');
-            await signOut(auth).catch(() => undefined);
+            await safeSignOut();
             resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
             setProfile(null);
             setPartnerProfile(null);
@@ -29443,30 +29528,9 @@ const App = () => {
       }
     });
 
-    // Hard stop infinite logo spin on native WebView if profile resolution hangs.
-    const loadingWatchdog = window.setTimeout(() => {
-      if (!active) return;
-      recordInternalDebugEvent('auth_loading_watchdog_fired', {
-        runtime: isAndroidWebViewLikeRuntime() ? 'android_webview' : 'web',
-        authUid: resolvedAuthProfileRef.current.authUid,
-      });
-      const cached = resolvedAuthProfileRef.current;
-      if (!cached.profile && !cached.partnerProfile) {
-        // Never open Not Registered from boot watchdog — drop to clean Login.
-        setNotRegisteredError(false);
-        setAuthMode('login');
-        setUser(null);
-        setProfile(null);
-        setPartnerProfile(null);
-        resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
-        void signOut(auth).catch(() => undefined);
-      }
-      setLoading(false);
-    }, isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 8000 : 15000);
-
     return () => {
       active = false;
-      window.clearTimeout(loadingWatchdog);
+      clearLoadingWatchdog();
       unsubscribe();
     };
   }, []);
@@ -29476,6 +29540,25 @@ const App = () => {
     safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
     return signOut(auth);
   };
+
+  // Last-resort UI unlock: authenticated without profile must not stick forever
+  // even if the auth effect watchdog was cleared by a remount.
+  useEffect(() => {
+    if (!user || profile || partnerProfile || loading) return;
+    const timer = window.setTimeout(() => {
+      recordInternalDebugEvent('auth_unhydrated_ui_watchdog', {
+        authUid: user.uid,
+      });
+      setNotRegisteredError(false);
+      setAuthMode('login');
+      setUser(null);
+      setProfile(null);
+      setPartnerProfile(null);
+      resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
+      void safeSignOut();
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [user, profile, partnerProfile, loading]);
 
   const isTravelerProfile = profile?.role === 'consumer';
 

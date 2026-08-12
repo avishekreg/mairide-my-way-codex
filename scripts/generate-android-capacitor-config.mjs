@@ -30,7 +30,9 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   plugins: {
     CapacitorHttp: {
-      enabled: false,
+      // Patch window.fetch through native HTTP. WebView fetch hangs after login
+      // were leaving the app on a stuck loading/white screen. Firebase is stripped in CI.
+      enabled: true,
     },
     GoogleSignIn: {
       scopes: ['profile', 'email'],
