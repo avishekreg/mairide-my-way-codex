@@ -279,6 +279,22 @@
       "destination": "/downloads/mairide-android.apk"
     },
     {
+      "source": "/api/auth/:action",
+      "destination": "/api/auth?action=:action"
+    },
+    {
+      "source": "/api/user/:action",
+      "destination": "/api/user?action=:action"
+    },
+    {
+      "source": "/api/bookings/:action",
+      "destination": "/api/bookings?action=:action"
+    },
+    {
+      "source": "/api/health/:action",
+      "destination": "/api/health?action=:action"
+    },
+    {
       "source": "/((?!api/).*)",
       "has": [
         {

@@ -6241,6 +6241,15 @@ const parseApiResponse = async (response: Response, fallback: string) => {
       (typeof payload === 'object' && payload?.Details) ||
       (typeof payload === 'string' && payload.trim() ? payload : null) ||
       `${fallback} (HTTP ${response.status})`;
+    const lowered = String(errorMessage || '').toLowerCase();
+    // Never surface bare Vercel edge NOT_FOUND bodies in the login modal.
+    if (
+      response.status === 404 ||
+      lowered.includes('not_found') ||
+      lowered.includes('the page could not be found')
+    ) {
+      throw new Error(`${fallback}. Authentication route was unavailable. Please retry in a moment.`);
+    }
     throw new Error(errorMessage);
   }
 
@@ -8582,7 +8591,7 @@ const findUserProfileByPhone = async (value: string) => {
       const response = await postAuthAction(
         'send-password-reset-otp',
         { identifier: resetIdentifier.trim() },
-        '/api/auth/send-password-reset-otp'
+        '/api/auth?action=send-password-reset-otp'
       );
       const data = await parseApiResponse(response, 'Failed to send reset OTP');
       setResetSessionId(data.resetSessionId || '');
@@ -8606,7 +8615,7 @@ const findUserProfileByPhone = async (value: string) => {
       const response = await postAuthAction(
         'verify-password-reset-otp',
         { resetSessionId, otp: otpDigits },
-        '/api/auth/verify-password-reset-otp'
+        '/api/auth?action=verify-password-reset-otp'
       );
       const data = await parseApiResponse(response, 'Failed to verify reset OTP');
       setResetToken(data.resetToken || '');
@@ -8633,7 +8642,7 @@ const findUserProfileByPhone = async (value: string) => {
       const response = await postAuthAction(
         'reset-password-with-otp',
         { resetToken, newPassword: resetPassword },
-        '/api/auth/reset-password-with-otp'
+        '/api/auth?action=reset-password-with-otp'
       );
       await parseApiResponse(response, 'Failed to reset password');
       alert('Password reset successful. Please login with your new password.');
@@ -8689,13 +8698,13 @@ const findUserProfileByPhone = async (value: string) => {
     if (!normalizedSignupEmail || !isValidEmailValue(normalizedSignupEmail)) return;
     setIsLoading(true);
     try {
-      const response = await postAuthAction('send-email-otp', { email: normalizedSignupEmail }, '/api/auth/send-email-otp');
+      const response = await postAuthAction('send-email-otp', { email: normalizedSignupEmail }, '/api/auth?action=send-email-otp');
       const data = await parseApiResponse(response, 'Failed to send Email OTP');
       if (data.Status === 'Success') {
         setEmailSessionId(data.Details);
         setStep('email-otp');
       } else if (data.Code === 'EMAIL_OTP_UNAVAILABLE') {
-        const phoneOtpResponse = await postAuthAction('send-otp', { phoneNumber: normalizedSignupPhone }, '/api/auth/send-otp');
+        const phoneOtpResponse = await postAuthAction('send-otp', { phoneNumber: normalizedSignupPhone }, '/api/auth?action=send-otp');
         const phoneOtpData = await parseApiResponse(phoneOtpResponse, 'Failed to send phone OTP');
         if (phoneOtpData.Status === 'Success') {
           setSessionId(phoneOtpData.Details);
@@ -8724,7 +8733,7 @@ const findUserProfileByPhone = async (value: string) => {
     if (!otpDigits || !emailSessionId) return;
     setIsLoading(true);
     try {
-      const response = await postAuthAction('verify-otp', { sessionId: emailSessionId, otp: otpDigits }, '/api/auth/verify-otp');
+      const response = await postAuthAction('verify-otp', { sessionId: emailSessionId, otp: otpDigits }, '/api/auth?action=verify-otp');
       const data = await parseApiResponse(response, 'Failed to verify Email OTP');
       if (data.Status === 'Success' && data.Details === 'OTP Matched') {
         setOtp(''); // Clear OTP for next step
@@ -8744,7 +8753,7 @@ const findUserProfileByPhone = async (value: string) => {
     if (!normalizedSignupPhone) return;
     setIsLoading(true);
     try {
-      const response = await postAuthAction('send-otp', { phoneNumber: normalizedSignupPhone }, '/api/auth/send-otp');
+      const response = await postAuthAction('send-otp', { phoneNumber: normalizedSignupPhone }, '/api/auth?action=send-otp');
       const data = await parseApiResponse(response, 'Failed to send OTP');
       if (data.Status === 'Success') {
         setSessionId(data.Details);
@@ -8770,7 +8779,7 @@ const findUserProfileByPhone = async (value: string) => {
     setIsLoading(true);
     setNotRegisteredError(false);
     try {
-      const response = await postAuthAction('verify-otp', { sessionId, otp: otpDigits }, '/api/auth/verify-otp');
+      const response = await postAuthAction('verify-otp', { sessionId, otp: otpDigits }, '/api/auth?action=verify-otp');
       const data = await parseApiResponse(response, 'Failed to verify OTP');
       if (data.Status === 'Success' && data.Details === 'OTP Matched') {
         setOtp('');
@@ -8782,7 +8791,7 @@ const findUserProfileByPhone = async (value: string) => {
             const resolveResponse = await postAuthResolveAction(
               'resolve-phone-login',
               { phoneNumber: phoneNumber || username },
-              '/api/auth/resolve-phone-login'
+              '/api/auth?action=resolve-phone-login'
             );
             existingProfile = await parseApiResponse(resolveResponse, 'Failed to resolve phone login');
           } catch (error: any) {
@@ -8896,7 +8905,7 @@ const findUserProfileByPhone = async (value: string) => {
               whatsapp: marketingOptIn,
             },
           },
-      }, '/api/auth/complete-signup');
+      }, '/api/auth?action=complete-signup');
       await parseApiResponse(signupResponse, 'Failed to complete sign up');
 
       const result = await signInWithEmailAndPassword(auth, normalizedSignupEmail, password);
@@ -8954,7 +8963,7 @@ const findUserProfileByPhone = async (value: string) => {
         // Trigger Phone OTP Login
         setPhoneNumber(normalizedLoginPhone);
         safeStorageSet('session', PHONE_LOGIN_NUMBER_KEY, normalizedLoginPhone);
-        const response = await postAuthAction('send-otp', { phoneNumber: normalizedLoginPhone }, '/api/auth/send-otp');
+        const response = await postAuthAction('send-otp', { phoneNumber: normalizedLoginPhone }, '/api/auth?action=send-otp');
         const data = await parseApiResponse(response, 'Failed to send OTP');
         if (data.Status === 'Success') {
           setSessionId(data.Details);
@@ -8979,7 +8988,7 @@ const findUserProfileByPhone = async (value: string) => {
               const fallbackResponse = await postAuthAction(
                 'password-login',
                 { email: loginEmail, password },
-                '/api/auth/password-login'
+                '/api/auth?action=password-login'
               );
               const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
               const accessToken = String(fallbackData?.session?.access_token || '');
@@ -9058,7 +9067,7 @@ const findUserProfileByPhone = async (value: string) => {
           const fallbackResponse = await postAuthAction(
             'password-login',
             { email: normalizeEmailValue(normalizedUsername), password },
-            '/api/auth/password-login'
+            '/api/auth?action=password-login'
           );
           const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
           const accessToken = String(fallbackData?.session?.access_token || '');

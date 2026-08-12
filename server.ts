@@ -68,6 +68,8 @@ async function startServer() {
   app.post("/api/auth/verify-otp", handleVerifyOtp);
   app.post("/api/auth/complete-signup", handleCompleteSignup);
   app.post("/api/auth/resolve-phone-login", handleResolvePhoneLogin);
+  app.all("/api/auth/:action", authHandler);
+  app.all("/api/user/:action", userHandler);
   app.post("/api/bookings/submit-review", handleSubmitReview);
   app.all("/api/bookings", bookingsHandler);
 

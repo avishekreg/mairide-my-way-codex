@@ -19,8 +19,18 @@ import {
 
 function getAction(req: any) {
   const fromQuery = req.query?.action;
-  if (Array.isArray(fromQuery)) return fromQuery[0];
-  if (typeof fromQuery === "string") return fromQuery;
+  if (Array.isArray(fromQuery) && fromQuery[0]) return String(fromQuery[0]);
+  if (typeof fromQuery === "string" && fromQuery.trim()) return fromQuery.trim();
+
+  try {
+    const rawUrl = String(req?.url || "");
+    const pathOnly = rawUrl.split("?")[0] || "";
+    const match = pathOnly.match(/\/api\/user\/([^/]+)\/?$/i);
+    if (match?.[1]) return decodeURIComponent(match[1]);
+  } catch {
+    // Ignore URL parse failures and continue to body action.
+  }
+
   return req.body?.action || "";
 }
 
