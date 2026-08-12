@@ -1530,10 +1530,10 @@ const AdminListPagination = ({
     <div className="flex flex-wrap items-center gap-3">
       <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-mairide-secondary">
         Per page
-        <select
+        <select style={SAFARI_SELECT_STYLE}
           value={pageSize}
           onChange={(event) => onPageSizeChange(Number(event.target.value))}
-          className="rounded-xl border border-mairide-secondary bg-mairide-bg px-3 py-2 text-sm font-bold text-mairide-primary outline-none"
+          className="appearance-none rounded-xl border border-mairide-secondary bg-mairide-bg px-3 py-2 text-sm font-bold text-mairide-primary outline-none"
         >
           {ADMIN_PAGE_SIZE_OPTIONS.map((option) => (
             <option key={option} value={option}>{option}</option>
@@ -1662,20 +1662,20 @@ const AdminTransactionsView = ({
                 className="w-full rounded-2xl bg-mairide-bg py-3 pl-11 pr-4 text-sm font-bold text-mairide-primary outline-none placeholder:font-medium placeholder:text-mairide-secondary"
               />
             </div>
-            <select
+            <select style={SAFARI_SELECT_STYLE}
               value={transactionStatusFilter}
               onChange={(event) => setTransactionStatusFilter(event.target.value as any)}
-              className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
+              className="appearance-none rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
             >
               <option value="all">All statuses</option>
               <option value="completed">Completed</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
             </select>
-            <select
+            <select style={SAFARI_SELECT_STYLE}
               value={transactionPayerFilter}
               onChange={(event) => setTransactionPayerFilter(event.target.value as any)}
-              className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
+              className="appearance-none rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
             >
               <option value="all">All payers</option>
               <option value="consumer">Traveler payments</option>
@@ -2278,10 +2278,10 @@ const AdminMaiPayControlDesk = ({
                 </label>
                 <label className="space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Service type</span>
-                  <select
+                  <select style={SAFARI_SELECT_STYLE}
                     value={newServiceDraft.kind}
                     onChange={(event) => setNewServiceDraft({ ...newServiceDraft, kind: event.target.value as MaiPayServiceKind })}
-                    className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                    className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
                   >
                     <option value="external">External API service</option>
                     <option value="internal">Internal capability</option>
@@ -2365,10 +2365,10 @@ const AdminMaiPayControlDesk = ({
                 <div className="rounded-3xl border border-mairide-secondary bg-mairide-bg p-4">
                   <label className="block space-y-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Routing strategy</span>
-                    <select
+                    <select style={SAFARI_SELECT_STYLE}
                       value={settingsDraft.routeStrategy}
                       onChange={(event) => setSettingsDraft({ ...settingsDraft, routeStrategy: event.target.value as MaiPayRouteStrategy })}
-                      className="w-full rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                      className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-white px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
                     >
                       <option value="priority_fallback">Priority routing with automatic fallback</option>
                       <option value="manual_primary">Manual primary only</option>
@@ -2438,10 +2438,10 @@ const AdminMaiPayControlDesk = ({
                         </label>
                         <label className="space-y-2">
                           <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Status</span>
-                          <select
+                          <select style={SAFARI_SELECT_STYLE}
                             value={provider.status}
                             onChange={(event) => updateProviderDraft(provider.id, { status: event.target.value as MaiPayProviderStatus })}
-                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
                           >
                             <option value="active">Active route</option>
                             <option value="inactive">Inactive route</option>
@@ -2459,10 +2459,10 @@ const AdminMaiPayControlDesk = ({
                         </label>
                         <label className="space-y-2">
                           <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Integration type</span>
-                          <select
+                          <select style={SAFARI_SELECT_STYLE}
                             value={provider.integrationType}
                             onChange={(event) => updateProviderDraft(provider.id, { integrationType: event.target.value as MaiPayIntegrationType })}
-                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
                           >
                             <option value="rest">REST API</option>
                             <option value="sdk">SDK</option>
@@ -2473,10 +2473,10 @@ const AdminMaiPayControlDesk = ({
                         </label>
                         <label className="space-y-2">
                           <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Environment</span>
-                          <select
+                          <select style={SAFARI_SELECT_STYLE}
                             value={provider.environment}
                             onChange={(event) => updateProviderDraft(provider.id, { environment: event.target.value as MaiPayServiceEnvironment })}
-                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
                           >
                             <option value="sandbox">Sandbox</option>
                             <option value="production">Production</option>
@@ -2496,10 +2496,10 @@ const AdminMaiPayControlDesk = ({
                         </label>
                         <label className="space-y-2">
                           <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Health status</span>
-                          <select
+                          <select style={SAFARI_SELECT_STYLE}
                             value={provider.healthStatus}
                             onChange={(event) => updateProviderDraft(provider.id, { healthStatus: event.target.value as MaiPayProviderHealth })}
-                            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
+                            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none focus:border-mairide-accent"
                           >
                             <option value="unknown">Unknown</option>
                             <option value="healthy">Healthy</option>
@@ -3146,10 +3146,10 @@ const AdminMobileAppView = () => {
                 className="w-full rounded-2xl bg-mairide-bg py-3 pl-11 pr-4 text-sm font-bold text-mairide-primary outline-none placeholder:font-medium placeholder:text-mairide-secondary"
               />
             </div>
-            <select
+            <select style={SAFARI_SELECT_STYLE}
               value={eventTypeFilter}
               onChange={(event) => setEventTypeFilter(event.target.value as any)}
-              className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
+              className="appearance-none rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
             >
               <option value="all">All mobile events</option>
               <option value="push">Push delivery</option>
@@ -4158,6 +4158,12 @@ const isInvestorDemoDataProfile = (profile?: Pick<UserProfile, 'email' | 'role'>
   const email = normalizeDemoEmail(profile?.email);
   return INVESTOR_DEMO_DATA_EMAILS.has(email) && (profile?.role === 'consumer' || profile?.role === 'driver');
 };
+const SAFARI_SELECT_STYLE: React.CSSProperties = {
+  WebkitAppearance: 'none',
+  MozAppearance: 'none',
+  appearance: 'none',
+};
+
 const hasInvestorDemoDataFlag = (record: any) => {
   const data = record?.data || {};
   return record?.isDemo === true || record?.is_demo === true || data?.isDemo === true || data?.is_demo === true;
@@ -4455,7 +4461,7 @@ const LanguageSwitcher = ({
         compact ? 'w-4 h-4' : 'w-5 h-5'
       )}
     />
-    <select
+    <select style={SAFARI_SELECT_STYLE}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       translate="no"
@@ -10769,8 +10775,8 @@ const DriverOnboarding = ({
             </div>
             <div>
               <label className="block text-[10px] font-bold text-mairide-secondary uppercase mb-1 ml-2">Insurance Status</label>
-              <select
-                className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none text-sm"
+              <select style={SAFARI_SELECT_STYLE}
+                className="appearance-none w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none text-sm"
                 value={formData.insuranceStatus}
                 onChange={e => setFormData({
                   ...formData,
@@ -11577,10 +11583,10 @@ const DashboardTranslatorCard = ({
       <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
         <label className="block">
           <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">From</span>
-          <select
+          <select style={SAFARI_SELECT_STYLE}
             value={sourceLanguage}
             onChange={(e) => setSourceLanguage(e.target.value)}
-            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
           >
             {SUPPORTED_UI_LANGUAGES.map((language) => (
               <option key={`source-${language.code}`} value={language.code}>
@@ -11591,10 +11597,10 @@ const DashboardTranslatorCard = ({
         </label>
         <label className="block">
           <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">To</span>
-          <select
+          <select style={SAFARI_SELECT_STYLE}
             value={targetLanguage}
             onChange={(e) => setTargetLanguage(e.target.value)}
-            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
           >
             {SUPPORTED_UI_LANGUAGES.map((language) => (
               <option key={`target-${language.code}`} value={language.code}>
@@ -11880,10 +11886,10 @@ const RouteAlertComposer = ({
       <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
         <label className="block">
           <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">Issue type</span>
-          <select
+          <select style={SAFARI_SELECT_STYLE}
             value={issueType}
             onChange={(event) => setIssueType(event.target.value as RouteAlertReport['issueType'])}
-            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
           >
             <option value="blockage">Blockage</option>
             <option value="accident">Accident</option>
@@ -12127,10 +12133,10 @@ const NegotiationCommunicationPanel = ({
       <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr]">
         <div>
           <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">I speak</label>
-          <select
+          <select style={SAFARI_SELECT_STYLE}
             value={sourceLanguage}
             onChange={(event) => setSourceLanguage(normalizeUiLanguageCode(event.target.value))}
-            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
           >
             {SUPPORTED_UI_LANGUAGES.map((option) => (
               <option key={`source-${option.value}`} value={option.value}>
@@ -12141,10 +12147,10 @@ const NegotiationCommunicationPanel = ({
         </div>
         <div>
           <label className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-mairide-secondary">Translate for recipient</label>
-          <select
+          <select style={SAFARI_SELECT_STYLE}
             value={targetLanguage}
             onChange={(event) => setTargetLanguage(normalizeUiLanguageCode(event.target.value))}
-            className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
+            className="appearance-none w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 text-sm font-semibold text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
           >
             {SUPPORTED_UI_LANGUAGES.map((option) => (
               <option key={`target-${option.value}`} value={option.value}>
@@ -18329,7 +18335,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                     <div>
                       <label className="mb-2 block text-sm font-semibold text-mairide-primary">Seats Needed</label>
                       <div className="relative">
-                        <select
+                        <select style={SAFARI_SELECT_STYLE}
                           className="w-full appearance-none rounded-2xl border border-mairide-secondary bg-mairide-bg py-4 pl-4 pr-12 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
                           value={newRequest.seats}
                           onChange={(e) => setNewRequest((prev) => ({ ...prev, seats: e.target.value }))}
@@ -18346,7 +18352,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                     <div>
                       <label className="mb-2 block text-sm font-semibold text-mairide-primary">Journey Day</label>
                       <div className="relative">
-                        <select
+                        <select style={SAFARI_SELECT_STYLE}
                           className="w-full appearance-none rounded-2xl border border-mairide-secondary bg-mairide-bg py-4 pl-4 pr-12 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
                           value={newRequest.departureDay}
                           onChange={(e) => setNewRequest((prev) => ({ ...prev, departureDay: e.target.value }))}
@@ -21589,7 +21595,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 <div>
                   <label className="block text-sm font-semibold text-mairide-primary mb-2">Seats Available</label>
                   <div className="relative">
-                    <select 
+                    <select style={SAFARI_SELECT_STYLE} 
                       className="w-full appearance-none py-4 pl-4 pr-12 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
                       value={newRide.seats}
                       onChange={e => setNewRide({ ...newRide, seats: e.target.value })}
@@ -21606,7 +21612,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 <div>
                   <label className="block text-sm font-semibold text-mairide-primary mb-2">Journey Day</label>
                   <div className="relative">
-                    <select
+                    <select style={SAFARI_SELECT_STYLE}
                       className="w-full appearance-none py-4 pl-4 pr-12 bg-mairide-bg border border-mairide-secondary rounded-2xl outline-none focus:ring-2 focus:ring-mairide-accent text-mairide-primary"
                       value={newRide.departureDay}
                       onChange={e => setNewRide({ ...newRide, departureDay: e.target.value })}
@@ -22567,10 +22573,10 @@ const ChatbotCore = ({
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={selectedLanguage}
                   onChange={(e) => setSelectedLanguage(e.target.value)}
-                  className="bg-white/10 text-white text-xs rounded-lg px-2 py-1 border border-white/20 outline-none"
+                  className="appearance-none bg-white/10 text-white text-xs rounded-lg px-2 py-1 border border-white/20 outline-none"
                   title="Assistant language"
                 >
                   {languageOptions.map((option) => (
@@ -23032,8 +23038,8 @@ const AdminSupportView = () => {
                   <h2 className="text-2xl font-bold text-mairide-primary">{selectedTicket.subject}</h2>
                   <p className="text-sm text-mairide-secondary">Ticket ID: {selectedTicket.id}</p>
                 </div>
-                <select 
-                  className="bg-mairide-bg border-none rounded-xl text-xs font-bold p-3 outline-none"
+                <select style={SAFARI_SELECT_STYLE} 
+                  className="appearance-none bg-mairide-bg border-none rounded-xl text-xs font-bold p-3 outline-none"
                   value={selectedTicket.status}
                   onChange={(e) => handleUpdateStatus(selectedTicket.id, e.target.value as any)}
                 >
@@ -23738,13 +23744,13 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Payment & DMT Services</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={(formData.maipayEnabled ?? formData.paymentDmtServicesEnabled) ? 'enabled' : 'disabled'}
                   onChange={e => {
                     const enabled = e.target.value === 'enabled';
                     setFormData({ ...formData, maipayEnabled: enabled, paymentDmtServicesEnabled: enabled });
                   }}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="disabled">Inactive for public users</option>
                   <option value="enabled">Active for production users</option>
@@ -23755,10 +23761,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Train & Flight Tracking</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.trackingServicesEnabled ? 'enabled' : 'disabled'}
                   onChange={e => setFormData({ ...formData, trackingServicesEnabled: e.target.value === 'enabled' })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="disabled">Inactive for public users</option>
                   <option value="enabled">Active for passenger users</option>
@@ -23793,10 +23799,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Driver Live Money Wallet Add-on</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.liveMoneyWalletAddOnEnabled ? 'enabled' : 'disabled'}
                   onChange={e => setFormData({ ...formData, liveMoneyWalletAddOnEnabled: e.target.value === 'enabled' })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="disabled">Inactive for public drivers</option>
                   <option value="enabled">Available as paid driver add-on</option>
@@ -23859,10 +23865,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">SMS OTP Provider</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.smsOtpProvider || '2factor'}
                   onChange={e => setFormData({ ...formData, smsOtpProvider: e.target.value as AppConfig['smsOtpProvider'] })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="2factor">2Factor</option>
                   <option value="custom">Custom</option>
@@ -23908,10 +23914,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Email OTP Enabled</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.emailOtpEnabled === false ? 'disabled' : 'enabled'}
                   onChange={e => setFormData({ ...formData, emailOtpEnabled: e.target.value === 'enabled' })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="enabled">Enabled</option>
                   <option value="disabled">Disabled</option>
@@ -23919,10 +23925,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Email OTP Provider</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.emailOtpProvider || 'resend'}
                   onChange={e => setFormData({ ...formData, emailOtpProvider: e.target.value as AppConfig['emailOtpProvider'] })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="resend">Resend</option>
                   <option value="2factor">2Factor</option>
@@ -24133,10 +24139,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Chatbot Enabled</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.chatbotEnabled === false ? 'disabled' : 'enabled'}
                   onChange={e => setFormData({ ...formData, chatbotEnabled: e.target.value === 'enabled' })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="enabled">Enabled</option>
                   <option value="disabled">Disabled</option>
@@ -24144,7 +24150,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">LLM Provider</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={selectedProvider}
                   onChange={e => {
                     const nextProvider = e.target.value as NonNullable<AppConfig['llmProvider']>;
@@ -24154,7 +24160,7 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
                       llmModel: providerModelOptions[nextProvider]?.[0] || '',
                     });
                   }}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="gemini">Gemini</option>
                   <option value="openai">OpenAI</option>
@@ -24164,10 +24170,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Model</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.llmModel || ''}
                   onChange={e => setFormData({ ...formData, llmModel: e.target.value })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   {providerModels.map(model => (
                     <option key={model} value={model}>{model}</option>
@@ -24199,10 +24205,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Default Chat Language</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.chatbotDefaultLanguage || 'en-IN'}
                   onChange={e => setFormData({ ...formData, chatbotDefaultLanguage: e.target.value })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="en-IN">English (India)</option>
                   <option value="hi-IN">Hindi</option>
@@ -24228,10 +24234,10 @@ Do not answer unrelated general knowledge questions. For non-admin users, do not
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-bold text-mairide-primary uppercase ml-1">Voice Input (STT)</label>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={formData.chatbotVoiceInputEnabled === false ? 'disabled' : 'enabled'}
                   onChange={e => setFormData({ ...formData, chatbotVoiceInputEnabled: e.target.value === 'enabled' })}
-                  className="w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
+                  className="appearance-none w-full px-6 py-4 bg-mairide-bg rounded-2xl border-none outline-none font-bold text-mairide-primary"
                 >
                   <option value="enabled">Enabled</option>
                   <option value="disabled">Disabled</option>
@@ -26762,10 +26768,10 @@ const AdminDashboard = ({
                       </button>
                     ))}
                   </div>
-                  <select
+                  <select style={SAFARI_SELECT_STYLE}
                     value={userStatusFilter}
                     onChange={(event) => setUserStatusFilter(event.target.value as any)}
-                    className="rounded-xl bg-mairide-bg px-4 py-3 text-xs font-bold uppercase tracking-widest text-mairide-primary outline-none"
+                    className="appearance-none rounded-xl bg-mairide-bg px-4 py-3 text-xs font-bold uppercase tracking-widest text-mairide-primary outline-none"
                   >
                     <option value="all">All statuses</option>
                     <option value="active">Active</option>
@@ -26812,10 +26818,10 @@ const AdminDashboard = ({
 
                         <div className="space-y-2">
                           <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">Role</p>
-                          <select 
+                          <select style={SAFARI_SELECT_STYLE} 
                             value={user.role}
                             onChange={(e) => handleUpdateRole(user.uid, e.target.value as any)}
-                            className="w-full bg-mairide-bg border-none rounded-xl text-xs font-bold p-3 outline-none"
+                            className="appearance-none w-full bg-mairide-bg border-none rounded-xl text-xs font-bold p-3 outline-none"
                           >
                             <option value="consumer">Consumer</option>
                             <option value="driver">Driver</option>
@@ -26946,10 +26952,10 @@ const AdminDashboard = ({
                     className="w-full rounded-2xl bg-mairide-bg py-3 pl-11 pr-4 text-sm font-bold text-mairide-primary outline-none placeholder:font-medium placeholder:text-mairide-secondary"
                   />
                 </div>
-                <select
+                <select style={SAFARI_SELECT_STYLE}
                   value={rideStatusFilter}
                   onChange={(event) => setRideStatusFilter(event.target.value as any)}
-                  className="rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
+                  className="appearance-none rounded-2xl bg-mairide-bg px-4 py-3 text-sm font-bold text-mairide-primary outline-none"
                 >
                   <option value="all">All ride statuses</option>
                   <option value="active">Active</option>
@@ -27420,8 +27426,8 @@ const AdminDashboard = ({
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Role</label>
-                  <select 
-                    className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none font-bold"
+                  <select style={SAFARI_SELECT_STYLE} 
+                    className="appearance-none w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none font-bold"
                     value={newUser.role}
                     onChange={e => setNewUser({ ...newUser, role: e.target.value as any })}
                   >
@@ -27433,8 +27439,8 @@ const AdminDashboard = ({
                 {newUser.role === 'admin' && (
                   <div>
                     <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Admin Job Role</label>
-                    <select 
-                      className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none font-bold"
+                    <select style={SAFARI_SELECT_STYLE} 
+                      className="appearance-none w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none font-bold"
                       value={newUser.adminRole}
                       onChange={e => setNewUser({ ...newUser, adminRole: e.target.value as any })}
                     >
@@ -27493,8 +27499,8 @@ const AdminDashboard = ({
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Role</label>
-                  <select 
-                    className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none font-bold"
+                  <select style={SAFARI_SELECT_STYLE} 
+                    className="appearance-none w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none font-bold"
                     value={editingUser.role}
                     onChange={e => setEditingUser({ ...editingUser, role: e.target.value as any })}
                   >
@@ -27505,8 +27511,8 @@ const AdminDashboard = ({
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Status</label>
-                  <select 
-                    className="w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none font-bold"
+                  <select style={SAFARI_SELECT_STYLE} 
+                    className="appearance-none w-full p-4 bg-mairide-bg border-none rounded-2xl outline-none font-bold"
                     value={editingUser.status}
                     onChange={e => setEditingUser({ ...editingUser, status: e.target.value as any })}
                   >

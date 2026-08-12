@@ -7,6 +7,13 @@
   --color-mairide-accent: #E97A2E;
 }
 
+/* Safari / WebKit: strip native select chrome so rounded borders render cleanly */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
 /* iOS Safari: prevent auto-zoom/layout jumps on form inputs */
 @supports (-webkit-touch-callout: none) {
   input,
