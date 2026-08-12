@@ -4409,38 +4409,50 @@ const detectTimezoneLanguageHints = (): LanguagePromptResolution => {
 };
 
 const detectLanguagePromptFromGeolocation = async (): Promise<LanguagePromptResolution | null> => {
-  if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return null;
-  const position = await new Promise<GeolocationPosition>((resolve, reject) =>
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: false,
-      timeout: 6000,
-      maximumAge: 600000,
-    })
-  ).catch(() => null);
+  try {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return null;
+    if (!('geolocation' in navigator) || typeof navigator.geolocation?.getCurrentPosition !== 'function') {
+      return null;
+    }
+    const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+      try {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: false,
+          timeout: 6000,
+          maximumAge: 600000,
+        });
+      } catch (error) {
+        reject(error);
+      }
+    }).catch(() => null);
 
-  if (!position) return null;
+    if (!position?.coords) return null;
 
-  const lat = position.coords.latitude;
-  const lon = position.coords.longitude;
-  const browserLanguage = detectBrowserPreferredLanguage();
-  const response = await fetch(
-    apiPath(
-      `/api/location?action=language-context&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lon)}&browserLanguage=${encodeURIComponent(browserLanguage)}`
-    ),
-    { cache: 'no-store' }
-  ).catch(() => null);
-  if (!response || !response.ok) return null;
-  const payload = await response.json().catch(() => null);
-  if (!payload?.ok) return null;
-  if (!Array.isArray(payload?.options) || !payload?.suggested) return null;
-  const suggested = getSupportedUiLanguage(String(payload.suggested)).value;
-  const options = buildLanguagePromptOptions(...payload.options);
-  const hasMeaningfulGeoSuggestion = suggested !== 'en' || options.some((lang) => lang !== 'en');
-  if (!hasMeaningfulGeoSuggestion) return null;
-  return {
-    suggested,
-    options,
-  };
+    const lat = Number(position.coords.latitude);
+    const lon = Number(position.coords.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const browserLanguage = detectBrowserPreferredLanguage();
+    const response = await fetch(
+      apiPath(
+        `/api/location?action=language-context&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lon)}&browserLanguage=${encodeURIComponent(browserLanguage)}`
+      ),
+      { cache: 'no-store' }
+    ).catch(() => null);
+    if (!response || !response.ok) return null;
+    const payload = await response.json().catch(() => null);
+    if (!payload?.ok) return null;
+    if (!Array.isArray(payload?.options) || !payload?.suggested) return null;
+    const suggested = getSupportedUiLanguage(String(payload.suggested)).value;
+    const options = buildLanguagePromptOptions(...payload.options);
+    const hasMeaningfulGeoSuggestion = suggested !== 'en' || options.some((lang) => lang !== 'en');
+    if (!hasMeaningfulGeoSuggestion) return null;
+    return {
+      suggested,
+      options,
+    };
+  } catch {
+    return null;
+  }
 };
 
 const resetGoogleTranslateToEnglish = async () => {
@@ -5127,43 +5139,64 @@ const getRuntimeLanguageCode = () => {
 
 const getPreciseLocationSnapshot = (): Promise<{ lat: number; lng: number; timestamp: number }> =>
   new Promise((resolve, reject) => {
-    if (Capacitor.isNativePlatform()) {
-      Geolocation.getCurrentPosition({
-        enableHighAccuracy: true,
-        timeout: 8000,
-        maximumAge: 0,
-      })
-        .then((pos) =>
-          resolve({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            timestamp: Date.now(),
+    try {
+      if (typeof window === 'undefined') {
+        reject(new Error('Geolocation unavailable'));
+        return;
+      }
+
+      const isNative =
+        typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
+
+      if (isNative && typeof Geolocation?.getCurrentPosition === 'function') {
+        Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 8000,
+          maximumAge: 0,
+        })
+          .then((pos) => {
+            const lat = Number(pos?.coords?.latitude);
+            const lng = Number(pos?.coords?.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+              reject(new Error('Invalid native geolocation reading'));
+              return;
+            }
+            resolve({ lat, lng, timestamp: Date.now() });
           })
-        )
-        .catch((error) => reject(error));
-      return;
-    }
+          .catch((error) => reject(error));
+        return;
+      }
 
-    if (!navigator.geolocation) {
-      reject(new Error('Geolocation not supported'));
-      return;
-    }
+      if (typeof navigator === 'undefined' || typeof navigator.geolocation?.getCurrentPosition !== 'function') {
+        reject(new Error('Geolocation not supported'));
+        return;
+      }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          timestamp: Date.now(),
-        }),
-      (error) => reject(error),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-    );
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = Number(pos?.coords?.latitude);
+          const lng = Number(pos?.coords?.longitude);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            reject(new Error('Invalid geolocation reading'));
+            return;
+          }
+          resolve({ lat, lng, timestamp: Date.now() });
+        },
+        (error) => reject(error),
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      );
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error('Geolocation failed'));
+    }
   });
 
 const getSpeechRecognitionConstructor = () => {
-  if (typeof window === 'undefined') return null;
-  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  try {
+    if (typeof window === 'undefined') return null;
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  } catch {
+    return null;
+  }
 };
 
 const resolveSpeechLocale = (language?: string) => {
@@ -5875,8 +5908,16 @@ const sendBrowserNotification = async (
   }
 };
 
-const canUseSpeechAnnouncements = () =>
-  typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+const canUseSpeechAnnouncements = () => {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') return false;
+    const synth = window.speechSynthesis;
+    return Boolean(synth && typeof synth.speak === 'function' && typeof synth.cancel === 'function');
+  } catch {
+    return false;
+  }
+};
 
 const spokenAnnouncementTimestamps = new Map<string, number>();
 let lastSpeechAnnouncementAt = 0;
@@ -5905,7 +5946,9 @@ const speakDeviceAnnouncement = (
   }
 
   try {
-    window.speechSynthesis.cancel();
+    const synth = window.speechSynthesis;
+    if (!synth || typeof synth.speak !== 'function') return false;
+    synth.cancel?.();
     const utterance = new SpeechSynthesisUtterance(message);
     utterance.rate = Number.isFinite(options?.rate) ? Number(options?.rate) : 1;
     utterance.pitch = Number.isFinite(options?.pitch) ? Number(options?.pitch) : 1;
@@ -5916,7 +5959,7 @@ const speakDeviceAnnouncement = (
     spokenAnnouncementTimestamps.set(dedupeKey, now);
     lastSpeechAnnouncementAt = now;
     lastSpeechAnnouncementText = normalizedMessage;
-    window.speechSynthesis.speak(utterance);
+    synth.speak(utterance);
     return true;
   } catch {
     return false;
@@ -6322,21 +6365,23 @@ const signInWithDirectSupabasePassword = async (email: string, password: string)
 
     // Seed localStorage immediately so a hung Preferences/setSession path cannot block login.
     try {
-      const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
-      const existingRaw = window.localStorage.getItem(storageKey);
-      const existing = existingRaw ? JSON.parse(existingRaw) : {};
-      window.localStorage.setItem(
-        storageKey,
-        JSON.stringify({
-          ...existing,
-          access_token: accessToken,
-          refresh_token: refreshToken,
-          token_type: grantPayload?.token_type || 'bearer',
-          expires_in: grantPayload?.expires_in || 3600,
-          expires_at: grantPayload?.expires_at || Math.floor(Date.now() / 1000) + Number(grantPayload?.expires_in || 3600),
-          user: grantPayload?.user || existing?.user || null,
-        })
-      );
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
+        const existingRaw = window.localStorage.getItem(storageKey);
+        const existing = existingRaw ? JSON.parse(existingRaw) : {};
+        window.localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            ...existing,
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            token_type: grantPayload?.token_type || 'bearer',
+            expires_in: grantPayload?.expires_in || 3600,
+            expires_at: grantPayload?.expires_at || Math.floor(Date.now() / 1000) + Number(grantPayload?.expires_in || 3600),
+            user: grantPayload?.user || existing?.user || null,
+          })
+        );
+      }
     } catch {
       // Continue with setSession even if manual seed fails.
     }
@@ -9191,21 +9236,23 @@ const findUserProfileByPhone = async (value: string) => {
 
             // Seed localStorage immediately; setSession can hang on Preferences.
             try {
-              const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
-              const existingRaw = window.localStorage.getItem(storageKey);
-              const existing = existingRaw ? JSON.parse(existingRaw) : {};
-              window.localStorage.setItem(
-                storageKey,
-                JSON.stringify({
-                  ...existing,
-                  access_token: accessToken,
-                  refresh_token: refreshToken,
-                  token_type: 'bearer',
-                  expires_in: 3600,
-                  expires_at: Math.floor(Date.now() / 1000) + 3600,
-                  user: fallbackData?.user || existing?.user || null,
-                })
-              );
+              if (typeof window !== 'undefined' && window.localStorage) {
+                const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
+                const existingRaw = window.localStorage.getItem(storageKey);
+                const existing = existingRaw ? JSON.parse(existingRaw) : {};
+                window.localStorage.setItem(
+                  storageKey,
+                  JSON.stringify({
+                    ...existing,
+                    access_token: accessToken,
+                    refresh_token: refreshToken,
+                    token_type: 'bearer',
+                    expires_in: 3600,
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                    user: fallbackData?.user || existing?.user || null,
+                  })
+                );
+              }
             } catch {
               // Continue with setSession.
             }
@@ -10477,36 +10524,51 @@ const DriverOnboarding = ({
 
   const getCurrentLocation = (): Promise<{ lat: number, lng: number, timestamp: number }> => {
     return new Promise((resolve, reject) => {
-      if (Capacitor.isNativePlatform() && isAndroidAppRuntime()) {
-        Geolocation.getCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 8000,
-          maximumAge: 0,
-        })
-          .then((pos) =>
-            resolve({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              timestamp: Date.now(),
-            })
-          )
-          .catch((err) => reject(err));
-        return;
-      }
+      try {
+        const isNativeAndroid =
+          typeof Capacitor?.isNativePlatform === 'function' &&
+          Capacitor.isNativePlatform() &&
+          isAndroidAppRuntime();
 
-      if (!navigator.geolocation) {
-        reject(new Error("Geolocation not supported"));
-        return;
+        if (isNativeAndroid && typeof Geolocation?.getCurrentPosition === 'function') {
+          Geolocation.getCurrentPosition({
+            enableHighAccuracy: true,
+            timeout: 8000,
+            maximumAge: 0,
+          })
+            .then((pos) => {
+              const lat = Number(pos?.coords?.latitude);
+              const lng = Number(pos?.coords?.longitude);
+              if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                reject(new Error('Invalid native geolocation reading'));
+                return;
+              }
+              resolve({ lat, lng, timestamp: Date.now() });
+            })
+            .catch((err) => reject(err));
+          return;
+        }
+
+        if (typeof navigator === 'undefined' || typeof navigator.geolocation?.getCurrentPosition !== 'function') {
+          reject(new Error("Geolocation not supported"));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const lat = Number(pos?.coords?.latitude);
+            const lng = Number(pos?.coords?.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+              reject(new Error('Invalid geolocation reading'));
+              return;
+            }
+            resolve({ lat, lng, timestamp: Date.now() });
+          },
+          (err) => reject(err),
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('Geolocation failed'));
       }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          timestamp: Date.now()
-        }),
-        (err) => reject(err),
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
     });
   };
 
@@ -11803,20 +11865,18 @@ const MapFirstDashboardShell = ({
       </div>
 
       {showBottomSheet && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-3 md:px-6 md:pb-6">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-2 pb-2 sm:px-3 sm:pb-3">
           <div
             className={cn(
-              "pointer-events-auto mx-auto w-full max-w-md overflow-y-auto overscroll-contain rounded-[28px] border border-mairide-secondary bg-white/96 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl [touch-action:pan-y] sm:max-w-3xl sm:rounded-[34px]",
-              compactBottomSheet ? "max-h-[18vh] p-2.5" : "max-h-[46vh] p-5"
+              "pointer-events-auto w-[min(92%,20rem)] max-w-sm overflow-visible rounded-[24px] border border-mairide-secondary bg-white/96 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl sm:w-[min(92%,24rem)] sm:rounded-[28px]",
+              compactBottomSheet ? "p-2" : "p-3.5"
             )}
-            onWheel={(event) => event.stopPropagation()}
-            onTouchMove={(event) => event.stopPropagation()}
           >
-            <div className={cn("mx-auto h-1.5 w-12 rounded-full bg-mairide-secondary/50", compactBottomSheet ? "mb-2" : "mb-3")} />
+            <div className={cn("mx-auto h-1.5 w-10 rounded-full bg-mairide-secondary/50", compactBottomSheet ? "mb-1.5" : "mb-2.5")} />
             {sheetContent || (
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  {sheetTitle && <h2 className="text-2xl font-black tracking-tight text-mairide-primary">{sheetTitle}</h2>}
+                  {sheetTitle && <h2 className="text-xl font-black tracking-tight text-mairide-primary sm:text-2xl">{sheetTitle}</h2>}
                   {sheetBody && <p className="mt-1 text-sm leading-relaxed text-mairide-secondary">{sheetBody}</p>}
                 </div>
                 <div className="flex shrink-0 flex-col gap-2 sm:hidden">
@@ -18063,25 +18123,25 @@ const finalizeTravelerDashboardRazorpayPayment = async (
               </button>
             )}
             sheetContent={(
-              <div className="mx-auto flex w-full max-w-md gap-2">
+              <div className="flex w-full gap-2">
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-available-rides')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="flex min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden rounded-3xl bg-mairide-bg px-3 py-2.5 text-left transition-colors hover:bg-orange-50 sm:rounded-full sm:px-4"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-1.5 overflow-hidden rounded-2xl bg-mairide-bg px-2.5 py-2 text-left transition-colors hover:bg-orange-50 sm:rounded-full sm:px-3"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-[9px] font-bold uppercase tracking-[0.14em] text-mairide-secondary sm:text-[10px]">Available Rides</p>
-                    <p className="mt-0.5 truncate text-base font-black leading-none text-mairide-primary sm:text-lg">{rides.length + partialRides.length}</p>
+                    <p className="truncate text-[9px] font-bold uppercase tracking-[0.12em] text-mairide-secondary">Available Rides</p>
+                    <p className="mt-0.5 truncate text-sm font-black leading-none text-mairide-primary sm:text-base">{rides.length + partialRides.length}</p>
                   </div>
                 </button>
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-my-requests')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="flex min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden rounded-3xl bg-mairide-bg px-3 py-2.5 text-left transition-colors hover:bg-orange-50 sm:rounded-full sm:px-4"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-1.5 overflow-hidden rounded-2xl bg-mairide-bg px-2.5 py-2 text-left transition-colors hover:bg-orange-50 sm:rounded-full sm:px-3"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-[9px] font-bold uppercase tracking-[0.14em] text-mairide-secondary sm:text-[10px]">My Requests</p>
-                    <p className="mt-0.5 truncate text-base font-black leading-none text-mairide-primary sm:text-lg">{travelerRequests.filter(isUnifiedRideActive).length}</p>
+                    <p className="truncate text-[9px] font-bold uppercase tracking-[0.12em] text-mairide-secondary">My Requests</p>
+                    <p className="mt-0.5 truncate text-sm font-black leading-none text-mairide-primary sm:text-base">{travelerRequests.filter(isUnifiedRideActive).length}</p>
                   </div>
                 </button>
               </div>
@@ -25961,14 +26021,15 @@ const AdminDashboard = ({
   };
 
   useEffect(() => {
-    if (!('geolocation' in navigator)) return;
+    if (typeof navigator === 'undefined' || typeof navigator.geolocation?.getCurrentPosition !== 'function') {
+      return;
+    }
 
     let isMounted = true;
     const syncLocation = (latitude: number, longitude: number) => {
+      if (!isMounted) return;
       const nextLocation = { lat: latitude, lng: longitude };
-      if (isMounted) {
-        setAdminLocation(nextLocation);
-      }
+      setAdminLocation(nextLocation);
 
       const now = Date.now();
       if (now - lastAdminLocationWriteRef.current < LOCATION_DB_UPDATE_INTERVAL_MS) return;
@@ -25981,13 +26042,20 @@ const AdminDashboard = ({
       }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
     };
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        syncLocation(position.coords.latitude, position.coords.longitude);
-      },
-      (error) => logGeolocationIssue('Admin', error),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-    );
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = Number(position?.coords?.latitude);
+          const lng = Number(position?.coords?.longitude);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          syncLocation(lat, lng);
+        },
+        (error) => logGeolocationIssue('Admin', error),
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+      );
+    } catch (error) {
+      logGeolocationIssue('Admin', error as any);
+    }
 
     return () => {
       isMounted = false;
