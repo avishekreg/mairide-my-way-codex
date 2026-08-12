@@ -389,18 +389,40 @@ export function onAuthStateChanged(
   authInstance: SupabaseAuthCompat,
   callback: AuthListener
 ) {
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-    authInstance.currentUser = session?.user
-      ? normalizeUser(session.user, session.access_token)
-      : null;
-    callback(authInstance.currentUser);
+  let hydratedFromSubscription = false;
+  let disposed = false;
+
+  const emitUser = (user: User | null) => {
+    if (disposed) return;
+    authInstance.currentUser = user;
+    callback(user);
+  };
+
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    // INITIAL_SESSION is the authoritative first emission; skip duplicate hydrate callback.
+    if (event === 'INITIAL_SESSION') {
+      hydratedFromSubscription = true;
+    }
+    // Token refresh / user metadata updates must not re-enter full app bootstrap loops.
+    if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+      if (session?.user) {
+        authInstance.currentUser = normalizeUser(session.user, session.access_token);
+      }
+      return;
+    }
+    emitUser(session?.user ? normalizeUser(session.user, session.access_token) : null);
   });
 
-  void authInstance.hydrate().then(() => {
-    callback(authInstance.currentUser);
+  // Fallback hydrate only if subscription never delivered INITIAL_SESSION (older clients / WebView quirks).
+  void authInstance.hydrate().then((user) => {
+    if (disposed || hydratedFromSubscription) return;
+    emitUser(user);
   });
 
-  return () => data.subscription.unsubscribe();
+  return () => {
+    disposed = true;
+    data.subscription.unsubscribe();
+  };
 }
 
 export async function signOut(authInstance: SupabaseAuthCompat) {

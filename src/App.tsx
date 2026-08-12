@@ -28366,6 +28366,7 @@ const App = () => {
     profile: UserProfile | null;
     partnerProfile: B2BPartner | null;
   }>({ authUid: null, profile: null, partnerProfile: null });
+  const authResolveGenerationRef = useRef(0);
   const travelerAvatarInputRef = useRef<HTMLInputElement | null>(null);
   const androidPushRegistrationKeyRef = useRef('');
   const criticalSessionResetRef = useRef(false);
@@ -28686,6 +28687,11 @@ const App = () => {
       }
     };
 
+    const finishAuthLoading = (generation: number) => {
+      if (!active || generation !== authResolveGenerationRef.current) return;
+      setLoading(false);
+    };
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (!active) return;
       const cached = resolvedAuthProfileRef.current;
@@ -28702,11 +28708,14 @@ const App = () => {
         return;
       }
 
-      setLoading((prev) => (cached.authUid === u?.uid && !prev ? prev : true));
+      // Avoid flicker loops: only raise loading when the authenticated principal actually changes.
       if (cached.authUid !== u?.uid) {
+        setLoading(true);
         setProfile(null);
         setPartnerProfile(null);
       }
+
+      const generation = ++authResolveGenerationRef.current;
 
       if (u) {
         const mappedPhoneProfileId = u.isAnonymous ? safeStorageGet('session', PHONE_LOGIN_PROFILE_KEY) : null;
@@ -28715,7 +28724,7 @@ const App = () => {
 
         try {
           const snapshot = await getDoc(doc(db, 'users', profileDocId));
-          if (!active) return;
+          if (!active || generation !== authResolveGenerationRef.current) return;
           if (snapshot.exists()) {
             const resolvedProfile = snapshot.data() as UserProfile;
             resolvedAuthProfileRef.current = { authUid: u.uid, profile: resolvedProfile, partnerProfile: null };
@@ -28724,7 +28733,7 @@ const App = () => {
             if (u.isAnonymous) {
               safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
             }
-            setLoading(false);
+            finishAuthLoading(generation);
           } else if (u.email && !u.isAnonymous) {
             // If not found by UID, try to find by email (for pre-created admin users)
             try {
@@ -28758,16 +28767,18 @@ const App = () => {
                   if (existingProfile.uid.startsWith('manual_')) {
                     await deleteDoc(doc(db, 'users', existingProfile.uid));
                   }
+                  if (!active || generation !== authResolveGenerationRef.current) return;
                   resolvedAuthProfileRef.current = { authUid: u.uid, profile: newProfile, partnerProfile: null };
                   setProfile(newProfile);
                   setPartnerProfile(null);
                 } else {
+                  if (!active || generation !== authResolveGenerationRef.current) return;
                   resolvedAuthProfileRef.current = { authUid: u.uid, profile: existingProfile, partnerProfile: null };
                   setProfile(existingProfile);
                   setPartnerProfile(null);
                 }
                 clearStoredOAuthIntent();
-                setLoading(false);
+                finishAuthLoading(generation);
               } else {
                 const oauthMode = getStoredOAuthMode();
                 if (oauthMode === 'signup') {
@@ -28786,6 +28797,7 @@ const App = () => {
                   };
                   await setDoc(doc(db, 'users', u.uid), newProfile);
                   await walletService.initializeUserWallet(u.uid);
+                  if (!active || generation !== authResolveGenerationRef.current) return;
                   resolvedAuthProfileRef.current = { authUid: u.uid, profile: newProfile, partnerProfile: null };
                   setProfile(newProfile);
                   setPartnerProfile(null);
@@ -28793,6 +28805,7 @@ const App = () => {
                 } else {
                   clearStoredOAuthIntent();
                   const matchedPartner = await resolvePartnerProfile(u.uid);
+                  if (!active || generation !== authResolveGenerationRef.current) return;
                   if (matchedPartner) {
                     resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
                     setPartnerProfile(matchedPartner);
@@ -28802,28 +28815,40 @@ const App = () => {
                     await signOut(auth);
                     resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
                     setProfile(null);
+                    setUser(null);
                   }
                 }
               }
             } catch (error) {
               console.error("Error linking profile:", error);
+              if (!active || generation !== authResolveGenerationRef.current) return;
               const matchedPartner = await resolvePartnerProfile(u.uid);
+              if (!active || generation !== authResolveGenerationRef.current) return;
               setProfile(null);
               setPartnerProfile(matchedPartner);
+              if (!matchedPartner) {
+                setNotRegisteredError(true);
+                await signOut(auth).catch(() => undefined);
+                resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
+                setUser(null);
+              } else {
+                resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
+              }
             }
-            setLoading(false);
+            finishAuthLoading(generation);
           } else {
             if (u.isAnonymous && pendingPhoneLogin) {
               try {
                 const matchedProfile = await findUserProfileByPhone(pendingPhoneLogin);
               if (matchedProfile) {
+                if (!active || generation !== authResolveGenerationRef.current) return;
                 safeStorageSet('session', PHONE_LOGIN_PROFILE_KEY, matchedProfile.uid);
                 safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
                 resolvedAuthProfileRef.current = { authUid: u.uid, profile: matchedProfile, partnerProfile: null };
                 setProfile(matchedProfile);
                   setPartnerProfile(null);
                   setNotRegisteredError(false);
-                  setLoading(false);
+                  finishAuthLoading(generation);
                   return;
                 }
               } catch (lookupError) {
@@ -28835,18 +28860,40 @@ const App = () => {
               safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
             }
             const matchedPartner = !u.isAnonymous ? await resolvePartnerProfile(u.uid) : null;
-            resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
-            setProfile(null);
-            setPartnerProfile(matchedPartner);
-            setLoading(false);
+            if (!active || generation !== authResolveGenerationRef.current) return;
+            if (matchedPartner) {
+              resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
+              setProfile(null);
+              setPartnerProfile(matchedPartner);
+            } else {
+              // Never leave Android WebView on an infinite LoadingScreen with a session but no profile.
+              setNotRegisteredError(true);
+              await signOut(auth).catch(() => undefined);
+              resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
+              setProfile(null);
+              setPartnerProfile(null);
+              setUser(null);
+            }
+            finishAuthLoading(generation);
           }
         } catch (error) {
           reportFirestoreError(error, OperationType.GET, `users/${profileDocId}`);
+          if (!active || generation !== authResolveGenerationRef.current) return;
           const matchedPartner = !u.isAnonymous ? await resolvePartnerProfile(u.uid) : null;
-          resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
-          setProfile(null);
-          setPartnerProfile(matchedPartner);
-          setLoading(false);
+          if (!active || generation !== authResolveGenerationRef.current) return;
+          if (matchedPartner) {
+            resolvedAuthProfileRef.current = { authUid: u.uid, profile: null, partnerProfile: matchedPartner };
+            setProfile(null);
+            setPartnerProfile(matchedPartner);
+          } else {
+            setNotRegisteredError(true);
+            await signOut(auth).catch(() => undefined);
+            resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
+            setProfile(null);
+            setPartnerProfile(null);
+            setUser(null);
+          }
+          finishAuthLoading(generation);
         }
       } else {
         safeStorageRemove('session', PHONE_LOGIN_PROFILE_KEY);
@@ -28854,12 +28901,35 @@ const App = () => {
         resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
         setProfile(null);
         setPartnerProfile(null);
-        setLoading(false);
+        finishAuthLoading(generation);
       }
     });
 
+    // Hard stop infinite logo spin on native WebView if profile resolution hangs.
+    const loadingWatchdog = window.setTimeout(() => {
+      if (!active) return;
+      setLoading((prev) => {
+        if (!prev) return prev;
+        recordInternalDebugEvent('auth_loading_watchdog_fired', {
+          runtime: isAndroidWebViewLikeRuntime() ? 'android_webview' : 'web',
+          authUid: resolvedAuthProfileRef.current.authUid,
+        });
+        const cached = resolvedAuthProfileRef.current;
+        if (!cached.profile && !cached.partnerProfile) {
+          setNotRegisteredError(true);
+          setUser(null);
+          setProfile(null);
+          setPartnerProfile(null);
+          resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
+          void signOut(auth).catch(() => undefined);
+        }
+        return false;
+      });
+    }, isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 12000 : 20000);
+
     return () => {
       active = false;
+      window.clearTimeout(loadingWatchdog);
       unsubscribe();
     };
   }, []);
@@ -29614,9 +29684,9 @@ const App = () => {
 
   if (loading) return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
 
-  if (user && !profile && !partnerProfile && !isPartnerRoute) {
-    return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
-  }
+  // Do not trap Android WebView on an infinite logo spin when auth finished without a profile.
+  // Fall through to AuthPage / partner handling (notRegisteredError + sign-out paths above).
+
 
   if (!user) return withAppConfigProvider(
     <ErrorBoundary>
@@ -29763,6 +29833,36 @@ const App = () => {
               <Route path="/partners/hotel/apply" element={<PartnerApplicationPage partnerType="hotel_partner" currentUser={user} />} />
               <Route path="*" element={<Navigate to="/partners/fleet/apply" replace />} />
             </Routes>
+            <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
+            <AppDialogHost />
+            {androidUpdatePrompt}
+            {cookieConsentManager}
+            {footerResourceModal}
+          </div>
+        </Router>
+      </ErrorBoundary>
+    );
+  }
+
+  if (user && !profile) {
+    return withAppConfigProvider(
+      <ErrorBoundary>
+        <Router>
+          <div className="min-h-screen flex flex-col bg-mairide-bg">
+            <div className="flex-1">
+              <AuthPage
+                user={user}
+                authMode={authMode}
+                setAuthMode={setAuthMode}
+                notRegisteredError={true}
+                setNotRegisteredError={setNotRegisteredError}
+                role={role}
+                setRole={setRole}
+                referralCodeInput={referralCodeInput}
+                setReferralCodeInput={setReferralCodeInput}
+                releaseVersion={releaseVersion}
+              />
+            </div>
             <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
             <AppDialogHost />
             {androidUpdatePrompt}

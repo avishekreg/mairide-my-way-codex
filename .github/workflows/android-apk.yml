@@ -63,6 +63,15 @@ jobs:
       - name: Build web app
         run: npm run build
 
+      - name: Prune heavy web assets before Capacitor sync
+        run: |
+          rm -rf dist/tutorials/videos
+          rm -rf dist/tutorials/screenshots/live
+          rm -f dist/assets/hero-car.jpg
+          # Keep downloadable APK out of the Android asset bundle.
+          rm -rf dist/downloads
+          du -sh dist dist/* 2>/dev/null | sort -hr | head -40
+
       - name: Generate Capacitor config
         run: |
           cat > capacitor.config.ts <<'EOF'
@@ -224,6 +233,9 @@ jobs:
             defaultConfig {
               versionCode ${GITHUB_RUN_NUMBER}
               versionName "${APP_VERSION_NAME}"
+              ndk {
+                abiFilters "armeabi-v7a", "arm64-v8a"
+              }
             }
 
             signingConfigs {
@@ -237,6 +249,7 @@ jobs:
 
             buildTypes {
               release {
+                // Keep minify off for Capacitor/WebView plugin reflection safety.
                 minifyEnabled false
                 shrinkResources false
                 signingConfig signingConfigs.release

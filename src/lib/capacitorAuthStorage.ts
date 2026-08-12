@@ -15,58 +15,95 @@ const isNativeShellRuntime = () => {
   }
 };
 
+const readLocal = (key: string): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const writeLocal = (key: string, value: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore restricted browser storage failures.
+  }
+};
+
+const removeLocal = (key: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore restricted browser storage failures.
+  }
+};
+
 const buildBrowserStorage = (): StorageLike => ({
-  getItem: (key: string) => {
-    if (typeof window === 'undefined') return null;
-    try {
-      return window.localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  },
+  getItem: (key: string) => readLocal(key),
   setItem: (key: string, value: string) => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(key, value);
-    } catch {
-      // Ignore restricted browser storage failures.
-    }
+    writeLocal(key, value);
   },
   removeItem: (key: string) => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.removeItem(key);
-    } catch {
-      // Ignore restricted browser storage failures.
-    }
+    removeLocal(key);
   },
 });
 
-const buildNativePreferencesStorage = (): StorageLike => ({
+/**
+ * Native WebView storage: dual-write Preferences + localStorage.
+ * Android Capacitor WebViews (especially remote-url shells) can lose Preferences
+ * mid-session; localStorage on the https origin is the reliable fallback.
+ */
+const buildNativeHybridStorage = (): StorageLike => ({
   async getItem(key: string) {
+    let preferenceValue: string | null = null;
     try {
       const result = await Preferences.get({ key });
-      return result.value ?? null;
+      preferenceValue = result.value ?? null;
     } catch {
-      return null;
+      preferenceValue = null;
     }
+
+    const localValue = readLocal(key);
+    if (preferenceValue != null && preferenceValue !== '') {
+      if (localValue !== preferenceValue) {
+        writeLocal(key, preferenceValue);
+      }
+      return preferenceValue;
+    }
+
+    if (localValue != null && localValue !== '') {
+      try {
+        await Preferences.set({ key, value: localValue });
+      } catch {
+        // Keep serving localStorage even if Preferences sync fails.
+      }
+      return localValue;
+    }
+
+    return null;
   },
   async setItem(key: string, value: string) {
+    writeLocal(key, value);
     try {
       await Preferences.set({ key, value });
     } catch {
-      // Ignore native persistence failures and let auth continue in-memory.
+      // localStorage write already applied for WebView continuity.
     }
   },
   async removeItem(key: string) {
+    removeLocal(key);
     try {
       await Preferences.remove({ key });
     } catch {
-      // Ignore native persistence failures and let auth continue in-memory.
+      // Ignore native persistence failures.
     }
   },
 });
 
 export const supabaseAuthStorage: StorageLike = isNativeShellRuntime()
-  ? buildNativePreferencesStorage()
+  ? buildNativeHybridStorage()
   : buildBrowserStorage();
