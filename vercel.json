@@ -11,8 +11,7 @@
       "maxDuration": 20
     },
     "api/password-login.ts": {
-      "maxDuration": 20,
-      "runtime": "edge"
+      "maxDuration": 25
     }
   },
   "headers": [
