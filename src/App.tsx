@@ -3368,6 +3368,16 @@ class ErrorBoundary extends Component<any, any> {
 
   componentDidCatch(error: any, errorInfo: any) {
     console.error("ErrorBoundary caught an error", error, errorInfo);
+    try {
+      if (typeof window !== 'undefined' && (isAndroidWebViewLikeRuntime() || isAppWebViewRuntime())) {
+        // Give WebView a beat to settle before forcing a hard recovery path.
+        window.setTimeout(() => {
+          // no-op: keeps error UI stable; user can refresh via button below.
+        }, 0);
+      }
+    } catch {
+      // Ignore runtime detection failures inside the boundary.
+    }
   }
 
   render() {
@@ -8136,7 +8146,7 @@ const Navbar = ({
 
   return (
     <nav className="bg-white border-b border-mairide-secondary sticky top-0 z-40">
-      <div className={cn("px-4 sm:px-6 lg:px-8", isAndroidShell ? "mx-auto max-w-7xl" : "w-full")}>
+      <div className={cn("w-full max-w-none px-4 sm:px-6 lg:px-8")}>
         {isAndroidShell ? (
           renderAndroidHeader()
         ) : (
@@ -11588,6 +11598,107 @@ const RouteAlertsTicker = ({
   );
 };
 
+const DASHBOARD_MAP_CONTAINER_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  width: '100%',
+  height: '100%',
+  maxWidth: '100%',
+  margin: 0,
+  padding: 0,
+};
+
+const useDeferredDashboardSurface = () => {
+  const preferDeferred =
+    typeof window !== 'undefined' &&
+    (isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() || isIosAppRuntime());
+  const [ready, setReady] = useState(!preferDeferred);
+
+  useEffect(() => {
+    if (!preferDeferred) {
+      setReady(true);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const frameId = window.requestAnimationFrame(() => {
+      timeoutId = window.setTimeout(() => {
+        if (!cancelled) setReady(true);
+      }, 160);
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [preferDeferred]);
+
+  return ready;
+};
+
+const triggerGoogleMapResize = (map: google.maps.Map | null | undefined) => {
+  if (!map || typeof window === 'undefined' || !window.google?.maps?.event) return;
+  try {
+    window.google.maps.event.trigger(map, 'resize');
+    const center = map.getCenter?.();
+    if (center) map.setCenter(center);
+  } catch {
+    // Ignore transient WebView map resize failures during startup.
+  }
+};
+
+const ResponsiveDashboardGoogleMap = ({
+  center,
+  zoom,
+  options,
+  children,
+}: {
+  center: { lat: number; lng: number };
+  zoom: number;
+  options?: google.maps.MapOptions;
+  children?: React.ReactNode;
+}) => {
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const safeCenter = useMemo(() => {
+    const lat = Number(center?.lat);
+    const lng = Number(center?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return { lat: 26.1433, lng: 91.7385 };
+    }
+    return { lat, lng };
+  }, [center?.lat, center?.lng]);
+
+  useEffect(() => {
+    const handleResize = () => triggerGoogleMapResize(mapRef.current);
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    const settleTimer = window.setTimeout(handleResize, 220);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      window.clearTimeout(settleTimer);
+    };
+  }, []);
+
+  return (
+    <GoogleMap
+      mapContainerStyle={DASHBOARD_MAP_CONTAINER_STYLE}
+      mapContainerClassName="absolute inset-0 h-full w-full max-w-full overflow-hidden"
+      center={safeCenter}
+      zoom={zoom}
+      onLoad={(map) => {
+        mapRef.current = map;
+        window.requestAnimationFrame(() => triggerGoogleMapResize(map));
+      }}
+      options={options}
+    >
+      {children}
+    </GoogleMap>
+  );
+};
+
 const MapFirstDashboardShell = ({
   searchLabel,
   searchSubtext,
@@ -11617,38 +11728,58 @@ const MapFirstDashboardShell = ({
   compactBottomSheet?: boolean;
   sheetContent?: React.ReactNode;
 }) => (
-  <section className={cn(
-    "relative -mx-4 -mt-4 w-full max-w-full overflow-hidden overflow-x-hidden bg-mairide-primary md:-mx-8 md:-mt-8",
-    compactBottomSheet ? "mb-3" : "mb-8"
-  )}>
-    <div className="relative min-h-[calc(100vh-96px)] w-full max-w-full overflow-hidden">
-      <div className="absolute inset-0 z-0 w-full max-w-full overflow-hidden pointer-events-auto bg-mairide-bg">{children}</div>
-      <div className="pointer-events-none absolute inset-0 z-[1] bg-[linear-gradient(180deg,rgba(244,247,249,0.88)_0%,rgba(244,247,249,0.34)_22%,rgba(244,247,249,0)_48%,rgba(244,247,249,0.76)_100%)]" />
+  <section
+    className={cn(
+      "relative left-0 right-0 m-0 w-full max-w-none border-0 p-0",
+      compactBottomSheet ? "mb-0" : "mb-0"
+    )}
+    style={{ width: '100%', maxWidth: '100%', margin: 0, padding: 0 }}
+  >
+    <div
+      className="relative m-0 w-full max-w-none overflow-hidden border-0 p-0"
+      style={{
+        width: '100%',
+        maxWidth: '100%',
+        height: 'calc(100dvh - 5.25rem)',
+        minHeight: 'calc(100vh - 5.25rem)',
+        margin: 0,
+        padding: 0,
+      }}
+    >
+      <div
+        className="pointer-events-auto absolute inset-0 z-0 m-0 h-full w-full max-w-none overflow-hidden border-0 bg-mairide-bg p-0"
+        style={{ width: '100%', height: '100%', margin: 0, padding: 0 }}
+      >
+        {children}
+      </div>
+      <div className="pointer-events-none absolute inset-0 z-[1] m-0 border-0 p-0 bg-[linear-gradient(180deg,rgba(244,247,249,0.88)_0%,rgba(244,247,249,0.34)_22%,rgba(244,247,249,0)_48%,rgba(244,247,249,0.76)_100%)]" />
 
-      <div className={cn(
-        "pointer-events-none absolute left-4 right-4 z-10 mx-auto",
-        topControlsOnly
-          ? "top-16 z-20 max-w-xl"
-          : compactSearchBar
-            ? "top-16 max-w-3xl"
-            : "top-4 max-w-3xl md:top-6"
-      )}>
+      <div
+        className={cn(
+          "pointer-events-none absolute left-3 right-3 z-10 mx-auto w-auto max-w-full sm:left-4 sm:right-4",
+          topControlsOnly
+            ? "top-16 z-20 max-w-xl"
+            : compactSearchBar
+              ? "top-16 max-w-3xl"
+              : "top-4 max-w-3xl md:top-6"
+        )}
+      >
         {topControlsOnly ? (
-          <div className="pointer-events-auto absolute left-1/2 top-0 z-20 flex w-fit max-w-full -translate-x-1/2 flex-row items-center justify-center gap-2 whitespace-nowrap rounded-full bg-white/90 px-3 py-1 shadow-lg shadow-mairide-primary/10 backdrop-blur-md">
+          <div className="pointer-events-auto absolute left-1/2 top-0 z-20 flex w-[min(100%,24rem)] max-w-full -translate-x-1/2 flex-row flex-wrap items-center justify-center gap-2 rounded-full bg-white/90 px-2 py-1 shadow-lg shadow-mairide-primary/10 backdrop-blur-md sm:w-fit sm:px-3">
             {primaryAction}
             {secondaryAction}
           </div>
         ) : compactSearchBar ? (
-          <div className="pointer-events-auto mx-auto flex w-fit max-w-full items-center justify-center gap-2 rounded-full bg-white/92 px-2 py-2 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl">
+          <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-2 rounded-full bg-white/92 px-2 py-2 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl sm:w-fit sm:max-w-full">
             <button
               type="button"
               onClick={onSearchClick}
-              className="inline-flex min-w-0 items-center gap-3 rounded-full px-4 py-3 text-left transition-colors hover:bg-mairide-bg"
+              className="inline-flex min-w-0 flex-1 items-center gap-2 rounded-full px-3 py-2.5 text-left transition-colors hover:bg-mairide-bg sm:flex-none sm:gap-3 sm:px-4 sm:py-3"
             >
               <Search className="h-5 w-5 shrink-0 text-mairide-primary" />
-              <span className="truncate text-base font-black tracking-tight text-mairide-primary">{searchLabel}</span>
+              <span className="truncate text-sm font-black tracking-tight text-mairide-primary sm:text-base">{searchLabel}</span>
             </button>
-            {primaryAction}
+            <div className="min-w-0 shrink">{primaryAction}</div>
           </div>
         ) : (
           <div className="pointer-events-auto flex items-center gap-3 rounded-[28px] border border-mairide-secondary bg-white/95 p-3 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl">
@@ -11672,30 +11803,30 @@ const MapFirstDashboardShell = ({
       </div>
 
       {showBottomSheet && (
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-3 md:px-8 md:pb-6">
-        <div
-          className={cn(
-            "pointer-events-auto mx-auto max-w-3xl overflow-y-auto overscroll-contain rounded-t-[34px] border border-mairide-secondary bg-white/96 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl [touch-action:pan-y] md:rounded-[34px]",
-            compactBottomSheet ? "h-[15vh] max-h-[15vh] p-2.5" : "max-h-[46vh] p-5"
-          )}
-          onWheel={(event) => event.stopPropagation()}
-          onTouchMove={(event) => event.stopPropagation()}
-        >
-          <div className={cn("mx-auto h-1.5 w-12 rounded-full bg-mairide-secondary/50", compactBottomSheet ? "mb-2" : "mb-3")} />
-          {sheetContent || (
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                {sheetTitle && <h2 className="text-2xl font-black tracking-tight text-mairide-primary">{sheetTitle}</h2>}
-                {sheetBody && <p className="mt-1 text-sm leading-relaxed text-mairide-secondary">{sheetBody}</p>}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-3 md:px-6 md:pb-6">
+          <div
+            className={cn(
+              "pointer-events-auto mx-auto w-full max-w-md overflow-y-auto overscroll-contain rounded-[28px] border border-mairide-secondary bg-white/96 shadow-2xl shadow-mairide-primary/15 backdrop-blur-xl [touch-action:pan-y] sm:max-w-3xl sm:rounded-[34px]",
+              compactBottomSheet ? "max-h-[18vh] p-2.5" : "max-h-[46vh] p-5"
+            )}
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
+            <div className={cn("mx-auto h-1.5 w-12 rounded-full bg-mairide-secondary/50", compactBottomSheet ? "mb-2" : "mb-3")} />
+            {sheetContent || (
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  {sheetTitle && <h2 className="text-2xl font-black tracking-tight text-mairide-primary">{sheetTitle}</h2>}
+                  {sheetBody && <p className="mt-1 text-sm leading-relaxed text-mairide-secondary">{sheetBody}</p>}
+                </div>
+                <div className="flex shrink-0 flex-col gap-2 sm:hidden">
+                  {primaryAction}
+                  {secondaryAction}
+                </div>
               </div>
-              <div className="flex shrink-0 flex-col gap-2 sm:hidden">
-                {primaryAction}
-                {secondaryAction}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
       )}
     </div>
   </section>
@@ -16631,26 +16762,49 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   }, [profile.location?.lat, profile.location?.lng, userLocation]);
 
   useEffect(() => {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          const newLocation = { lat: latitude, lng: longitude };
-          setUserLocation(newLocation);
-          reverseGeocode(latitude, longitude);
-          persistTravelerLocation(newLocation);
-        },
-        (error) => {
-          logGeolocationIssue('Traveler', error);
-          const fallbackLocation = extractLatLng(profile.location);
-          if (fallbackLocation) {
-            setUserLocation((prev) => prev || fallbackLocation);
-          }
-        },
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-
+    if (!("geolocation" in navigator) || typeof navigator.geolocation?.getCurrentPosition !== 'function') {
+      return;
     }
+
+    let cancelled = false;
+    const startGeolocation = () => {
+      if (cancelled) return;
+      try {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            if (cancelled || !position?.coords) return;
+            const latitude = Number(position.coords.latitude);
+            const longitude = Number(position.coords.longitude);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+            const newLocation = { lat: latitude, lng: longitude };
+            setUserLocation(newLocation);
+            void reverseGeocode(latitude, longitude);
+            persistTravelerLocation(newLocation);
+          },
+          (error) => {
+            if (cancelled) return;
+            logGeolocationIssue('Traveler', error);
+            const fallbackLocation = extractLatLng(profile.location);
+            if (fallbackLocation) {
+              setUserLocation((prev) => prev || fallbackLocation);
+            }
+          },
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      } catch (error) {
+        logGeolocationIssue('Traveler', error);
+      }
+    };
+
+    // Defer geolocation on Android so WebView + map can stabilize after login.
+    const timer = window.setTimeout(
+      startGeolocation,
+      isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 350 : 0
+    );
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [profile.uid, profile.location?.lat, profile.location?.lng]);
 
   useEffect(() => {
@@ -17874,7 +18028,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
   };
 
   const travelerMapCenter = userLocation || { lat: 26.1433, lng: 91.7385 };
+  const dashboardSurfaceReady = useDeferredDashboardSurface();
   const travelerMapReady = Boolean(
+    dashboardSurfaceReady &&
     GOOGLE_MAPS_API_KEY &&
     isLoaded &&
     !hasMapsIssue &&
@@ -17884,9 +18040,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
 
   return (
     <div className={cn(
-      "relative w-full max-w-full overflow-x-hidden",
+      "relative m-0 w-full max-w-none border-0 p-0",
       activeTab === 'search'
-        ? "relative min-h-[calc(100vh-4rem)] bg-mairide-bg"
+        ? "min-h-[calc(100dvh-5.25rem)] w-full bg-mairide-bg"
         : "max-w-4xl mx-auto p-4 md:p-8"
     )}>
       {activeTab === 'search' && (
@@ -17900,36 +18056,39 @@ const finalizeTravelerDashboardRazorpayPayment = async (
             primaryAction={(
               <button
                 onClick={() => setShowRequestForm(true)}
-                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full bg-mairide-accent px-5 py-3 text-sm font-bold text-white shadow-lg shadow-mairide-accent/20 transition-all hover:bg-mairide-primary"
+                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-mairide-accent px-3 py-2.5 text-xs font-bold text-white shadow-lg shadow-mairide-accent/20 transition-all hover:bg-mairide-primary sm:gap-2 sm:px-5 sm:py-3 sm:text-sm"
               >
-                <Plus className="h-5 w-5" />
-                Request a Ride
+                <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+                <span className="truncate">Request a Ride</span>
               </button>
             )}
             sheetContent={(
-              <div className="grid grid-cols-2 gap-2">
+              <div className="mx-auto flex w-full max-w-md gap-2">
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-available-rides')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="rounded-2xl bg-mairide-bg px-3 py-2 text-left transition-colors hover:bg-orange-50"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden rounded-3xl bg-mairide-bg px-3 py-2.5 text-left transition-colors hover:bg-orange-50 sm:rounded-full sm:px-4"
                 >
-                  <p className="text-[8px] font-bold uppercase tracking-[0.14em] text-mairide-secondary">Available Rides</p>
-                  <p className="mt-0.5 text-lg font-black leading-none text-mairide-primary">{rides.length + partialRides.length}</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-[9px] font-bold uppercase tracking-[0.14em] text-mairide-secondary sm:text-[10px]">Available Rides</p>
+                    <p className="mt-0.5 truncate text-base font-black leading-none text-mairide-primary sm:text-lg">{rides.length + partialRides.length}</p>
+                  </div>
                 </button>
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-my-requests')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="rounded-2xl bg-mairide-bg px-3 py-2 text-left transition-colors hover:bg-orange-50"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden rounded-3xl bg-mairide-bg px-3 py-2.5 text-left transition-colors hover:bg-orange-50 sm:rounded-full sm:px-4"
                 >
-                  <p className="text-[8px] font-bold uppercase tracking-[0.14em] text-mairide-secondary">My Requests</p>
-                  <p className="mt-0.5 text-lg font-black leading-none text-mairide-primary">{travelerRequests.filter(isUnifiedRideActive).length}</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-[9px] font-bold uppercase tracking-[0.14em] text-mairide-secondary sm:text-[10px]">My Requests</p>
+                    <p className="mt-0.5 truncate text-base font-black leading-none text-mairide-primary sm:text-lg">{travelerRequests.filter(isUnifiedRideActive).length}</p>
+                  </div>
                 </button>
               </div>
             )}
           >
             {travelerMapReady ? (
-              <GoogleMap
-                mapContainerStyle={{ width: '100%', maxWidth: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
+              <ResponsiveDashboardGoogleMap
                 center={travelerMapCenter}
                 zoom={userLocation ? 13 : 7}
                 options={{
@@ -17947,7 +18106,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                   ],
                 }}
               >
-                {userLocation && (
+                {userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng) && (
                   <Marker
                     position={userLocation}
                     icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' }}
@@ -17965,9 +18124,9 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                 {directionsResponse && (
                   <DirectionsRenderer directions={directionsResponse} />
                 )}
-              </GoogleMap>
+              </ResponsiveDashboardGoogleMap>
             ) : (
-              <div className="h-full min-h-[calc(100vh-96px)] bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
+              <div className="absolute inset-0 h-full w-full bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
             )}
           </MapFirstDashboardShell>
 
@@ -20032,44 +20191,67 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, [profile.location?.lat, profile.location?.lng, userLocation]);
 
   useEffect(() => {
-    if ("geolocation" in navigator) {
-      const persistDriverLocation = (newLocation: { lat: number; lng: number }) => {
-        const now = Date.now();
-        if (now - lastDriverLocationWriteRef.current < LOCATION_DB_UPDATE_INTERVAL_MS) return;
-        lastDriverLocationWriteRef.current = now;
-        updateDoc(doc(db, 'users', profile.uid), {
-          location: {
-            ...newLocation,
-            lastUpdated: new Date().toISOString()
-          }
-        }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
-      };
-
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          const newLocation = { lat: latitude, lng: longitude };
-          setUserLocation(newLocation);
-          setDriverSignalLocation({
-            lat: latitude,
-            lng: longitude,
-            accuracy: position.coords.accuracy,
-            heading: Number.isFinite(position.coords.heading as number) ? Number(position.coords.heading) : undefined,
-            speedKmph: Number.isFinite(position.coords.speed as number) ? Number(position.coords.speed) * 3.6 : undefined,
-          });
-          persistDriverLocation(newLocation);
-        },
-        (error) => {
-          logGeolocationIssue('Driver', error);
-          const fallbackLocation = extractLatLng(profile.location);
-          if (fallbackLocation) {
-            setUserLocation((prev) => prev || fallbackLocation);
-            setDriverSignalLocation((prev) => prev || { lat: fallbackLocation.lat, lng: fallbackLocation.lng });
-          }
-        },
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
-      );
+    if (!("geolocation" in navigator) || typeof navigator.geolocation?.getCurrentPosition !== 'function') {
+      return;
     }
+
+    let cancelled = false;
+    const persistDriverLocation = (newLocation: { lat: number; lng: number }) => {
+      const now = Date.now();
+      if (now - lastDriverLocationWriteRef.current < LOCATION_DB_UPDATE_INTERVAL_MS) return;
+      lastDriverLocationWriteRef.current = now;
+      updateDoc(doc(db, 'users', profile.uid), {
+        location: {
+          ...newLocation,
+          lastUpdated: new Date().toISOString()
+        }
+      }).catch((error) => handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`));
+    };
+
+    const startGeolocation = () => {
+      if (cancelled) return;
+      try {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            if (cancelled || !position?.coords) return;
+            const latitude = Number(position.coords.latitude);
+            const longitude = Number(position.coords.longitude);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+            const newLocation = { lat: latitude, lng: longitude };
+            setUserLocation(newLocation);
+            setDriverSignalLocation({
+              lat: latitude,
+              lng: longitude,
+              accuracy: position.coords.accuracy,
+              heading: Number.isFinite(position.coords.heading as number) ? Number(position.coords.heading) : undefined,
+              speedKmph: Number.isFinite(position.coords.speed as number) ? Number(position.coords.speed) * 3.6 : undefined,
+            });
+            persistDriverLocation(newLocation);
+          },
+          (error) => {
+            if (cancelled) return;
+            logGeolocationIssue('Driver', error);
+            const fallbackLocation = extractLatLng(profile.location);
+            if (fallbackLocation) {
+              setUserLocation((prev) => prev || fallbackLocation);
+              setDriverSignalLocation((prev) => prev || { lat: fallbackLocation.lat, lng: fallbackLocation.lng });
+            }
+          },
+          { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
+        );
+      } catch (error) {
+        logGeolocationIssue('Driver', error);
+      }
+    };
+
+    const timer = window.setTimeout(
+      startGeolocation,
+      isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 350 : 0
+    );
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [profile.uid, profile.location?.lat, profile.location?.lng]);
 
   useEffect(() => {
@@ -21529,7 +21711,9 @@ const finalizeDriverDashboardRazorpayPayment = async (
   };
 
   const driverMapCenter = userLocation || { lat: 26.1433, lng: 91.7385 };
+  const dashboardSurfaceReady = useDeferredDashboardSurface();
   const driverMapReady = Boolean(
+    dashboardSurfaceReady &&
     GOOGLE_MAPS_API_KEY &&
     isLoaded &&
     !hasMapsIssue &&
@@ -21538,9 +21722,9 @@ const finalizeDriverDashboardRazorpayPayment = async (
   );
   return (
     <div className={cn(
-      "relative w-full max-w-full overflow-x-hidden",
+      "relative m-0 w-full max-w-none border-0 p-0",
       activeTab === 'dashboard'
-        ? "relative min-h-[calc(100vh-4rem)] bg-mairide-bg"
+        ? "min-h-[calc(100dvh-5.25rem)] w-full bg-mairide-bg"
         : "max-w-4xl mx-auto p-4 md:p-8"
     )}>
       {activeTab === 'dashboard' && (
@@ -21569,22 +21753,22 @@ const finalizeDriverDashboardRazorpayPayment = async (
                   setShowOfferForm(true);
                 }}
                 className={cn(
-                  "inline-flex h-12 items-center justify-center gap-2 rounded-full px-4 text-sm font-black shadow-xl transition-all sm:px-5",
+                  "inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-black shadow-xl transition-all sm:h-12 sm:gap-2 sm:px-5 sm:text-sm",
                   isOnline
                     ? "bg-mairide-accent text-white shadow-mairide-accent/20 hover:bg-mairide-primary"
                     : "cursor-not-allowed bg-mairide-secondary text-mairide-primary opacity-80"
                 )}
                 disabled={!isOnline}
               >
-                <Plus className="h-5 w-5" />
-                Offer a Ride
+                <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+                <span className="truncate">Offer a Ride</span>
               </button>
             )}
             secondaryAction={(
               <button
                 onClick={toggleOnline}
                 className={cn(
-                  "inline-flex h-12 items-center justify-center gap-2 rounded-full px-4 text-sm font-black shadow-xl transition-all sm:px-5",
+                  "inline-flex h-10 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-black shadow-xl transition-all sm:h-12 sm:gap-2 sm:px-5 sm:text-sm",
                   isOnline ? "bg-green-600 text-white shadow-green-900/20" : "bg-white text-mairide-primary"
                 )}
               >
@@ -21596,8 +21780,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             sheetBody=""
           >
             {driverMapReady ? (
-              <GoogleMap
-                mapContainerStyle={{ width: '100%', maxWidth: '100%', height: '100%', minHeight: 'calc(100vh - 96px)' }}
+              <ResponsiveDashboardGoogleMap
                 center={driverMapCenter}
                 zoom={userLocation ? 13 : 7}
                 options={{
@@ -21615,7 +21798,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                   ],
                 }}
               >
-                {userLocation && (
+                {userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng) && (
                   <Marker
                     position={userLocation}
                     icon={{ url: 'https://maps.google.com/mapfiles/ms/icons/car.png' }}
@@ -21630,9 +21813,9 @@ const finalizeDriverDashboardRazorpayPayment = async (
                     title={consumer.displayName}
                   />
                 ))}
-              </GoogleMap>
+              </ResponsiveDashboardGoogleMap>
             ) : (
-              <div className="h-full min-h-[calc(100vh-96px)] bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
+              <div className="absolute inset-0 h-full w-full bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
             )}
           </MapFirstDashboardShell>
 
@@ -29022,10 +29205,13 @@ const App = () => {
                     setPartnerProfile(matchedPartner);
                     setProfile(null);
                   } else {
-                    setNotRegisteredError(true);
-                    await signOut(auth);
+                    // Orphan/unhydrated session on boot: return to clean Login — never force Not Registered.
+                    setNotRegisteredError(false);
+                    setAuthMode('login');
+                    await signOut(auth).catch(() => undefined);
                     resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
                     setProfile(null);
+                    setPartnerProfile(null);
                     setUser(null);
                   }
                 }
@@ -29038,7 +29224,8 @@ const App = () => {
               setProfile(null);
               setPartnerProfile(matchedPartner);
               if (!matchedPartner) {
-                setNotRegisteredError(true);
+                setNotRegisteredError(false);
+                setAuthMode('login');
                 await signOut(auth).catch(() => undefined);
                 resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
                 setUser(null);
@@ -29077,8 +29264,9 @@ const App = () => {
               setProfile(null);
               setPartnerProfile(matchedPartner);
             } else {
-              // Never leave Android WebView on an infinite LoadingScreen with a session but no profile.
-              setNotRegisteredError(true);
+              // Stale/anonymous session without a profile: clean Login only (no signup modal).
+              setNotRegisteredError(false);
+              setAuthMode('login');
               await signOut(auth).catch(() => undefined);
               resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
               setProfile(null);
@@ -29097,7 +29285,8 @@ const App = () => {
             setProfile(null);
             setPartnerProfile(matchedPartner);
           } else {
-            setNotRegisteredError(true);
+            setNotRegisteredError(false);
+            setAuthMode('login');
             await signOut(auth).catch(() => undefined);
             resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
             setProfile(null);
@@ -29112,6 +29301,7 @@ const App = () => {
         resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
         setProfile(null);
         setPartnerProfile(null);
+        setNotRegisteredError(false);
         finishAuthLoading(generation);
       }
     });
@@ -29127,7 +29317,9 @@ const App = () => {
         });
         const cached = resolvedAuthProfileRef.current;
         if (!cached.profile && !cached.partnerProfile) {
-          setNotRegisteredError(true);
+          // Never open Not Registered from boot watchdog — drop to clean Login.
+          setNotRegisteredError(false);
+          setAuthMode('login');
           setUser(null);
           setProfile(null);
           setPartnerProfile(null);
@@ -29895,9 +30087,8 @@ const App = () => {
 
   if (loading) return withAppConfigProvider(<ErrorBoundary><LoadingScreen />{cookieConsentManager}</ErrorBoundary>);
 
-  // Do not trap Android WebView on an infinite logo spin when auth finished without a profile.
-  // Fall through to AuthPage / partner handling (notRegisteredError + sign-out paths above).
-
+  // Authenticated-but-unhydrated sessions are handled above (silent sign-out → clean Login).
+  // Do not surface signup / Not Registered UI from boot.
 
   if (!user) return withAppConfigProvider(
     <ErrorBoundary>
@@ -30055,34 +30246,10 @@ const App = () => {
     );
   }
 
-  if (user && !profile) {
-    return withAppConfigProvider(
-      <ErrorBoundary>
-        <Router>
-          <div className="min-h-screen flex flex-col bg-mairide-bg">
-            <div className="flex-1">
-              <AuthPage
-                user={user}
-                authMode={authMode}
-                setAuthMode={setAuthMode}
-                notRegisteredError={true}
-                setNotRegisteredError={setNotRegisteredError}
-                role={role}
-                setRole={setRole}
-                referralCodeInput={referralCodeInput}
-                setReferralCodeInput={setReferralCodeInput}
-                releaseVersion={releaseVersion}
-              />
-            </div>
-            <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
-            <AppDialogHost />
-            {androidUpdatePrompt}
-            {cookieConsentManager}
-            {footerResourceModal}
-          </div>
-        </Router>
-      </ErrorBoundary>
-    );
+  // Authenticated session still hydrating profile — keep LoadingScreen.
+  // Never force the Not Registered signup modal during boot/hydration.
+  if (user && !profile && !partnerProfile) {
+    return withAppConfigProvider(<ErrorBoundary><LoadingScreen releaseVersion={releaseVersion} />{cookieConsentManager}</ErrorBoundary>);
   }
 
   if (profile && profile.role === 'driver') {
@@ -30126,7 +30293,7 @@ const App = () => {
   return withAppConfigProvider(
     <ErrorBoundary>
       <Router>
-        <div className="min-h-screen bg-mairide-bg">
+        <div className="min-h-screen w-full max-w-none bg-mairide-bg m-0 p-0">
           <Navbar
             user={user}
             profile={profile}
@@ -30138,7 +30305,7 @@ const App = () => {
             isUploadingTravelerAvatar={isUploadingTravelerAvatar}
           />
           <div id="google_translate_element" className="hidden" />
-          <main className="pb-20">
+          <main className="m-0 w-full max-w-none border-0 p-0 pb-20">
             <Routes>
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
