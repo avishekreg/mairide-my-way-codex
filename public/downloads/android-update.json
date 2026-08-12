@@ -1,13 +1,6 @@
 {
-<<<<<<< HEAD
-  "appVersion": "v3.0.1-beta+build.322",
-  "apkUrl": "https://downloads.mairide.in/mairide-android-322.apk",
-  "buildSha": "9e39cd4d14700c93e41aa51446e95d55c76083cc",
-  "builtAt": "2026-08-12T10:02:05Z"
-=======
-  "appVersion": "v3.0.1-beta+build.321",
-  "apkUrl": "https://rides.mairide.in/downloads/mairide-android.apk",
-  "buildSha": "9e39cd4",
-  "builtAt": "2026-08-12T09:57:00Z"
->>>>>>> f83048f (fix: streamline android apk download path)
+  "appVersion": "v3.0.1-beta+build.323",
+  "apkUrl": "https://downloads.mairide.in/mairide-android-323.apk",
+  "buildSha": "3628cfe8eb3ec15b39bb8d16672e02c9e5c012b3",
+  "builtAt": "2026-08-12T13:43:37Z"
 }
