@@ -87,53 +87,7 @@ jobs:
           echo "Push notifications plugin removed to prevent FirebaseInitProvider crashes without google-services.json."
 
       - name: Generate Capacitor config
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const hasFirebase = process.env.HAS_ANDROID_FIREBASE === '1';
-          const pushBlock = hasFirebase
-            ? `    PushNotifications: {
-      presentationOptions: ['badge', 'sound', 'alert'],
-    },
-`
-            : '';
-          const contents = `import type { CapacitorConfig } from '@capacitor/cli';
-
-const config: CapacitorConfig = {
-  appId: 'in.mairide.app',
-  appName: 'MaiRide',
-  webDir: 'dist',
-  plugins: {
-    CapacitorHttp: {
-      enabled: false,
-    },
-    GoogleSignIn: {
-      scopes: ['profile', 'email'],
-      serverClientId: '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com',
-    },
-${pushBlock}  },
-  server: {
-    androidScheme: 'https',
-    cleartext: false,
-    allowNavigation: [
-      'rides.mairide.in',
-      'www.mairide.in',
-      'mairide.in',
-      'jcgoccsdlrjnratpaeje.supabase.co',
-      '*.supabase.co',
-      'accounts.google.com',
-      '*.googleapis.com',
-      '*.gstatic.com',
-    ],
-  },
-};
-
-export default config;
-`;
-          fs.writeFileSync('capacitor.config.ts', contents);
-          console.log(contents);
-          console.log('firebase=', hasFirebase);
-          NODE
+        run: node scripts/generate-android-capacitor-config.mjs
 
       - name: Add Android platform
         run: npx cap add android
@@ -142,61 +96,7 @@ export default config;
         run: npx cap sync android
 
       - name: Inject Android runtime permissions and crash guards
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const path = 'android/app/src/main/AndroidManifest.xml';
-          if (!fs.existsSync(path)) {
-            console.error('Android manifest not found at', path);
-            process.exit(1);
-          }
-          let xml = fs.readFileSync(path, 'utf8');
-          for (const permission of [
-            'android.permission.CAMERA',
-            'android.permission.ACCESS_FINE_LOCATION',
-            'android.permission.ACCESS_COARSE_LOCATION',
-          ]) {
-            if (!xml.includes(permission)) {
-              xml = xml.replace(
-                /<application\b/,
-                `    <uses-permission android:name="${permission}" />\n    <application`
-              );
-            }
-          }
-          if (!xml.includes('android:largeHeap')) {
-            xml = xml.replace(/<application\b/, '<application android:largeHeap="true"');
-          }
-          if (process.env.HAS_ANDROID_FIREBASE !== '1') {
-            const hooks = [
-              'firebase_messaging_auto_init_enabled',
-              'firebase_analytics_collection_enabled',
-            ];
-            for (const name of hooks) {
-              if (!xml.includes(name)) {
-                xml = xml.replace(
-                  /(<application\b[^>]*>)/,
-                  `$1\n        <meta-data android:name="${name}" android:value="false" />`
-                );
-              }
-            }
-            // Drop Capacitor MessagingService if it somehow remains without Firebase config.
-            xml = xml.replace(
-              /\s*<service[\s\S]*?com\.capacitorjs\.plugins\.pushnotifications\.MessagingService[\s\S]*?<\/service>/g,
-              ''
-            );
-          }
-          fs.writeFileSync(path, xml);
-          console.log('Patched AndroidManifest.xml');
-          for (const needle of [
-            'largeHeap',
-            'firebase_messaging_auto_init_enabled',
-            'CAMERA',
-            'MessagingService',
-            'FirebaseInitProvider',
-          ]) {
-            console.log(needle, xml.includes(needle));
-          }
-          NODE
+        run: node scripts/patch-android-manifest.mjs
 
       - name: Configure Firebase services for Android push
         env:
