@@ -221,18 +221,6 @@ const isLocalDevFirestoreMode = () => {
 
 const resolveApiBaseUrl = () => {
   if (typeof window === 'undefined') return '';
-
-  // Native Capacitor shells always call production APIs over the real network.
-  // Never use window.location.origin here — the WebView host is localhost (bundled
-  // assets), and spoofing rides.mairide.in previously trapped /api in Cap's local server.
-  try {
-    if (typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform()) {
-      return WEB_API_ORIGIN_FALLBACK;
-    }
-  } catch {
-    // Fall through to host-based detection.
-  }
-
   const protocol = String(window.location.protocol || '').toLowerCase();
   const hostname = String(window.location.hostname || '').toLowerCase();
   const isHttpLike = protocol === 'http:' || protocol === 'https:';
@@ -322,22 +310,15 @@ const buildOriginCandidates = (path?: string) => {
   const currentOrigin = String(window.location.origin || '');
   const normalizedPath = String(path || '').toLowerCase();
   const isAuthPath = normalizedPath.startsWith('/api/auth');
-  const isNativeShell = (() => {
-    try {
-      return typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
-    } catch {
-      return false;
-    }
-  })();
 
-  // Native shells must never use the WebView origin (localhost or a spoofed host).
-  // Those requests are answered by Capacitor's local asset server, not Vercel.
-  if (isNativeShell || (isAndroidWebViewLikeRuntime() && isAuthPath)) {
+  if (isAndroidWebViewLikeRuntime() && isAuthPath) {
+    // Android WebView auth is sensitive to host-level HTML fallbacks/challenges.
+    // Prefer the canonical public domain, then fall back to the Vercel deployment.
     return Array.from(new Set([WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER].filter(Boolean)));
   }
 
   const appPreferred = isAndroidWebViewLikeRuntime()
-    ? [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER, primary]
+    ? [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER, currentOrigin, primary]
     : [currentOrigin, primary, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
   return Array.from(
     new Set(appPreferred.filter(Boolean))
@@ -379,18 +360,6 @@ const withRejectingTimeout = async <T,>(
     ]);
   } finally {
     if (timer) clearTimeout(timer);
-  }
-};
-
-const safeSignOut = async (timeoutMs = 2500) => {
-  try {
-    await withRejectingTimeout(
-      signOut(auth).catch(() => undefined),
-      timeoutMs,
-      'sign-out-timeout'
-    );
-  } catch {
-    // Never block UI recovery on a hung native signOut/fetch.
   }
 };
 
@@ -3453,8 +3422,8 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
-const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android.apk';
-const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://downloads.mairide.in/mairide-android.apk';
+const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android-340.apk';
+const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://downloads.mairide.in/mairide-android-340.apk';
 const buildAndroidQrUrl = (apkUrl: string) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(apkUrl)}`;
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
@@ -5738,15 +5707,6 @@ const normalizeDialogMessage = (input: unknown, fallback = 'A server error has o
   if (lowered.includes('auth_upstream_timeout') || lowered.includes('authentication service timed out')) {
     return 'Login is taking too long. Please check your connection and retry.';
   }
-  if (
-    lowered.includes('network error') ||
-    lowered.includes('failed to fetch') ||
-    lowered.includes('networkerror') ||
-    lowered.includes('load failed') ||
-    lowered.includes('the internet connection appears to be offline')
-  ) {
-    return 'Network error. Please check your internet connection and retry.';
-  }
   return raw;
 };
 
@@ -6464,34 +6424,7 @@ const signInWithDirectSupabasePassword = async (email: string, password: string)
         return data;
       }
     } catch {
-      // Fall through — try reading the seeded storage session below.
-    }
-
-    // Native shells cannot rely on location.reload() to pick up a seeded session.
-    // Prefer getSession from storage; if that fails on native, surface a hard error.
-    try {
-      const { data: existing } = await withRejectingTimeout(
-        supabase.auth.getSession(),
-        5000,
-        'Login session verification timed out. Please retry.'
-      );
-      if (existing?.session?.access_token) {
-        return existing;
-      }
-    } catch {
-      // Continue to native/web divergence below.
-    }
-
-    const isNative = (() => {
-      try {
-        return typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
-      } catch {
-        return false;
-      }
-    })();
-
-    if (isNative) {
-      throw new Error('Login session could not be established. Please retry.');
+      // Fall through to hydrated session object below.
     }
 
     return {
@@ -9352,48 +9285,84 @@ const findUserProfileByPhone = async (value: string) => {
         // Email/Password Login
         if (isAndroidWebViewRuntime) {
           const loginEmail = normalizeEmailValue(normalizedUsername);
-          // Native only: CapacitorHttp token grant + CapHttp-backed profile read.
-          // Never location.reload() — that caused remote-shell white screens.
-          await signInWithDirectSupabasePassword(loginEmail, password);
-          try {
-            const sessionWrap = await withRejectingTimeout(
-              supabase.auth.getSession(),
-              5000,
-              'Login session verification timed out. Please retry.'
-            );
-            const sessionUser = sessionWrap?.data?.session?.user;
-            const accessToken = String(sessionWrap?.data?.session?.access_token || '');
-            if (sessionUser?.id) {
-              const snapshot = await withRejectingTimeout(
-                getDoc(doc(db, 'users', sessionUser.id)),
-                12000,
-                'Profile lookup timed out. Please retry.'
-              );
-              if (snapshot.exists()) {
-                const resolvedProfile = snapshot.data() as UserProfile;
-                resolvedAuthProfileRef.current = {
-                  authUid: sessionUser.id,
-                  profile: resolvedProfile,
-                  partnerProfile: null,
-                };
-                setUser({
-                  uid: sessionUser.id,
-                  email: sessionUser.email || loginEmail,
-                  displayName: resolvedProfile.displayName || sessionUser.email || 'User',
-                  photoURL: resolvedProfile.photoURL || '',
-                  phoneNumber: resolvedProfile.phoneNumber || '',
-                  emailVerified: Boolean(sessionUser.email_confirmed_at),
-                  isAnonymous: false,
-                  getIdToken: async () => accessToken,
-                } as any);
-                setProfile(resolvedProfile);
-                setPartnerProfile(null);
-                setLoading(false);
-              }
+          // Race native Supabase HTTP with same-origin Vercel proxy. Whichever
+          // returns a session first wins — WebView stalls and upstream hangs
+          // should not block both paths serially.
+          const persistProxySession = async () => {
+            // Node function in iad1 — bom1 Edge/Node cannot reach supabase.co from India.
+            const fallbackResponse = await fetchWithOriginFailover('/api/auth?action=password-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: loginEmail, password }),
+              cache: 'no-store',
+            });
+            const fallbackData = await parseApiResponse(fallbackResponse, 'Failed to login');
+            const accessToken = String(fallbackData?.session?.access_token || '');
+            const refreshToken = String(fallbackData?.session?.refresh_token || '');
+
+            if (!accessToken || !refreshToken) {
+              throw new Error('Login session could not be established.');
             }
-          } catch (hydrateError) {
-            console.warn('Native post-login profile hydrate:', hydrateError);
+
+            // Seed localStorage immediately; setSession can hang on Preferences.
+            try {
+              if (typeof window !== 'undefined' && window.localStorage) {
+                const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
+                const existingRaw = window.localStorage.getItem(storageKey);
+                const existing = existingRaw ? JSON.parse(existingRaw) : {};
+                window.localStorage.setItem(
+                  storageKey,
+                  JSON.stringify({
+                    ...existing,
+                    access_token: accessToken,
+                    refresh_token: refreshToken,
+                    token_type: 'bearer',
+                    expires_in: 3600,
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                    user: fallbackData?.user || existing?.user || null,
+                  })
+                );
+              }
+            } catch {
+              // Continue with setSession.
+            }
+
+            try {
+              const { error: setSessionError } = await withRejectingTimeout(
+                supabase.auth.setSession({
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                }),
+                8000,
+                'Login session setup timed out. Please retry.'
+              );
+              if (setSessionError) {
+                // Still reload if tokens were seeded — auth bootstrap can pick them up.
+                console.warn('setSession after proxy login:', setSessionError.message);
+              }
+            } catch (sessionError) {
+              console.warn('setSession after proxy login timed out', sessionError);
+            }
+          };
+
+          const directAttempt = signInWithDirectSupabasePassword(loginEmail, password).then(() => 'direct' as const);
+          const proxyAttempt = persistProxySession().then(() => 'proxy' as const);
+
+          try {
+            await Promise.any([directAttempt, proxyAttempt]);
+          } catch (aggregateError: any) {
+            const errors = Array.isArray(aggregateError?.errors) ? aggregateError.errors : [aggregateError];
+            const firstUseful =
+              errors.find((err: any) => {
+                const msg = String(err?.message || '').toLowerCase();
+                return msg && !msg.includes('timed out') && !msg.includes('timeout');
+              }) || errors[0];
+            throw firstUseful instanceof Error
+              ? firstUseful
+              : new Error(String(firstUseful?.message || 'Failed to login'));
           }
+
+          window.location.reload();
           return;
         }
 
@@ -29214,7 +29183,7 @@ const App = () => {
       !criticalSessionResetRef.current
     ) {
       criticalSessionResetRef.current = true;
-      void safeSignOut();
+      void signOut(auth).catch(() => undefined);
     }
   }, [installedNativeVersion, mobileReleasePolicy, user]);
 
@@ -29266,46 +29235,11 @@ const App = () => {
 
     const finishAuthLoading = (generation: number) => {
       if (!active || generation !== authResolveGenerationRef.current) return;
-      clearLoadingWatchdog();
       setLoading(false);
     };
 
-    let loadingWatchdog: number | null = null;
-    const clearLoadingWatchdog = () => {
-      if (loadingWatchdog !== null) {
-        window.clearTimeout(loadingWatchdog);
-        loadingWatchdog = null;
-      }
-    };
-    const armLoadingWatchdog = (reason: string) => {
-      clearLoadingWatchdog();
-      const timeoutMs = isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 10000 : 15000;
-      loadingWatchdog = window.setTimeout(() => {
-        if (!active) return;
-        recordInternalDebugEvent('auth_loading_watchdog_fired', {
-          runtime: isAndroidWebViewLikeRuntime() ? 'android_webview' : 'web',
-          authUid: resolvedAuthProfileRef.current.authUid,
-          reason,
-        });
-        const cached = resolvedAuthProfileRef.current;
-        if (!cached.profile && !cached.partnerProfile) {
-          setNotRegisteredError(false);
-          setAuthMode('login');
-          setUser(null);
-          setProfile(null);
-          setPartnerProfile(null);
-          resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
-          void safeSignOut();
-        }
-        setLoading(false);
-      }, timeoutMs);
-    };
-
-    armLoadingWatchdog('boot');
-
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (!active) return;
-      armLoadingWatchdog(u ? `auth:${u.uid}` : 'auth:signed_out');
       const cached = resolvedAuthProfileRef.current;
       const isSameResolvedUser =
         Boolean(u?.uid) &&
@@ -29335,11 +29269,7 @@ const App = () => {
         const profileDocId = mappedPhoneProfileId || u.uid;
 
         try {
-          const snapshot = await withRejectingTimeout(
-            getDoc(doc(db, 'users', profileDocId)),
-            12000,
-            'Profile lookup timed out. Please retry.'
-          );
+          const snapshot = await getDoc(doc(db, 'users', profileDocId));
           if (!active || generation !== authResolveGenerationRef.current) return;
           if (snapshot.exists()) {
             const resolvedProfile = snapshot.data() as UserProfile;
@@ -29430,7 +29360,7 @@ const App = () => {
                     // Orphan/unhydrated session on boot: return to clean Login — never force Not Registered.
                     setNotRegisteredError(false);
                     setAuthMode('login');
-                    await safeSignOut();
+                    await signOut(auth).catch(() => undefined);
                     resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
                     setProfile(null);
                     setPartnerProfile(null);
@@ -29448,7 +29378,7 @@ const App = () => {
               if (!matchedPartner) {
                 setNotRegisteredError(false);
                 setAuthMode('login');
-                await safeSignOut();
+                await signOut(auth).catch(() => undefined);
                 resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
                 setUser(null);
               } else {
@@ -29489,7 +29419,7 @@ const App = () => {
               // Stale/anonymous session without a profile: clean Login only (no signup modal).
               setNotRegisteredError(false);
               setAuthMode('login');
-              await safeSignOut();
+              await signOut(auth).catch(() => undefined);
               resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
               setProfile(null);
               setPartnerProfile(null);
@@ -29509,7 +29439,7 @@ const App = () => {
           } else {
             setNotRegisteredError(false);
             setAuthMode('login');
-            await safeSignOut();
+            await signOut(auth).catch(() => undefined);
             resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
             setProfile(null);
             setPartnerProfile(null);
@@ -29528,9 +29458,30 @@ const App = () => {
       }
     });
 
+    // Hard stop infinite logo spin on native WebView if profile resolution hangs.
+    const loadingWatchdog = window.setTimeout(() => {
+      if (!active) return;
+      recordInternalDebugEvent('auth_loading_watchdog_fired', {
+        runtime: isAndroidWebViewLikeRuntime() ? 'android_webview' : 'web',
+        authUid: resolvedAuthProfileRef.current.authUid,
+      });
+      const cached = resolvedAuthProfileRef.current;
+      if (!cached.profile && !cached.partnerProfile) {
+        // Never open Not Registered from boot watchdog — drop to clean Login.
+        setNotRegisteredError(false);
+        setAuthMode('login');
+        setUser(null);
+        setProfile(null);
+        setPartnerProfile(null);
+        resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
+        void signOut(auth).catch(() => undefined);
+      }
+      setLoading(false);
+    }, isAndroidWebViewLikeRuntime() || isAppWebViewRuntime() ? 8000 : 15000);
+
     return () => {
       active = false;
-      clearLoadingWatchdog();
+      window.clearTimeout(loadingWatchdog);
       unsubscribe();
     };
   }, []);
@@ -29540,25 +29491,6 @@ const App = () => {
     safeStorageRemove('session', PHONE_LOGIN_NUMBER_KEY);
     return signOut(auth);
   };
-
-  // Last-resort UI unlock: authenticated without profile must not stick forever
-  // even if the auth effect watchdog was cleared by a remount.
-  useEffect(() => {
-    if (!user || profile || partnerProfile || loading) return;
-    const timer = window.setTimeout(() => {
-      recordInternalDebugEvent('auth_unhydrated_ui_watchdog', {
-        authUid: user.uid,
-      });
-      setNotRegisteredError(false);
-      setAuthMode('login');
-      setUser(null);
-      setProfile(null);
-      setPartnerProfile(null);
-      resolvedAuthProfileRef.current = { authUid: null, profile: null, partnerProfile: null };
-      void safeSignOut();
-    }, 8000);
-    return () => window.clearTimeout(timer);
-  }, [user, profile, partnerProfile, loading]);
 
   const isTravelerProfile = profile?.role === 'consumer';
 

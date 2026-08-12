@@ -3,14 +3,11 @@
  * Generates capacitor.config.ts for Android CI builds.
  * HAS_ANDROID_FIREBASE=1 keeps PushNotifications; otherwise omit it.
  *
- * IMPORTANT: Do NOT set server.hostname to rides.mairide.in (or any live API host).
- * Spoofing the production host makes same-origin fetches hit Capacitor's local asset
- * server, and allowNavigation + location.reload() can escape the bundled shell into
- * a remote white-screen state after login.
- *
- * Keep default localhost + https scheme. Maps key is baked at build time; Google Cloud
- * HTTP referrers must allow https://localhost/* for the WebView Maps JS API.
- * API calls always target https://rides.mairide.in via resolveApiBaseUrl().
+ * LOCKED to known-good APK 342 (093016b) shell config:
+ * - CapHttp.enabled = false (explicit CapHttp.post still used for login)
+ * - NO server.hostname spoof of rides.mairide.in (that caused white-screen)
+ * - NO remote server.url
+ * Maps key is supplied at Vite build time via VITE_GOOGLE_MAPS_API_KEY.
  */
 import { writeFileSync } from 'node:fs';
 
@@ -30,9 +27,7 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   plugins: {
     CapacitorHttp: {
-      // Patch window.fetch through native HTTP. WebView fetch hangs after login
-      // were leaving the app on a stuck loading/white screen. Firebase is stripped in CI.
-      enabled: true,
+      enabled: false,
     },
     GoogleSignIn: {
       scopes: ['profile', 'email'],
@@ -41,9 +36,9 @@ const config: CapacitorConfig = {
 ${pushBlock}  },
   server: {
     androidScheme: 'https',
-    // Default Capacitor host. Never spoof the live API domain here.
     cleartext: false,
     allowNavigation: [
+      'rides.mairide.in',
       'www.mairide.in',
       'mairide.in',
       'jcgoccsdlrjnratpaeje.supabase.co',

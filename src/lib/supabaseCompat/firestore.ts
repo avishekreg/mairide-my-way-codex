@@ -1,94 +1,4 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { supabase } from '../supabase';
-
-const SUPABASE_REST_URL = 'https://jcgoccsdlrjnratpaeje.supabase.co/rest/v1';
-const SUPABASE_ANON_KEY =
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ29jY3NkbHJqbnJhdHBhZWplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTkwMTQsImV4cCI6MjA5MDUzNTAxNH0.iPIawKCThu7lYMoGrWAyRDVvQPf5YICP7Ap_XOwAOrw';
-
-const isNativeCapacitorRuntime = () => {
-  try {
-    return typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
-  } catch {
-    return false;
-  }
-};
-
-const readAccessTokenHint = () => {
-  if (typeof window === 'undefined' || !window.localStorage) return '';
-  try {
-    const raw = window.localStorage.getItem('sb-jcgoccsdlrjnratpaeje-auth-token');
-    if (!raw) return '';
-    const parsed = JSON.parse(raw);
-    return String(parsed?.access_token || parsed?.currentSession?.access_token || '').trim();
-  } catch {
-    return '';
-  }
-};
-
-const resolveNativeAuthHeaders = async (prefer = 'return=representation') => {
-  let accessToken = readAccessTokenHint();
-  if (!accessToken) {
-    try {
-      const sessionPromise = supabase.auth.getSession();
-      const timed = await Promise.race([
-        sessionPromise,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
-      ]);
-      accessToken = String((timed as any)?.data?.session?.access_token || '').trim();
-    } catch {
-      accessToken = '';
-    }
-  }
-  const bearer = accessToken || SUPABASE_ANON_KEY;
-  return {
-    apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${bearer}`,
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-    Prefer: prefer,
-  };
-};
-
-const nativeRestRequest = async (
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
-  pathWithQuery: string,
-  body?: Record<string, any> | Record<string, any>[],
-  prefer = 'return=representation'
-) => {
-  const headers = await resolveNativeAuthHeaders(prefer);
-  const response = await CapacitorHttp.request({
-    url: `${SUPABASE_REST_URL}/${pathWithQuery.replace(/^\//, '')}`,
-    method,
-    headers,
-    data: body,
-    connectTimeout: 12000,
-    readTimeout: 12000,
-  });
-  const status = Number(response.status || 0);
-  const payload =
-    typeof response.data === 'string'
-      ? (() => {
-          try {
-            return JSON.parse(response.data);
-          } catch {
-            return response.data;
-          }
-        })()
-      : response.data;
-
-  if (status < 200 || status >= 300) {
-    const message =
-      (payload && typeof payload === 'object' && (payload.message || payload.error || payload.hint)) ||
-      `Supabase REST ${method} failed (${status})`;
-    const error: any = new Error(String(message));
-    error.code = payload?.code;
-    error.status = status;
-    throw error;
-  }
-  return payload;
-};
-
 
 type Primitive = string | number | boolean | null;
 type WhereValue = Primitive | Primitive[];
@@ -381,24 +291,6 @@ function applyPatch<T extends Record<string, any>>(current: T, patch: Record<str
 }
 
 async function executeDocumentRead<T>(ref: DocumentReference<T>) {
-  if (isNativeCapacitorRuntime() && typeof CapacitorHttp?.request === 'function') {
-    try {
-      const rows = await nativeRestRequest(
-        'GET',
-        `${encodeURIComponent(ref.collection)}?id=eq.${encodeURIComponent(ref.id)}&select=*`
-      );
-      const row = Array.isArray(rows) ? rows[0] : rows;
-      return new DocumentSnapshot<T>(row ? inflateRecord<T>(ref.collection, row) : null, ref.id);
-    } catch (error: any) {
-      const code = String(error?.code || '');
-      const message = String(error?.message || '');
-      if (code === 'PGRST205' || message.includes('schema cache')) {
-        return new DocumentSnapshot<T>(null, ref.id);
-      }
-      // Fall through to JS client once; some emulator/web paths still need it.
-    }
-  }
-
   const { data, error } = await supabase.from(ref.collection).select('*').eq('id', ref.id).maybeSingle();
   if (error) {
     const code = String((error as any)?.code || '');
@@ -431,52 +323,7 @@ function applyConstraints(builder: any, table: string, constraints: Constraint[]
   return queryBuilder;
 }
 
-function buildRestFilterQuery(table: string, constraints: Constraint[]) {
-  const params: string[] = ['select=*'];
-  for (const constraint of constraints) {
-    if (constraint.kind === 'where') {
-      const field = mapFieldToColumn(table, constraint.field);
-      if (constraint.op === '==') {
-        params.push(`${encodeURIComponent(field)}=eq.${encodeURIComponent(String(constraint.value))}`);
-      } else if (constraint.op === '!=') {
-        params.push(`${encodeURIComponent(field)}=neq.${encodeURIComponent(String(constraint.value))}`);
-      } else if (constraint.op === 'in' && Array.isArray(constraint.value)) {
-        const list = constraint.value.map((value) => `"${String(value).replace(/"/g, '')}"`).join(',');
-        params.push(`${encodeURIComponent(field)}=in.(${list})`);
-      }
-    }
-    if (constraint.kind === 'orderBy') {
-      const field = mapFieldToColumn(table, constraint.field);
-      params.push(`order=${encodeURIComponent(field)}.${constraint.direction === 'desc' ? 'desc' : 'asc'}`);
-    }
-    if (constraint.kind === 'limit') {
-      params.push(`limit=${Math.max(1, Number(constraint.count) || 1)}`);
-    }
-  }
-  return params.join('&');
-}
-
 async function executeQueryRead<T>(ref: Query<T>) {
-  if (isNativeCapacitorRuntime() && typeof CapacitorHttp?.request === 'function') {
-    try {
-      const query = buildRestFilterQuery(ref.collection, ref.constraints);
-      const rows = await nativeRestRequest('GET', `${encodeURIComponent(ref.collection)}?${query}`);
-      const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
-      const docs = list.map((row: any) => {
-        const id = row.uid ?? row.id;
-        return new QueryDocumentSnapshot<T>(inflateRecord<T>(ref.collection, row), id);
-      });
-      return new QuerySnapshot<T>(docs);
-    } catch (error: any) {
-      const code = String(error?.code || '');
-      const message = String(error?.message || '');
-      if (code === 'PGRST205' || message.includes('schema cache')) {
-        return new QuerySnapshot<T>([]);
-      }
-      // Fall through to JS client.
-    }
-  }
-
   let builder = supabase.from(ref.collection).select('*');
   builder = applyConstraints(builder, ref.collection, ref.constraints.map((constraint) => ({ ...constraint })));
   const { data, error } = await builder;
@@ -575,15 +422,6 @@ export async function setDoc<T>(
   _options?: { merge?: boolean }
 ) {
   const row = flattenForStorage(ref.collection, { ...data, id: data.id ?? ref.id, uid: data.uid ?? ref.id });
-  if (isNativeCapacitorRuntime() && typeof CapacitorHttp?.request === 'function') {
-    await nativeRestRequest(
-      'POST',
-      `${encodeURIComponent(ref.collection)}?on_conflict=id`,
-      row,
-      'resolution=merge-duplicates,return=representation'
-    );
-    return;
-  }
   const { error } = await supabase.from(ref.collection).upsert(row, { onConflict: 'id' });
   if (error) throw error;
 }
@@ -599,26 +437,11 @@ export async function updateDoc<T>(ref: DocumentReference<T>, patch: Record<stri
     id: (merged as any).id ?? ref.id,
     uid: (merged as any).uid ?? ref.id,
   });
-  if (isNativeCapacitorRuntime() && typeof CapacitorHttp?.request === 'function') {
-    await nativeRestRequest(
-      'PATCH',
-      `${encodeURIComponent(ref.collection)}?id=eq.${encodeURIComponent(ref.id)}`,
-      row
-    );
-    return;
-  }
   const { error } = await supabase.from(ref.collection).update(row).eq('id', ref.id);
   if (error) throw error;
 }
 
 export async function deleteDoc<T>(ref: DocumentReference<T>) {
-  if (isNativeCapacitorRuntime() && typeof CapacitorHttp?.request === 'function') {
-    await nativeRestRequest(
-      'DELETE',
-      `${encodeURIComponent(ref.collection)}?id=eq.${encodeURIComponent(ref.id)}`
-    );
-    return;
-  }
   const { error } = await supabase.from(ref.collection).delete().eq('id', ref.id);
   if (error) throw error;
 }
