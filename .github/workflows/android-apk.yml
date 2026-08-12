@@ -82,6 +82,9 @@ jobs:
             appName: 'MaiRide',
             webDir: 'dist',
             plugins: {
+              CapacitorHttp: {
+                enabled: true,
+              },
               PushNotifications: {
                 presentationOptions: ['badge', 'sound', 'alert'],
               },
@@ -89,7 +92,13 @@ jobs:
             server: {
               url: 'https://rides.mairide.in',
               cleartext: false,
-              allowNavigation: ['rides.mairide.in', 'www.mairide.in', 'mairide.in'],
+              allowNavigation: [
+                'rides.mairide.in',
+                'www.mairide.in',
+                'mairide.in',
+                'jcgoccsdlrjnratpaeje.supabase.co',
+                '*.supabase.co',
+              ],
             }
           };
 

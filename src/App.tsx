@@ -59,7 +59,7 @@ import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConf
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import { b2bPartnerService } from './services/b2bPartnerService';
 import { AdminB2BVerificationDesk, PartnerApplicationPage, PartnerPortal } from './b2b';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { PushNotifications, type Token } from '@capacitor/push-notifications';
 import { Camera as CapacitorCamera, CameraResultType } from '@capacitor/camera';
@@ -6295,73 +6295,155 @@ const signInWithDirectSupabasePassword = async (email: string, password: string)
   const supabaseUrl = 'https://jcgoccsdlrjnratpaeje.supabase.co';
   const supabaseAnonKey =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ29jY3NkbHJqbnJhdHBhZWplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTkwMTQsImV4cCI6MjA5MDUzNTAxNH0.iPIawKCThu7lYMoGrWAyRDVvQPf5YICP7Ap_XOwAOrw';
-
-  const applySession = async (accessToken: string, refreshToken: string) => {
-    const { data, error: setSessionError } = await withRejectingTimeout(
-      supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      }),
-      SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
-      'Login session setup timed out. Please retry.'
-    );
-    if (setSessionError) {
-      throw new Error(setSessionError.message || 'Failed to set login session.');
-    }
-    if (!data?.session?.access_token || !data?.session?.refresh_token) {
-      throw new Error('Login session could not be established.');
-    }
-    return data;
+  const tokenUrl = `${supabaseUrl}/auth/v1/token?grant_type=password`;
+  const authHeaders = {
+    'Content-Type': 'application/json',
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${supabaseAnonKey}`,
   };
+  const authBody = { email, password };
 
-  // Raw password grant avoids Capacitor Preferences lock contention inside signInWithPassword.
-  const controller = new AbortController();
-  const timer = globalThis.setTimeout(() => controller.abort(), SUPABASE_PASSWORD_GRANT_TIMEOUT_MS);
-  try {
-    const grantResponse = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: supabaseAnonKey,
-        Authorization: `Bearer ${supabaseAnonKey}`,
-      },
-      body: JSON.stringify({ email, password }),
-      signal: controller.signal,
-      cache: 'no-store',
-    });
-    const grantPayload = await grantResponse.json().catch(() => ({}));
-    if (!grantResponse.ok) {
-      const message =
-        grantPayload?.error_description ||
-        grantPayload?.msg ||
-        grantPayload?.error ||
-        'Invalid login credentials';
-      throw new Error(String(message));
-    }
-
+  const persistGrantedSession = async (grantPayload: any) => {
     const accessToken = String(grantPayload?.access_token || '');
     const refreshToken = String(grantPayload?.refresh_token || '');
     if (!accessToken || !refreshToken) {
       throw new Error('Login session could not be established.');
     }
-    return await applySession(accessToken, refreshToken);
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error('Authentication service timed out. Please retry.');
+
+    // Seed localStorage immediately so a hung Preferences/setSession path cannot block login.
+    try {
+      const storageKey = 'sb-jcgoccsdlrjnratpaeje-auth-token';
+      const existingRaw = window.localStorage.getItem(storageKey);
+      const existing = existingRaw ? JSON.parse(existingRaw) : {};
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          ...existing,
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          token_type: grantPayload?.token_type || 'bearer',
+          expires_in: grantPayload?.expires_in || 3600,
+          expires_at: grantPayload?.expires_at || Math.floor(Date.now() / 1000) + Number(grantPayload?.expires_in || 3600),
+          user: grantPayload?.user || existing?.user || null,
+        })
+      );
+    } catch {
+      // Continue with setSession even if manual seed fails.
     }
 
+    try {
+      const { data, error: setSessionError } = await withRejectingTimeout(
+        supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        }),
+        8000,
+        'Login session setup timed out. Please retry.'
+      );
+      if (!setSessionError && data?.session?.access_token) {
+        return data;
+      }
+    } catch {
+      // Fall through to hydrated session object below.
+    }
+
+    return {
+      session: {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      },
+      user: grantPayload?.user || null,
+    };
+  };
+
+  const requestPasswordGrant = async () => {
+    const useNativeHttp =
+      typeof Capacitor?.isNativePlatform === 'function' && Capacitor.isNativePlatform();
+
+    if (useNativeHttp) {
+      // Native HTTP bypasses Android WebView networking stalls to supabase.co.
+      const nativeResponse = await withRejectingTimeout(
+        CapacitorHttp.post({
+          url: tokenUrl,
+          headers: authHeaders,
+          data: authBody,
+          connectTimeout: SUPABASE_PASSWORD_GRANT_TIMEOUT_MS,
+          readTimeout: SUPABASE_PASSWORD_GRANT_TIMEOUT_MS,
+        }),
+        SUPABASE_PASSWORD_GRANT_TIMEOUT_MS + 2000,
+        'Authentication service timed out. Please retry.'
+      );
+
+      const grantPayload =
+        typeof nativeResponse.data === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(nativeResponse.data);
+              } catch {
+                return {};
+              }
+            })()
+          : nativeResponse.data || {};
+
+      if (nativeResponse.status < 200 || nativeResponse.status >= 300) {
+        const message =
+          grantPayload?.error_description ||
+          grantPayload?.msg ||
+          grantPayload?.error ||
+          'Invalid login credentials';
+        throw new Error(String(message));
+      }
+      return grantPayload;
+    }
+
+    const controller = new AbortController();
+    const timer = globalThis.setTimeout(() => controller.abort(), SUPABASE_PASSWORD_GRANT_TIMEOUT_MS);
+    try {
+      const grantResponse = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(authBody),
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+      const grantPayload = await grantResponse.json().catch(() => ({}));
+      if (!grantResponse.ok) {
+        const message =
+          grantPayload?.error_description ||
+          grantPayload?.msg ||
+          grantPayload?.error ||
+          'Invalid login credentials';
+        throw new Error(String(message));
+      }
+      return grantPayload;
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        throw new Error('Authentication service timed out. Please retry.');
+      }
+      throw error;
+    } finally {
+      globalThis.clearTimeout(timer);
+    }
+  };
+
+  try {
+    const grantPayload = await requestPasswordGrant();
+    return await persistGrantedSession(grantPayload);
+  } catch (error: any) {
     const message = String(error?.message || '').toLowerCase();
     const looksLikeTransportFailure =
       message.includes('failed to fetch') ||
       message.includes('network') ||
       message.includes('load failed') ||
-      message.includes('offline');
+      message.includes('offline') ||
+      message.includes('timed out') ||
+      message.includes('timeout');
 
-    // Only fall back to the SDK when the raw grant could not reach Supabase at all.
     if (!looksLikeTransportFailure) {
       throw error instanceof Error ? error : new Error(String(error?.message || 'Failed to login'));
     }
 
+    // Last-resort SDK attempt for non-native / odd transport failures.
     const { data, error: sdkError } = await withRejectingTimeout(
       supabase.auth.signInWithPassword({ email, password }),
       SUPABASE_CLIENT_AUTH_TIMEOUT_MS,
@@ -6372,8 +6454,6 @@ const signInWithDirectSupabasePassword = async (email: string, password: string)
       throw new Error('Login session could not be established.');
     }
     return data;
-  } finally {
-    globalThis.clearTimeout(timer);
   }
 };
 

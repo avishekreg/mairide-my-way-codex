@@ -16,9 +16,18 @@ const config: CapacitorConfig = {
   server: {
     url: RIDES_APP_ORIGIN,
     cleartext: false,
-    allowNavigation: ["rides.mairide.in"],
+    allowNavigation: [
+      "rides.mairide.in",
+      "www.mairide.in",
+      "mairide.in",
+      "jcgoccsdlrjnratpaeje.supabase.co",
+      "*.supabase.co",
+    ],
   },
   plugins: {
+    CapacitorHttp: {
+      enabled: true,
+    },
     GoogleAuth: {
       scopes: ['profile', 'email'],
       serverClientId: GOOGLE_WEB_CLIENT_ID,
