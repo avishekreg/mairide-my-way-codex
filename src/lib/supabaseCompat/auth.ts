@@ -189,7 +189,8 @@ async function signInWithNativeGoogleOAuth(authInstance: SupabaseAuthCompat) {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo,
+      redirectTo: 'https://rides.mairide.in',
+      queryParams: { prompt: 'select_account', access_type: 'offline' },
       skipBrowserRedirect: true,
     } as any,
   });
