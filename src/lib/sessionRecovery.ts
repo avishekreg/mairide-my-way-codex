@@ -4,6 +4,7 @@
  */
 
 const SUPABASE_AUTH_STORAGE_KEY = 'sb-jcgoccsdlrjnratpaeje-auth-token';
+const RETIRED_SUPABASE_PROJECT_REFS = ['qnmetkbiuxwzmlwpxpuz'];
 
 const SESSION_HINT_KEYS = [
   SUPABASE_AUTH_STORAGE_KEY,
@@ -79,6 +80,47 @@ export const purgeLocalAuthSession = () => {
   } catch {
     // Ignore sessionStorage failures.
   }
+};
+
+export const purgeRetiredSupabaseState = () => {
+  if (typeof window === 'undefined') return false;
+
+  let purged = false;
+  const shouldPurgeKeyOrValue = (key: string | null, value: string | null) => {
+    const haystack = `${key || ''} ${value || ''}`.toLowerCase();
+    return RETIRED_SUPABASE_PROJECT_REFS.some((ref) => haystack.includes(ref));
+  };
+
+  const purgeFromStorage = (storage: Storage | null | undefined) => {
+    if (!storage) return;
+    const keys: string[] = [];
+    try {
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (!key) continue;
+        let value = '';
+        try {
+          value = storage.getItem(key) || '';
+        } catch {
+          value = '';
+        }
+        if (shouldPurgeKeyOrValue(key, value)) {
+          keys.push(key);
+        }
+      }
+      keys.forEach((key) => {
+        storage.removeItem(key);
+        purged = true;
+      });
+    } catch {
+      // Storage access can fail in restricted webviews; ignore and keep booting.
+    }
+  };
+
+  purgeFromStorage(window.localStorage);
+  purgeFromStorage(window.sessionStorage);
+
+  return purged;
 };
 
 export const hardResetToLogin = () => {

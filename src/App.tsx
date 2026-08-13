@@ -146,6 +146,7 @@ import {
   isInteractiveLoginActive,
   probeSessionFast,
   purgeLocalAuthSession,
+  purgeRetiredSupabaseState,
   retrySessionRestore,
 } from './lib/sessionRecovery';
 
@@ -3357,6 +3358,23 @@ function reportFirestoreError(error: unknown, operationType: OperationType, path
   recordInternalDebugEvent('firestore_error', errInfo);
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   return errInfo;
+}
+
+function getSafeProfileSyncErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const lowerMessage = message.toLowerCase();
+  if (
+    lowerMessage.includes('failed to fetch') ||
+    lowerMessage.includes('network') ||
+    lowerMessage.includes('name_not_resolved') ||
+    lowerMessage.includes('err_name_not_resolved')
+  ) {
+    return 'Profile sync is temporarily unavailable. Please check your network and try again.';
+  }
+  if (lowerMessage.includes('invalid') && lowerMessage.includes('credential')) {
+    return 'Invalid credentials';
+  }
+  return 'Profile sync failed. Please try again.';
 }
 
 async function testConnection() {
@@ -9531,7 +9549,8 @@ const findUserProfileByPhone = async (value: string) => {
       }
     } catch (error: any) {
       if (error.message === "NOT_REGISTERED") throw error;
-      handleFirestoreError(error, OperationType.WRITE, path);
+      reportFirestoreError(error, OperationType.WRITE, path);
+      throw new Error(getSafeProfileSyncErrorMessage(error));
     }
   };
 
@@ -28833,6 +28852,16 @@ const useAppConfig = () => React.useContext(AppConfigContext) || emptyAppConfigS
 
 const App = () => {
   console.log("🚀 App component initialization started");
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const purgedRetiredState = purgeRetiredSupabaseState();
+    if (!purgedRetiredState) return;
+    recordInternalDebugEvent('retired_supabase_state_purged', {
+      href: window.location.href,
+    });
+    window.setTimeout(() => window.location.reload(), 50);
+  }, []);
+
   const appConfigState = useAppConfigSource();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
