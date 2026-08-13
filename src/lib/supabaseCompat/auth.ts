@@ -229,11 +229,10 @@ async function signInWithNativeGoogleOAuth(authInstance: SupabaseAuthCompat) {
       listener = await App.addListener('appUrlOpen', (event) => {
         void finish(String(event?.url || ''));
       });
-      if (Capacitor.isPluginAvailable('Browser')) {
-        await Browser.open({ url: data.url });
-      } else {
-        window.location.href = data.url;
+      if (!Capacitor.isPluginAvailable('Browser')) {
+        throw new Error('Google sign-in requires the native Browser plugin. Please install the latest mAIRide app build.');
       }
+      await Browser.open({ url: data.url, presentationStyle: 'fullscreen' });
     } catch (openError: any) {
       if (!settled) {
         settled = true;
