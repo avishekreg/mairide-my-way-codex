@@ -228,7 +228,11 @@ async function signInWithNativeGoogleOAuth(authInstance: SupabaseAuthCompat) {
       listener = await App.addListener('appUrlOpen', (event) => {
         void finish(String(event?.url || ''));
       });
-      await Browser.open({ url: data.url });
+      if (Capacitor.isPluginAvailable('Browser')) {
+        await Browser.open({ url: data.url });
+      } else {
+        window.location.href = data.url;
+      }
     } catch (openError: any) {
       if (!settled) {
         settled = true;
