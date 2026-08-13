@@ -1,4 +1,6 @@
 import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
+import { Browser } from '@capacitor/browser';
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import { supabase } from '../supabase';
 
@@ -151,12 +153,91 @@ function isNativeGoogleRuntime() {
 }
 
 function getGoogleOAuthRedirectTo() {
+  if (isNativeGoogleRuntime()) return 'mairide://auth-callback';
   if (typeof window === 'undefined') return 'https://rides.mairide.in';
   const origin = String(window.location.origin || '').trim();
   if (!origin || origin === 'null' || /^capacitor:/i.test(origin) || /^ionic:/i.test(origin)) {
     return 'https://rides.mairide.in';
   }
   return origin;
+}
+
+async function resolveNativeGoogleOAuthCallback(callbackUrl: string) {
+  const parsed = new URL(callbackUrl);
+  const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+  const searchParams = parsed.searchParams;
+  const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
+  const refreshToken = hashParams.get('refresh_token') || searchParams.get('refresh_token');
+  const code = searchParams.get('code') || hashParams.get('code');
+
+  if (accessToken && refreshToken) {
+    return await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+  }
+
+  if (code) {
+    return await supabase.auth.exchangeCodeForSession(code);
+  }
+
+  throw new Error('Google sign-in callback did not include a Supabase session.');
+}
+
+async function signInWithNativeGoogleOAuth(authInstance: SupabaseAuthCompat) {
+  const redirectTo = getGoogleOAuthRedirectTo();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+    } as any,
+  });
+
+  if (error || !data?.url) throw mapAuthError(error);
+
+  return await new Promise<UserCredential>(async (resolve, reject) => {
+    let settled = false;
+    let listener: { remove: () => Promise<void> } | null = null;
+    const timeout = window.setTimeout(async () => {
+      if (settled) return;
+      settled = true;
+      await listener?.remove().catch(() => undefined);
+      await Browser.close().catch(() => undefined);
+      reject(Object.assign(new Error('Google sign-in timed out. Please try again.'), { code: 'auth/timeout' }));
+    }, 120000);
+
+    const finish = async (callbackUrl: string) => {
+      if (settled || !callbackUrl.startsWith('mairide://auth-callback')) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      await listener?.remove().catch(() => undefined);
+      await Browser.close().catch(() => undefined);
+
+      const { data: sessionData, error: sessionError } = await resolveNativeGoogleOAuthCallback(callbackUrl);
+      if (sessionError || !sessionData.user) {
+        reject(mapAuthError(sessionError));
+        return;
+      }
+
+      authInstance.currentUser = normalizeUser(sessionData.user, sessionData.session?.access_token);
+      resolve(toUserCredential(sessionData.user, sessionData.session?.access_token));
+    };
+
+    try {
+      listener = await App.addListener('appUrlOpen', (event) => {
+        void finish(String(event?.url || ''));
+      });
+      await Browser.open({ url: data.url });
+    } catch (openError: any) {
+      if (!settled) {
+        settled = true;
+        window.clearTimeout(timeout);
+        await listener?.remove().catch(() => undefined);
+        reject(openError);
+      }
+    }
+  });
 }
 
 async function ensureNativeGoogleSignInInitialized() {
@@ -487,6 +568,11 @@ export async function signInWithPopup(
   sessionStorage.setItem('mairide_oauth_started', 'google');
   const oauthMode = sessionStorage.getItem('mairide_oauth_mode') || '';
   const context = oauthMode === 'signup' ? 'signup' : 'signin';
+
+  if (isNativeGoogleRuntime()) {
+    return await signInWithNativeGoogleOAuth(authInstance);
+  }
+
   let idToken = '';
 
   try {
