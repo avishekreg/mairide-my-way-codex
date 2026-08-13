@@ -3482,8 +3482,8 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
-const LIVE_ANDROID_APK_URL = 'https://downloads.mairide.in/mairide-android-366.apk';
-const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://downloads.mairide.in/mairide-android-366.apk';
+const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
+const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
 const buildAndroidQrUrl = (apkUrl: string) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(apkUrl)}`;
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
