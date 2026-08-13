@@ -15772,6 +15772,7 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
   const [searchLocationTo, setSearchLocationTo] = useState<{ lat: number, lng: number } | null>(null);
   const [showTravelerSearchFilter, setShowTravelerSearchFilter] = useState(false);
   const [showRequestForm, setShowRequestForm] = useState(false);
+  const travelerSearchDestinationInputRef = useRef<HTMLInputElement | null>(null);
   const [isPostingRequest, setIsPostingRequest] = useState(false);
   const [newRequest, setNewRequest] = useState({
     origin: '',
@@ -16890,6 +16891,69 @@ const ConsumerApp = ({ profile, isLoaded, loadError, authFailure }: { profile: U
       console.error("Geocoding failed:", error);
     }
   };
+
+  const resolveTravelerPickupAddress = useCallback(async (location: { lat: number; lng: number }) => {
+    if (!window.google || !window.google.maps) return 'Current location';
+    const geocoder = new window.google.maps.Geocoder();
+    try {
+      const result = await geocoder.geocode({ location });
+      return result.results?.[0]?.formatted_address || 'Current location';
+    } catch (error) {
+      console.error('Pickup geocoding failed:', error);
+      return 'Current location';
+    }
+  }, []);
+
+  const focusTravelerDestinationSearch = useCallback(() => {
+    window.setTimeout(() => {
+      travelerSearchDestinationInputRef.current?.focus();
+    }, 120);
+  }, []);
+
+  const openInstantTravelerSearch = useCallback(async () => {
+    setShowTravelerSearchFilter(true);
+    const fallbackLocation = extractLatLng(profile.location);
+    const knownLocation = userLocation || fallbackLocation;
+    if (knownLocation) {
+      setSearchLocationFrom(knownLocation);
+      const pickupAddress = await resolveTravelerPickupAddress(knownLocation);
+      setSearch((prev) => ({ ...prev, from: pickupAddress }));
+      focusTravelerDestinationSearch();
+      return;
+    }
+
+    if (!("geolocation" in navigator) || typeof navigator.geolocation?.getCurrentPosition !== 'function') {
+      focusTravelerDestinationSearch();
+      return;
+    }
+
+    try {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const latitude = Number(position.coords.latitude);
+          const longitude = Number(position.coords.longitude);
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            focusTravelerDestinationSearch();
+            return;
+          }
+          const location = { lat: latitude, lng: longitude };
+          setUserLocation(location);
+          setSearchLocationFrom(location);
+          const pickupAddress = await resolveTravelerPickupAddress(location);
+          setSearch((prev) => ({ ...prev, from: pickupAddress }));
+          focusTravelerDestinationSearch();
+        },
+        (error) => {
+          logGeolocationIssue('Traveler instant search', error);
+          focusTravelerDestinationSearch();
+        },
+        { enableHighAccuracy: true, timeout: 6000 }
+      );
+    } catch (error) {
+      logGeolocationIssue('Traveler instant search', error);
+      focusTravelerDestinationSearch();
+    }
+  }, [focusTravelerDestinationSearch, profile.location, resolveTravelerPickupAddress, userLocation]);
 
   const persistTravelerLocation = (newLocation: { lat: number; lng: number }) => {
     const now = Date.now();
@@ -18200,7 +18264,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
           <MapFirstDashboardShell
             searchLabel="Where to?"
             searchSubtext=""
-            onSearchClick={() => setShowTravelerSearchFilter(true)}
+            onSearchClick={() => void openInstantTravelerSearch()}
             compactSearchBar
             compactBottomSheet
             primaryAction={(
@@ -18224,6 +18288,15 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                     <p className="mt-0.5 truncate text-sm font-black leading-none text-mairide-primary sm:text-base">{rides.length + partialRides.length}</p>
                   </div>
                 </button>
+                <div className="hidden min-w-0 items-center gap-2 rounded-2xl bg-orange-50 px-3 py-2 text-left sm:flex sm:rounded-full">
+                  <Users className="h-4 w-4 shrink-0 text-mairide-accent" />
+                  <div className="min-w-0">
+                    <p className="truncate text-[9px] font-bold uppercase tracking-[0.12em] text-mairide-accent">Nearby Drivers</p>
+                    <p className="mt-0.5 truncate text-xs font-black leading-none text-mairide-primary">
+                      {nearbyAvailableCabCount} active near you
+                    </p>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => document.getElementById('traveler-my-requests')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
@@ -18299,6 +18372,10 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                   <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-accent">Ride Search</p>
                   <h3 className="mt-2 text-2xl font-black tracking-tight text-mairide-primary">Where to?</h3>
                   <p className="mt-1 text-sm text-mairide-secondary">Filter open driver offers by route. This does not create a ride request.</p>
+                  <div className="mt-4 flex items-center gap-2 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-bold text-mairide-primary">
+                    <Users className="h-4 w-4 text-mairide-accent" />
+                    <span>{drivers.length} drivers active near this pickup zone.</span>
+                  </div>
                   <div className="mt-5 space-y-3">
                     <input
                       value={search.from}
@@ -18310,6 +18387,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                       className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
                     />
                     <input
+                      ref={travelerSearchDestinationInputRef}
                       value={search.to}
                       onChange={(event) => {
                         setSearch((prev) => ({ ...prev, to: event.target.value }));
