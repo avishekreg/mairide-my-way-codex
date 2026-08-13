@@ -9402,7 +9402,7 @@ const findUserProfileByPhone = async (value: string) => {
         alert("An account already exists with this email but using a different login method. Please use your original login method.");
       } else if (error.message === "NOT_REGISTERED") {
         setNotRegisteredError(true);
-      } else if (error.code !== 'auth/popup-closed-by-user') {
+      } else if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/redirect-in-progress') {
         alert(error.message || "Failed to login with Google.");
       }
     } finally {
@@ -25684,6 +25684,7 @@ const AdminDashboard = ({
   authFailure,
   uiLanguage,
   onChangeLanguage,
+  footer,
 }: {
   profile: UserProfile,
   isLoaded: boolean,
@@ -25691,6 +25692,7 @@ const AdminDashboard = ({
   authFailure?: boolean,
   uiLanguage: string,
   onChangeLanguage: (next: string) => void,
+  footer?: React.ReactNode,
 }) => {
   const effectiveAdminRole = profile.adminRole || 'super_admin';
   const { config: adminAppConfig } = useAppConfig();
@@ -26654,7 +26656,7 @@ const AdminDashboard = ({
   }
 
   return (
-    <div className="min-h-screen bg-mairide-bg flex overflow-hidden relative">
+    <div className="flex h-screen w-full overflow-hidden bg-mairide-bg">
       {/* Sidebar Overlay for Mobile */}
       <AnimatePresence>
         {isSidebarOpen && (
@@ -26670,7 +26672,7 @@ const AdminDashboard = ({
 
       {/* Sidebar */}
       <aside className={cn(
-        "bg-white border-r border-mairide-secondary flex flex-col transition-all duration-300 fixed lg:static inset-y-0 left-0 z-50",
+        "h-screen sticky top-0 bg-white border-r border-mairide-secondary flex flex-col justify-between transition-all duration-300 fixed lg:sticky inset-y-0 left-0 z-50",
         isSidebarOpen ? "w-72 translate-x-0" : "w-20 -translate-x-full lg:translate-x-0"
       )}>
         <div className="p-6 flex items-center justify-between border-b border-mairide-bg">
@@ -26819,7 +26821,7 @@ const AdminDashboard = ({
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+      <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
         {/* Mobile Header */}
         <header className="lg:hidden bg-white border-b border-mairide-secondary p-4 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center">
@@ -26841,8 +26843,8 @@ const AdminDashboard = ({
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 min-h-screen overflow-y-auto">
+          <div className="mx-auto max-w-7xl p-4 md:p-8 lg:p-12">
             <div className="mb-12 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h2 className="text-4xl font-black text-mairide-primary tracking-tighter capitalize mb-2">
@@ -27839,6 +27841,11 @@ const AdminDashboard = ({
             </div>
           </div>
           )}
+            {footer ? (
+              <div className="mt-12">
+                {footer}
+              </div>
+            ) : null}
           </div>
         </main>
       </div>
@@ -30514,9 +30521,9 @@ const App = () => {
               authFailure={authFailure}
               uiLanguage={uiLanguage}
               onChangeLanguage={commitUiLanguage}
+              footer={<AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />}
             />
           </div>
-          <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
           <AppDialogHost />
           {androidUpdatePrompt}
           {cookieConsentManager}

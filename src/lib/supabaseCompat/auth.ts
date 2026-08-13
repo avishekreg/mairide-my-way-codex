@@ -150,6 +150,15 @@ function isNativeGoogleRuntime() {
   return Capacitor.isNativePlatform() && (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios');
 }
 
+function getGoogleOAuthRedirectTo() {
+  if (typeof window === 'undefined') return 'https://rides.mairide.in';
+  const origin = String(window.location.origin || '').trim();
+  if (!origin || origin === 'null' || /^capacitor:/i.test(origin) || /^ionic:/i.test(origin)) {
+    return 'https://rides.mairide.in';
+  }
+  return origin;
+}
+
 async function ensureNativeGoogleSignInInitialized() {
   const clientId = ensureGoogleClientId();
   if (!isNativeGoogleRuntime() || nativeGoogleInitialized) return clientId;
@@ -478,7 +487,28 @@ export async function signInWithPopup(
   sessionStorage.setItem('mairide_oauth_started', 'google');
   const oauthMode = sessionStorage.getItem('mairide_oauth_mode') || '';
   const context = oauthMode === 'signup' ? 'signup' : 'signin';
-  const idToken = await requestGoogleIdToken(context);
+  let idToken = '';
+
+  try {
+    idToken = await requestGoogleIdToken(context);
+  } catch (error: any) {
+    if (isNativeGoogleRuntime() && error?.code !== 'auth/popup-closed-by-user') {
+      const { error: redirectError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: getGoogleOAuthRedirectTo(),
+        },
+      });
+
+      if (redirectError) throw mapAuthError(redirectError);
+
+      throw Object.assign(new Error('Redirecting to Google sign-in...'), {
+        code: 'auth/redirect-in-progress',
+      });
+    }
+
+    throw error;
+  }
 
   const { data, error } = await supabase.auth.signInWithIdToken({
     provider: 'google',
