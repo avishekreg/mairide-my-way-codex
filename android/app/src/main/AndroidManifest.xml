@@ -54,6 +54,17 @@
                     android:host="auth-callback" />
             </intent-filter>
 
+            <intent-filter android:label="mAIRide Web OAuth Callback">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="rides.mairide.in" />
+            </intent-filter>
+
         </activity>
 
         <provider

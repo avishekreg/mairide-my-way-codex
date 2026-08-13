@@ -209,7 +209,11 @@ async function signInWithNativeGoogleOAuth(authInstance: SupabaseAuthCompat) {
     }, 120000);
 
     const finish = async (callbackUrl: string) => {
-      if (settled || !callbackUrl.startsWith('mairide://auth-callback')) return;
+      if (
+        settled ||
+        (!callbackUrl.startsWith('mairide://auth-callback') &&
+          !callbackUrl.startsWith('https://rides.mairide.in'))
+      ) return;
       settled = true;
       window.clearTimeout(timeout);
       await listener?.remove().catch(() => undefined);
