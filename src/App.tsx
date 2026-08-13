@@ -9275,23 +9275,25 @@ const findUserProfileByPhone = async (value: string) => {
         beginInteractiveLogin();
         cancelBackgroundSessionBoot();
         try {
-          const { data } = await signInWithDirectSupabasePassword(loginEmail, password);
-          if (!data?.user) {
+          const loginResult = await signInWithDirectSupabasePassword(loginEmail, password);
+          const loginSession = (loginResult as any)?.session || (loginResult as any)?.data?.session || null;
+          const loginUser = (loginResult as any)?.user || (loginResult as any)?.data?.user || loginSession?.user || null;
+          if (!loginUser) {
             console.error('Login Error: Supabase returned no user');
             alert('Invalid credentials');
             return;
           }
 
-          const accessToken = String(data.session?.access_token || '');
+          const accessToken = String(loginSession?.access_token || '');
           const compatUser = {
-            uid: data.user.id,
-            email: data.user.email || loginEmail,
-            phoneNumber: (data.user as any).phone || null,
+            uid: loginUser.id,
+            email: loginUser.email || loginEmail,
+            phoneNumber: (loginUser as any).phone || null,
             displayName:
-              String(data.user.user_metadata?.full_name || data.user.user_metadata?.name || '').trim() || null,
-            photoURL: String(data.user.user_metadata?.avatar_url || '').trim() || null,
-            emailVerified: Boolean(data.user.email_confirmed_at),
-            isAnonymous: data.user.is_anonymous === true,
+              String(loginUser.user_metadata?.full_name || loginUser.user_metadata?.name || '').trim() || null,
+            photoURL: String(loginUser.user_metadata?.avatar_url || '').trim() || null,
+            emailVerified: Boolean(loginUser.email_confirmed_at),
+            isAnonymous: loginUser.is_anonymous === true,
             providerData: [],
             getIdToken: async () => {
               const sessionResult = await supabase.auth.getSession();
