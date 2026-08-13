@@ -9275,16 +9275,7 @@ const findUserProfileByPhone = async (value: string) => {
         beginInteractiveLogin();
         cancelBackgroundSessionBoot();
         try {
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email: loginEmail,
-            password,
-          });
-
-          if (error) {
-            console.error('Login Error:', error);
-            alert(error.message || 'Invalid credentials');
-            return;
-          }
+          const { data } = await signInWithDirectSupabasePassword(loginEmail, password);
           if (!data?.user) {
             console.error('Login Error: Supabase returned no user');
             alert('Invalid credentials');
