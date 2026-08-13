@@ -7128,12 +7128,12 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               ) : null}
             </div>
           ) : null}
-          <div className="flex flex-row items-center justify-center gap-4">
+          <div className="flex flex-row flex-wrap items-center justify-center gap-3 sm:gap-4">
             <a
               href={androidDownloadUrl || LIVE_ANDROID_APK_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-12 items-center rounded-xl bg-black px-5 text-sm font-bold tracking-wide text-white shadow-sm transition hover:opacity-90"
+              className="inline-flex h-11 min-w-[9.75rem] max-w-full items-center justify-center whitespace-nowrap rounded-xl bg-black px-4 text-center text-[13px] font-bold leading-none tracking-wide text-white shadow-sm transition hover:opacity-90 sm:h-12 sm:min-w-[10.5rem] sm:px-5 sm:text-sm"
             >
               Get it on Android
             </a>
@@ -7141,7 +7141,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               href="/downloads/ios.html"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-12 items-center rounded-xl bg-mairide-primary px-5 text-sm font-bold tracking-wide text-white transition hover:opacity-90"
+              className="inline-flex h-11 min-w-[8.75rem] max-w-full items-center justify-center whitespace-nowrap rounded-xl bg-mairide-primary px-4 text-center text-[13px] font-bold leading-none tracking-wide text-white transition hover:opacity-90 sm:h-12 sm:min-w-[9.5rem] sm:px-5 sm:text-sm"
             >
               Get it on iOS
             </a>
@@ -11852,6 +11852,7 @@ const MapFirstDashboardShell = ({
   topControlsOnly = false,
   showBottomSheet = true,
   compactSearchBar = false,
+  compactTopControls = false,
   compactBottomSheet = false,
   sheetContent,
 }: {
@@ -11866,6 +11867,7 @@ const MapFirstDashboardShell = ({
   topControlsOnly?: boolean;
   showBottomSheet?: boolean;
   compactSearchBar?: boolean;
+  compactTopControls?: boolean;
   compactBottomSheet?: boolean;
   sheetContent?: React.ReactNode;
 }) => (
@@ -11899,14 +11901,17 @@ const MapFirstDashboardShell = ({
         className={cn(
           "pointer-events-none absolute left-3 right-3 z-10 mx-auto w-auto max-w-full sm:left-4 sm:right-4",
           topControlsOnly
-            ? "top-16 z-20 max-w-xl"
+            ? compactTopControls ? "top-12 z-20 max-w-xl sm:top-14" : "top-16 z-20 max-w-xl"
             : compactSearchBar
               ? "top-16 max-w-3xl"
               : "top-4 max-w-3xl md:top-6"
         )}
       >
         {topControlsOnly ? (
-          <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center gap-2 rounded-full bg-white/92 px-2 py-2 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl sm:w-fit sm:max-w-full">
+          <div className={cn(
+            "pointer-events-auto mx-auto flex w-full max-w-md items-center justify-center rounded-full bg-white/92 shadow-2xl shadow-mairide-primary/10 backdrop-blur-xl sm:w-fit sm:max-w-full",
+            compactTopControls ? "gap-1.5 px-1.5 py-1.5 sm:gap-2 sm:px-2 sm:py-2" : "gap-2 px-2 py-2"
+          )}>
             {secondaryAction ? (
               <div className="min-w-0 flex-1 sm:flex-none">{secondaryAction}</div>
             ) : null}
@@ -21878,6 +21883,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             searchLabel="Where are you heading?"
             searchSubtext={isOnline ? "Post an empty-leg offer from your route" : "Go online to start accepting live demand"}
             compactSearchBar
+            compactTopControls
             showBottomSheet={false}
             onSearchClick={() => {
               if (!isOnline) {
@@ -21893,7 +21899,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 onClick={() => {
                   void toggleOnline();
                 }}
-                className="inline-flex min-w-0 flex-1 items-center gap-2 rounded-full px-3 py-2.5 text-left transition-colors hover:bg-mairide-bg sm:flex-none sm:gap-3 sm:px-4 sm:py-3"
+                className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-full px-2.5 py-2 text-left transition-colors hover:bg-mairide-bg sm:flex-none sm:gap-2 sm:px-3 sm:py-2.5"
               >
                 <span
                   className={cn(
@@ -21901,7 +21907,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                     isOnline ? "bg-green-600 animate-pulse" : "bg-mairide-secondary"
                   )}
                 />
-                <span className="truncate text-sm font-black tracking-tight text-mairide-primary sm:text-base">
+                <span className="truncate text-xs font-black tracking-tight text-mairide-primary sm:text-sm">
                   {isOnline ? 'Online' : 'Offline'}
                 </span>
               </button>
@@ -21918,7 +21924,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                   setShowOfferForm(true);
                 }}
                 className={cn(
-                  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2.5 text-xs font-bold shadow-lg transition-all sm:gap-2 sm:px-5 sm:py-3 sm:text-sm",
+                  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-xs font-bold shadow-lg transition-all sm:gap-2 sm:px-4 sm:py-2.5 sm:text-sm",
                   isOnline
                     ? "bg-mairide-accent text-white shadow-mairide-accent/20 hover:bg-mairide-primary"
                     : "cursor-not-allowed bg-mairide-secondary text-mairide-primary opacity-80 shadow-none"
@@ -21940,7 +21946,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                   disableDefaultUI: true,
                   clickableIcons: false,
                   scrollwheel: false,
-                  gestureHandling: 'greedy',
+                  gestureHandling: 'cooperative',
                   zoomControl: true,
                   styles: [
                     { featureType: "poi", elementType: "all", stylers: [{ visibility: "off" }] },
