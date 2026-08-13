@@ -18,11 +18,10 @@ jobs:
       # Opt in now so JS-based actions run on Node 24 and avoid Node 20 deprecation warnings.
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       VITE_SUPABASE_URL: https://jcgoccsdlrjnratpaeje.supabase.co
-      VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ29jY3NkbHJqbnJhdHBhZWplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTkwMTQsImV4cCI6MjA5MDUzNTAxNH0.iPIawKCThu7lYMoGrWAyRDVvQPf5YICP7Ap_XOwAOrw
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       VITE_SUPABASE_STORAGE_BUCKET: mairide-assets
       VITE_APP_VERSION: V3.5.0
-      # Same browser Maps key already present in the live web JS bundle.
-      VITE_GOOGLE_MAPS_API_KEY: AIzaSyAiKP5wiiv4geYcO-cymatIPS29LS6P4mI
+      VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
       PROD_SUPABASE_REF: jcgoccsdlrjnratpaeje
       STAGING_SUPABASE_REF: jcgoccsdlrjnratpaeje
       MAIRIDE_UPLOAD_STORE_FILE: mairide-release.keystore
@@ -326,10 +325,12 @@ jobs:
 
       - name: Verify production Supabase source lock
         run: |
-          # Hard fail if staging reference appears in runtime source.
-          if grep -R "$STAGING_SUPABASE_REF" src api >/dev/null 2>&1; then
-            echo "Staging Supabase reference found in source."
-            exit 1
+          # Hard fail if a distinct staging reference appears in runtime source.
+          if [ -n "$STAGING_SUPABASE_REF" ] && [ "$STAGING_SUPABASE_REF" != "$PROD_SUPABASE_REF" ]; then
+            if grep -R "$STAGING_SUPABASE_REF" src api >/dev/null 2>&1; then
+              echo "Staging Supabase reference found in source."
+              exit 1
+            fi
           fi
 
           # Hard fail if production reference is missing from both lock files.

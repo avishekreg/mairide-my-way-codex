@@ -4,7 +4,7 @@
  */
 
 const SUPABASE_AUTH_STORAGE_KEY = 'sb-jcgoccsdlrjnratpaeje-auth-token';
-const RETIRED_SUPABASE_PROJECT_REFS = ['qnmetkbiuxwzmlwpxpuz', 'qnmetkbiuxwzmlwpzpuz'];
+const CURRENT_SUPABASE_PROJECT_REF = 'jcgoccsdlrjnratpaeje';
 
 const SESSION_HINT_KEYS = [
   SUPABASE_AUTH_STORAGE_KEY,
@@ -88,7 +88,8 @@ export const purgeRetiredSupabaseState = () => {
   let purged = false;
   const shouldPurgeKeyOrValue = (key: string | null, value: string | null) => {
     const haystack = `${key || ''} ${value || ''}`.toLowerCase();
-    return RETIRED_SUPABASE_PROJECT_REFS.some((ref) => haystack.includes(ref));
+    if (!haystack.includes('supabase')) return false;
+    return haystack.includes('.supabase.co') && !haystack.includes(CURRENT_SUPABASE_PROJECT_REF);
   };
 
   const purgeFromStorage = (storage: Storage | null | undefined) => {
