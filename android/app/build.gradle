@@ -1,5 +1,11 @@
 apply plugin: 'com.android.application'
 
+def mairideReleaseStoreFile = project.findProperty("MAIRIDE_RELEASE_STORE_FILE") ?: System.getenv("MAIRIDE_RELEASE_STORE_FILE")
+def mairideReleaseStorePassword = project.findProperty("MAIRIDE_RELEASE_STORE_PASSWORD") ?: System.getenv("MAIRIDE_RELEASE_STORE_PASSWORD")
+def mairideReleaseKeyAlias = project.findProperty("MAIRIDE_RELEASE_KEY_ALIAS") ?: System.getenv("MAIRIDE_RELEASE_KEY_ALIAS")
+def mairideReleaseKeyPassword = project.findProperty("MAIRIDE_RELEASE_KEY_PASSWORD") ?: System.getenv("MAIRIDE_RELEASE_KEY_PASSWORD")
+def hasMairideReleaseSigning = mairideReleaseStoreFile && mairideReleaseStorePassword && mairideReleaseKeyAlias && mairideReleaseKeyPassword
+
 android {
     namespace = "in.mairide.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -13,7 +19,17 @@ android {
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
-            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:*.map'
+        }
+    }
+    signingConfigs {
+        release {
+            if (hasMairideReleaseSigning) {
+                storeFile file(mairideReleaseStoreFile)
+                storePassword mairideReleaseStorePassword
+                keyAlias mairideReleaseKeyAlias
+                keyPassword mairideReleaseKeyPassword
+            }
         }
     }
     buildTypes {
@@ -22,7 +38,18 @@ android {
             shrinkResources true
             zipAlignEnabled true
             debuggable false
+            if (hasMairideReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    splits {
+        abi {
+            enable true
+            reset()
+            include "arm64-v8a", "armeabi-v7a"
+            universalApk false
         }
     }
     bundle {
