@@ -24,7 +24,7 @@ jobs:
       # Same browser Maps key already present in the live web JS bundle.
       VITE_GOOGLE_MAPS_API_KEY: AIzaSyAiKP5wiiv4geYcO-cymatIPS29LS6P4mI
       PROD_SUPABASE_REF: jcgoccsdlrjnratpaeje
-      STAGING_SUPABASE_REF: qnmetkbiuxwzmlwpxpuz
+      STAGING_SUPABASE_REF: jcgoccsdlrjnratpaeje
       MAIRIDE_UPLOAD_STORE_FILE: mairide-release.keystore
 
     steps:

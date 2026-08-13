@@ -3384,6 +3384,19 @@ function getSafeProfileSyncErrorMessage(error: unknown) {
   return 'Profile sync failed. Please try again.';
 }
 
+const hasOAuthSessionMarkers = () => {
+  if (typeof window === 'undefined') return false;
+  const searchParams = new URLSearchParams(window.location.search || '');
+  const hashParams = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
+  return ['code', 'access_token', 'refresh_token'].some((key) => searchParams.has(key) || hashParams.has(key));
+};
+
+const isNonCriticalFetchError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const normalized = message.toLowerCase();
+  return normalized.includes('failed to fetch') || normalized.includes('network') || normalized.includes('name_not_resolved');
+};
+
 async function testConnection() {
   if (!isLocalDevFirestoreMode()) return;
   try {
@@ -28930,7 +28943,11 @@ const useAppConfigSource = (): AppConfigState => {
     } catch (nextError) {
       const normalizedError = nextError instanceof Error ? nextError : new Error(String(nextError));
       setError(normalizedError);
-      reportFirestoreError(nextError, OperationType.GET, 'app_config/global');
+      if (isNonCriticalFetchError(nextError)) {
+        console.warn('App config fetch skipped:', normalizedError.message);
+      } else {
+        reportFirestoreError(nextError, OperationType.GET, 'app_config/global');
+      }
     } finally {
       setLoading(false);
     }
@@ -29595,6 +29612,14 @@ const App = () => {
         } catch (error) {
           reportFirestoreError(error, OperationType.GET, `users/${profileDocId}`);
           if (!active || generation !== authResolveGenerationRef.current) return;
+          if (hasOAuthSessionMarkers() && isNonCriticalFetchError(error)) {
+            recordInternalDebugEvent('oauth_profile_hydration_deferred', {
+              authUid: u.uid,
+              profileDocId,
+            });
+            finishAuthLoading(generation);
+            return;
+          }
           const matchedPartner = !u.isAnonymous ? await resolvePartnerProfile(u.uid) : null;
           if (!active || generation !== authResolveGenerationRef.current) return;
           if (matchedPartner) {

@@ -4,7 +4,7 @@
  */
 
 const SUPABASE_AUTH_STORAGE_KEY = 'sb-jcgoccsdlrjnratpaeje-auth-token';
-const RETIRED_SUPABASE_PROJECT_REFS = ['qnmetkbiuxwzmlwpxpuz'];
+const RETIRED_SUPABASE_PROJECT_REFS = ['qnmetkbiuxwzmlwpxpuz', 'qnmetkbiuxwzmlwpzpuz'];
 
 const SESSION_HINT_KEYS = [
   SUPABASE_AUTH_STORAGE_KEY,
