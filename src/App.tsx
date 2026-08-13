@@ -200,7 +200,6 @@ type BeforeInstallPromptEvent = Event & {
 const deg2rad = (deg: number) => deg * (Math.PI / 180);
 
 const WEB_API_ORIGIN_FALLBACK = 'https://rides.mairide.in';
-const WEB_API_ORIGIN_FAILOVER = 'https://mairide-my-way-codex.vercel.app';
 const UI_LANGUAGE_PROMPT_APP_SEEN_KEY = 'mairide_ui_language_prompt_seen_app';
 
 const isAppWebViewRuntime = () => {
@@ -315,7 +314,7 @@ const isMobileAppRuntime = () => isAndroidWebViewLikeRuntime() || isIosAppRuntim
 
 const buildOriginCandidates = (path?: string) => {
   if (typeof window === 'undefined') {
-    return [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
+    return [WEB_API_ORIGIN_FALLBACK];
   }
   const primary = resolveApiBaseUrl();
   const currentOrigin = String(window.location.origin || '');
@@ -324,13 +323,13 @@ const buildOriginCandidates = (path?: string) => {
 
   if (isAndroidWebViewLikeRuntime() && isAuthPath) {
     // Android WebView auth is sensitive to host-level HTML fallbacks/challenges.
-    // Prefer the canonical public domain, then fall back to the Vercel deployment.
-    return Array.from(new Set([WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER].filter(Boolean)));
+    // Prefer only the canonical public domain; stale preview origins must not enter auth.
+    return Array.from(new Set([WEB_API_ORIGIN_FALLBACK].filter(Boolean)));
   }
 
   const appPreferred = isAndroidWebViewLikeRuntime()
-    ? [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER, currentOrigin, primary]
-    : [currentOrigin, primary, WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
+    ? [WEB_API_ORIGIN_FALLBACK, currentOrigin, primary]
+    : [currentOrigin, primary, WEB_API_ORIGIN_FALLBACK];
   return Array.from(
     new Set(appPreferred.filter(Boolean))
   );
@@ -445,7 +444,7 @@ const fetchWithOriginFailover = async (path: string, requestInit: RequestInit) =
 };
 
 const forceDirectAuthFetch = async (path: string, requestInit: RequestInit) => {
-  const directOrigins = [WEB_API_ORIGIN_FALLBACK, WEB_API_ORIGIN_FAILOVER];
+  const directOrigins = [WEB_API_ORIGIN_FALLBACK];
   let lastError: any = null;
   for (const origin of directOrigins) {
     const url = `${origin}${path}`;
@@ -6949,39 +6948,14 @@ const submitSupportFeedback = async (payload: { ticketId: string; rating: number
 
 const LoadingScreen = ({
   releaseVersion: releaseVersionProp,
-  showRecovery = false,
-  onSignOut,
+  showRecovery: _showRecovery = false,
+  onSignOut: _onSignOut,
 }: {
   releaseVersion?: string;
   showRecovery?: boolean;
   onSignOut?: () => void;
 }) => {
   const releaseVersion = String(releaseVersionProp || '').trim() || APP_VERSION;
-  const [recoveryVisible, setRecoveryVisible] = useState(Boolean(showRecovery));
-
-  useEffect(() => {
-    if (!showRecovery) {
-      setRecoveryVisible(false);
-      return;
-    }
-    // Show recovery actions after a short wait — never auto-purge (that races login submit).
-    const timer = window.setTimeout(() => {
-      if (!isInteractiveLoginActive()) setRecoveryVisible(true);
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [showRecovery]);
-
-  const handleRetry = () => {
-    // Re-initiate auth check with a clean transport path.
-    retrySessionRestore();
-  };
-
-  const handleBackToLogin = () => {
-    purgeLocalAuthSession();
-    void Promise.resolve(onSignOut?.()).finally(() => {
-      hardResetToLogin();
-    });
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#1F2D38] px-6 text-white">
@@ -6997,24 +6971,6 @@ const LoadingScreen = ({
       </motion.div>
       <p className="mt-2 text-sm font-semibold text-white/70">Starting your session…</p>
       <p className="mt-1 text-[11px] font-bold uppercase tracking-widest text-white/40">{releaseVersion}</p>
-      {recoveryVisible ? (
-        <div className="mt-8 flex w-full max-w-sm flex-col gap-3">
-          <button
-            type="button"
-            onClick={handleRetry}
-            className="rounded-2xl bg-[#E97A2E] px-5 py-3 text-sm font-black text-white"
-          >
-            Retry
-          </button>
-          <button
-            type="button"
-            onClick={handleBackToLogin}
-            className="rounded-2xl border border-white/25 px-5 py-3 text-sm font-bold text-white"
-          >
-            Back to login
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 };
@@ -11791,6 +11747,77 @@ const ResponsiveDashboardGoogleMap = ({
     >
       {children}
     </GoogleMap>
+  );
+};
+
+const getGoogleMapsDiagnostic = ({
+  isLoaded,
+  loadError,
+  authFailure,
+}: {
+  isLoaded: boolean;
+  loadError?: Error | null;
+  authFailure: boolean;
+}) => {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return 'Missing VITE_GOOGLE_MAPS_API_KEY in the active environment.';
+  }
+  if (authFailure) {
+    return 'Google Maps authentication failed. Check referrer restrictions, enabled Maps JavaScript API, and billing.';
+  }
+  const message = String(loadError?.message || '');
+  if (/RefererNotAllowedMapError/i.test(message)) {
+    return 'Referrer mismatch. Add this localhost origin and rides.mairide.in to Google Cloud HTTP referrer restrictions.';
+  }
+  if (/InvalidKeyMapError/i.test(message)) {
+    return 'Invalid Google Maps API key. Verify VITE_GOOGLE_MAPS_API_KEY is from the correct Google Cloud project.';
+  }
+  if (/ApiNotActivatedMapError/i.test(message)) {
+    return 'Maps JavaScript API is not enabled for this Google Cloud project.';
+  }
+  if (/BillingNotEnabledMapError/i.test(message)) {
+    return 'Billing is not enabled for this Google Cloud project.';
+  }
+  if (message) {
+    return message;
+  }
+  if (!isLoaded) {
+    return 'Google Maps JavaScript API is still loading.';
+  }
+  if (typeof window !== 'undefined' && !window.google) {
+    return 'Google Maps loaded flag resolved, but window.google is not available yet.';
+  }
+  return 'Google Maps is not ready yet.';
+};
+
+const DashboardGoogleMapUnavailable = ({
+  isLoaded,
+  loadError,
+  authFailure,
+}: {
+  isLoaded: boolean;
+  loadError?: Error | null;
+  authFailure: boolean;
+}) => {
+  const showDevDiagnostics = isLocalhostRuntime();
+  const diagnostic = showDevDiagnostics
+    ? getGoogleMapsDiagnostic({ isLoaded, loadError, authFailure })
+    : '';
+  return (
+    <div
+      className="absolute inset-0 h-full w-full bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]"
+      aria-label="Google map loading"
+    >
+      {showDevDiagnostics ? (
+        <div className="absolute left-4 top-24 z-10 max-w-sm rounded-2xl border border-red-200 bg-white/95 p-4 text-left shadow-xl backdrop-blur-md">
+          <p className="text-[11px] font-black uppercase tracking-[0.22em] text-red-600">Google Maps Dev Diagnostic</p>
+          <p className="mt-2 text-sm font-bold text-mairide-primary">{diagnostic}</p>
+          <p className="mt-2 text-xs font-semibold text-mairide-secondary">
+            Key prefix: {GOOGLE_MAPS_API_KEY ? `${GOOGLE_MAPS_API_KEY.slice(0, 8)}...` : 'missing'}
+          </p>
+        </div>
+      ) : null}
+    </div>
   );
 };
 
@@ -18225,7 +18252,7 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                 )}
               </ResponsiveDashboardGoogleMap>
             ) : (
-              <div className="absolute inset-0 h-full w-full bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
+              <DashboardGoogleMapUnavailable isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} />
             )}
           </MapFirstDashboardShell>
 
@@ -21922,7 +21949,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 ))}
               </ResponsiveDashboardGoogleMap>
             ) : (
-              <div className="absolute inset-0 h-full w-full bg-[radial-gradient(circle_at_52%_34%,rgba(242,116,38,0.12),transparent_30%),linear-gradient(135deg,#eef3f5_0%,#dbe4e8_100%)]" aria-label="Map loading" />
+              <DashboardGoogleMapUnavailable isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} />
             )}
           </MapFirstDashboardShell>
 
