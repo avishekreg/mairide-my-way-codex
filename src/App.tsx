@@ -230,6 +230,13 @@ const isLocalDevFirestoreMode = () => {
   return (hostname === 'localhost' || hostname === '127.0.0.1') && port.length > 0;
 };
 
+const isLocalhostRuntime = () => {
+  if (typeof window === 'undefined') return false;
+  const hostname = String(window.location.hostname || '').toLowerCase();
+  const protocol = String(window.location.protocol || '').toLowerCase();
+  return (hostname === 'localhost' || hostname === '127.0.0.1') && protocol !== 'capacitor:' && protocol !== 'ionic:';
+};
+
 const resolveApiBaseUrl = () => {
   if (typeof window === 'undefined') return '';
   const protocol = String(window.location.protocol || '').toLowerCase();
