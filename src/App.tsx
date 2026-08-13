@@ -7099,8 +7099,10 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
         setIsAndroidUpdateAvailable(false);
         setAndroidUpdateMessage('Your Android app is up to date.');
       }
-    } catch {
-      setAndroidUpdateMessage('Could not check update right now. Please try again.');
+    } catch (error) {
+      console.warn('Android update check skipped:', error);
+      setIsAndroidUpdateAvailable(false);
+      setAndroidUpdateMessage('');
     } finally {
       setIsCheckingAndroidUpdate(false);
     }

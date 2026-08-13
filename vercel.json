@@ -15,13 +15,7 @@
       "maxDuration": 25
     }
   },
-  "redirects": [
-    {
-      "source": "/downloads/mairide-android.apk",
-      "destination": "https://downloads.mairide.in/mairide-android.apk",
-      "permanent": false
-    }
-  ],
+  "redirects": [],
   "headers": [
     {
       "source": "/sw.js",
@@ -38,6 +32,15 @@
         {
           "key": "Cache-Control",
           "value": "no-cache, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/downloads/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
         }
       ]
     },
@@ -330,7 +333,7 @@
       "destination": "/api/health?action=:action"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/((?!api/|downloads/).*)",
       "has": [
         {
           "type": "host",
