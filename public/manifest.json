@@ -1,7 +1,7 @@
 {
-  "name": "mAIRide",
-  "short_name": "mAIRide",
-  "description": "Empty-leg ride aggregation platform for travelers and drivers.",
+  "name": "MaiRide",
+  "short_name": "MaiRide",
+  "description": "MaiRide is a smart ride-hailing platform for travelers and drivers.",
   "start_url": "https://rides.mairide.in/",
   "scope": "https://rides.mairide.in/",
   "display": "standalone",
@@ -20,6 +20,5 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ],
-  "csp_connect_src": "'self' https://*.mairide.in https://*.supabase.co https://*.tile.openstreetmap.org https://*.mapbox.com https://*.googleapis.com https://*.gstatic.com"
+  ]
 }

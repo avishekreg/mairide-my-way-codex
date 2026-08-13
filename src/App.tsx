@@ -54,7 +54,7 @@ import {
   getDownloadURL 
 } from 'firebase/storage';
 import { auth, db, storage } from './lib/firebase';
-import { supabase } from './lib/supabase';
+import { supabase, supabaseAnonKey, supabaseUrl } from './lib/supabase';
 import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest, B2BPartner, BookingCommunicationMessage, RouteAlertReport } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
 import { b2bPartnerService } from './services/b2bPartnerService';
@@ -6417,9 +6417,6 @@ const parseApiResponse = async (response: Response, fallback: string) => {
 };
 
 const signInWithDirectSupabasePassword = async (email: string, password: string) => {
-  const supabaseUrl = 'https://jcgoccsdlrjnratpaeje.supabase.co';
-  const supabaseAnonKey =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ29jY3NkbHJqbnJhdHBhZWplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTkwMTQsImV4cCI6MjA5MDUzNTAxNH0.iPIawKCThu7lYMoGrWAyRDVvQPf5YICP7Ap_XOwAOrw';
   const tokenUrl = `${supabaseUrl}/auth/v1/token?grant_type=password`;
   const authHeaders = {
     'Content-Type': 'application/json',

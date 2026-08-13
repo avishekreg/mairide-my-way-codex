@@ -1,7 +1,7 @@
 {
-  "name": "mAIRide",
-  "short_name": "mAIRide",
-  "description": "Empty-leg ride aggregation platform for travelers and drivers.",
+  "name": "MaiRide",
+  "short_name": "MaiRide",
+  "description": "MaiRide is a smart ride-hailing platform for travelers and drivers.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F4F7F8",
