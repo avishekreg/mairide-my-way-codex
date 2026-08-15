@@ -7079,18 +7079,12 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
     setIsCheckingAndroidUpdate(true);
     try {
       const response = await fetch(apiPath(`/downloads/android-update.json?t=${Date.now()}`), { cache: 'no-store' });
-      if (!response.ok) {
-        setAndroidUpdateMessage('Could not check update right now. Please try again.');
-        return;
-      }
+      if (!response.ok) return;
       const data = await response.json();
       const latestVersion = String(data?.appVersion || '').trim();
       const nextApkUrl = String(data?.apkUrl || LIVE_ANDROID_APK_URL).trim() || LIVE_ANDROID_APK_URL;
       setAndroidDownloadUrl(nextApkUrl);
-      if (!latestVersion) {
-        setAndroidUpdateMessage('Update metadata unavailable. Please try again.');
-        return;
-      }
+      if (!latestVersion) return;
       const hasUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(installedAndroidVersion);
       if (hasUpdate) {
         setIsAndroidUpdateAvailable(true);
@@ -7100,7 +7094,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
         setAndroidUpdateMessage('Your Android app is up to date.');
       }
     } catch (error) {
-      console.warn('Android update check skipped:', error);
+      console.warn('Update check bypassed:', error);
       setIsAndroidUpdateAvailable(false);
       setAndroidUpdateMessage('');
     } finally {
@@ -29809,6 +29803,15 @@ const App = () => {
           : message instanceof Error
             ? message.message
             : JSON.stringify(message);
+      if (
+        normalizedMessage === 'Failed to fetch' ||
+        normalizedMessage.includes('Unable to connect to login server') ||
+        normalizedMessage.includes('Could not check update') ||
+        normalizedMessage.includes('Update metadata unavailable')
+      ) {
+        console.warn('Update check bypassed:', normalizedMessage);
+        return;
+      }
       showAppDialog(normalizedMessage);
     }) as typeof window.alert;
 
@@ -30130,8 +30133,8 @@ const App = () => {
         } else {
           setShowAndroidUpdatePrompt(false);
         }
-      } catch {
-        // Keep runtime stable if update check fails.
+      } catch (error) {
+        console.warn('Update check bypassed:', error);
       }
     };
 

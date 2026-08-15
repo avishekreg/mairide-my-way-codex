@@ -87,6 +87,7 @@ const GIS_SCRIPT_ID = 'mairide-google-gsi-client';
 const GOOGLE_CLIENT_ID =
   import.meta.env.VITE_GOOGLE_CLIENT_ID ||
   '506109288880-4ad9lteqdrc8bcf8pkgv4a7vrkfv6pu4.apps.googleusercontent.com';
+const GOOGLE_OAUTH_REDIRECT_TO = 'https://jcgoccsdlrjnratpaeje.supabase.co/auth/v1/callback';
 let nativeGoogleInitialized = false;
 
 function normalizeUser(user: any, accessToken?: string | null): User {
@@ -153,13 +154,7 @@ function isNativeGoogleRuntime() {
 }
 
 function getGoogleOAuthRedirectTo() {
-  if (isNativeGoogleRuntime()) return 'mairide://auth-callback';
-  if (typeof window === 'undefined') return 'https://rides.mairide.in';
-  const origin = String(window.location.origin || '').trim();
-  if (!origin || origin === 'null' || /^capacitor:/i.test(origin) || /^ionic:/i.test(origin)) {
-    return 'https://rides.mairide.in';
-  }
-  return origin;
+  return GOOGLE_OAUTH_REDIRECT_TO;
 }
 
 async function resolveNativeGoogleOAuthCallback(callbackUrl: string) {
