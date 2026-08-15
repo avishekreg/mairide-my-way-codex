@@ -431,10 +431,8 @@
         <div class="mt-6 flex flex-wrap items-center gap-4">
           <a
             id="android-app-download"
-            href="https://rides.mairide.in/downloads/mairide-android-366.apk"
-            download
-            target="_blank"
-            rel="noopener noreferrer"
+            href="/downloads/mairide-android-366.apk"
+            download="mairide-android-366.apk"
             class="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
             aria-label="Download MaiRide for Android"
           >
@@ -1706,7 +1704,7 @@
     document.getElementById('cookiePreferencesButton').addEventListener('click', () => showCookiePrompt(true));
 
     (function syncAndroidDownloadLinks() {
-      var DEFAULT_APK = 'https://rides.mairide.in/downloads/mairide-android-366.apk';
+      var DEFAULT_APK = '/downloads/mairide-android-366.apk';
       var appLink = document.getElementById('android-app-download');
       var qrLink = document.getElementById('android-qr-link');
       var qrImage = document.getElementById('android-qr-image');

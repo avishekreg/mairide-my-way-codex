@@ -3484,7 +3484,7 @@ const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
 const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
 const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
-const PUBLIC_ANDROID_DOWNLOAD_PATH = 'https://rides.mairide.in/downloads/mairide-android-366.apk';
+const PUBLIC_ANDROID_DOWNLOAD_PATH = '/downloads/mairide-android-366.apk';
 const buildAndroidQrUrl = (apkUrl: string) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(apkUrl)}`;
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
@@ -7138,9 +7138,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
           <div className="flex flex-row flex-wrap items-center justify-center gap-3 sm:gap-4">
             <a
               href={PUBLIC_ANDROID_DOWNLOAD_PATH}
-              download
-              target="_blank"
-              rel="noopener noreferrer"
+              download="mairide-android-366.apk"
               className="inline-flex h-11 min-w-[9.75rem] max-w-full items-center justify-center whitespace-nowrap rounded-xl bg-black px-4 text-center text-[13px] font-bold leading-none tracking-wide text-white shadow-sm transition hover:opacity-90 sm:h-12 sm:min-w-[10.5rem] sm:px-5 sm:text-sm"
             >
               Get it on Android
@@ -7155,9 +7153,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
             </a>
             <a
               href={PUBLIC_ANDROID_DOWNLOAD_PATH}
-              download
-              target="_blank"
-              rel="noopener noreferrer"
+              download="mairide-android-366.apk"
               className="inline-flex w-32 flex-col items-center justify-center rounded-2xl border border-mairide-secondary bg-white/90 p-2 shadow-sm transition hover:bg-white"
               aria-label="Scan QR code to download the mAIRide Android app"
             >
