@@ -23,7 +23,7 @@
     <section class="card">
       <h1>Get MaiRide on Android</h1>
       <p>Tap Download APK to start the installer immediately.</p>
-      <a id="apk-download" class="btn btn-secondary" href="/downloads/mairide-android-366.apk" download target="_blank" rel="noopener noreferrer">
+      <a id="apk-download" class="btn btn-secondary" href="https://rides.mairide.in/downloads/mairide-android-366.apk" download target="_blank" rel="noopener noreferrer">
         Download APK
       </a>
       <a id="apk-chrome" class="btn btn-primary" style="margin-left:10px" href="https://rides.mairide.in/downloads/mairide-android-366.apk" target="_blank" rel="noopener noreferrer">
@@ -50,7 +50,7 @@
 
       function applyApkUrl(url, info) {
         if (!url) return;
-        if (apkDownload) apkDownload.setAttribute('href', '/downloads/mairide-android-366.apk');
+        if (apkDownload) apkDownload.setAttribute('href', url);
         if (apkChrome) apkChrome.setAttribute('href', url);
         if (meta) meta.textContent = info || ('Latest installer: ' + url);
       }

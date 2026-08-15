@@ -3484,7 +3484,7 @@ const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
 const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
 const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
-const PUBLIC_ANDROID_DOWNLOAD_PATH = '/downloads/mairide-android-366.apk';
+const PUBLIC_ANDROID_DOWNLOAD_PATH = 'https://rides.mairide.in/downloads/mairide-android-366.apk';
 const buildAndroidQrUrl = (apkUrl: string) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(apkUrl)}`;
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
@@ -9937,7 +9937,6 @@ const findUserProfileByPhone = async (value: string) => {
               <button
                 type="button"
                 onClick={handleLogin}
-                disabled={isLoading}
                 className="w-full bg-mairide-accent hover:bg-mairide-primary text-white py-4 rounded-2xl font-bold transition-all disabled:opacity-50"
               >
                 {isLoading ? "Processing..." : (/^\+?[\d\s-]{10,}$/.test(username) ? "Send Login OTP" : "Login")}
