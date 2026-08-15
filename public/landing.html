@@ -431,7 +431,10 @@
         <div class="mt-6 flex flex-wrap items-center gap-4">
           <a
             id="android-app-download"
-            href="https://rides.mairide.in/downloads/mairide-android-366.apk?v=366"
+            href="/downloads/mairide-android-366.apk"
+            download
+            target="_blank"
+            rel="noopener noreferrer"
             class="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
             aria-label="Download MaiRide for Android"
           >
@@ -1703,7 +1706,7 @@
     document.getElementById('cookiePreferencesButton').addEventListener('click', () => showCookiePrompt(true));
 
     (function syncAndroidDownloadLinks() {
-      var DEFAULT_APK = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
+      var DEFAULT_APK = '/downloads/mairide-android-366.apk';
       var appLink = document.getElementById('android-app-download');
       var qrLink = document.getElementById('android-qr-link');
       var qrImage = document.getElementById('android-qr-image');
@@ -1711,7 +1714,6 @@
 
       function applyApkUrl(url, versionLabel) {
         if (!url) return;
-        if (appLink) appLink.setAttribute('href', url);
         if (qrLink) qrLink.setAttribute('href', url);
         if (qrImage) {
           qrImage.setAttribute(
@@ -1726,15 +1728,8 @@
         }
       }
 
-      applyApkUrl(DEFAULT_APK, 'build.340');
-      fetch('./downloads/android-update.json?t=' + Date.now(), { cache: 'no-store' })
-        .then(function (response) { return response.ok ? response.json() : null; })
-        .then(function (data) {
-          var nextUrl = data && data.apkUrl ? String(data.apkUrl).trim() : '';
-          var version = data && data.appVersion ? String(data.appVersion).trim() : '';
-          if (nextUrl) applyApkUrl(nextUrl, version);
-        })
-        .catch(function () {});
+      if (appLink) appLink.setAttribute('href', DEFAULT_APK);
+      applyApkUrl('https://rides.mairide.in/downloads/mairide-android-366.apk', 'build 366');
     })();
     document.getElementById('cookieRejectButton').addEventListener('click', () => {
       applyConsent({ preferences: false, analytics: false, marketing: false });

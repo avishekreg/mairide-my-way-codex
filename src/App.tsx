@@ -3484,6 +3484,7 @@ const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
 const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
 const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
+const PUBLIC_ANDROID_DOWNLOAD_PATH = '/downloads/mairide-android-366.apk';
 const buildAndroidQrUrl = (apkUrl: string) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(apkUrl)}`;
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
@@ -7136,7 +7137,8 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
           ) : null}
           <div className="flex flex-row flex-wrap items-center justify-center gap-3 sm:gap-4">
             <a
-              href={androidDownloadUrl || LIVE_ANDROID_APK_URL}
+              href={PUBLIC_ANDROID_DOWNLOAD_PATH}
+              download
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex h-11 min-w-[9.75rem] max-w-full items-center justify-center whitespace-nowrap rounded-xl bg-black px-4 text-center text-[13px] font-bold leading-none tracking-wide text-white shadow-sm transition hover:opacity-90 sm:h-12 sm:min-w-[10.5rem] sm:px-5 sm:text-sm"
@@ -7152,7 +7154,8 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               Get it on iOS
             </a>
             <a
-              href={androidDownloadUrl || PUBLIC_ANDROID_DOWNLOAD_URL}
+              href={PUBLIC_ANDROID_DOWNLOAD_PATH}
+              download
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex w-32 flex-col items-center justify-center rounded-2xl border border-mairide-secondary bg-white/90 p-2 shadow-sm transition hover:bg-white"
@@ -9262,6 +9265,7 @@ const findUserProfileByPhone = async (value: string) => {
   };
 
   const handleLogin = async () => {
+    setIsLoading(false);
     const normalizedUsername = username.trim();
     const isPhone = /^\+?[\d\s-]{10,}$/.test(normalizedUsername);
     const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedUsername);
@@ -9931,6 +9935,7 @@ const findUserProfileByPhone = async (value: string) => {
                 </button>
               )}
               <button
+                type="button"
                 onClick={handleLogin}
                 disabled={isLoading}
                 className="w-full bg-mairide-accent hover:bg-mairide-primary text-white py-4 rounded-2xl font-bold transition-all disabled:opacity-50"
@@ -9947,6 +9952,7 @@ const findUserProfileByPhone = async (value: string) => {
           </div>
 
           <button
+            type="button"
             onClick={handleGoogleLogin}
             disabled={isLoading}
             className="w-full bg-white border border-mairide-secondary hover:bg-mairide-bg text-mairide-primary py-4 rounded-2xl font-bold flex items-center justify-center space-x-3 transition-all disabled:opacity-50"
