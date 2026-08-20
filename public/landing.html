@@ -431,8 +431,8 @@
         <div class="mt-6 flex flex-wrap items-center gap-4">
           <a
             id="android-app-download"
-            href="/downloads/mairide-android-366.apk"
-            download="mairide-android-366.apk"
+            href="/downloads/mairide-android.apk"
+            download="mairide-android.apk"
             class="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
             aria-label="Download MaiRide for Android"
           >
@@ -457,18 +457,19 @@
         <div class="inline-flex flex-wrap items-center justify-center gap-4">
           <a
             id="android-qr-link"
-            href="https://rides.mairide.in/downloads/mairide-android-366.apk?v=366"
+            href="https://rides.mairide.in/downloads/mairide-android.apk"
             aria-label="Scan QR code to download the MaiRide Android app"
             class="rounded-3xl bg-white p-3 shadow-sm"
           >
             <img
               id="android-qr-image"
-              src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&amp;margin=12&amp;format=svg&amp;data=https%3A%2F%2Frides.mairide.in%2Fdownloads%2Fmairide-android-366.apk%3Fv%3D366"
+              src="/assets/mairide-android-download-qr.png"
               alt="QR code to download the MaiRide Android app"
               class="h-28 w-28"
               width="112"
               height="112"
               loading="lazy"
+              style="image-rendering:pixelated"
             />
           </a>
           <div class="max-w-[170px] text-left">
@@ -1704,21 +1705,15 @@
     document.getElementById('cookiePreferencesButton').addEventListener('click', () => showCookiePrompt(true));
 
     (function syncAndroidDownloadLinks() {
-      var DEFAULT_APK = '/downloads/mairide-android-366.apk';
+      var DEFAULT_APK = '/downloads/mairide-android.apk';
+      var CANONICAL_APK = 'https://rides.mairide.in/downloads/mairide-android.apk';
       var appLink = document.getElementById('android-app-download');
       var qrLink = document.getElementById('android-qr-link');
-      var qrImage = document.getElementById('android-qr-image');
       var caption = document.getElementById('android-qr-caption');
 
       function applyApkUrl(url, versionLabel) {
         if (!url) return;
-        if (qrLink) qrLink.setAttribute('href', url);
-        if (qrImage) {
-          qrImage.setAttribute(
-            'src',
-            'https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=' + encodeURIComponent(url)
-          );
-        }
+        if (qrLink) qrLink.setAttribute('href', CANONICAL_APK);
         if (caption) {
           caption.textContent = versionLabel
             ? ('Direct APK · ' + versionLabel)
@@ -1727,7 +1722,7 @@
       }
 
       if (appLink) appLink.setAttribute('href', DEFAULT_APK);
-      applyApkUrl('https://rides.mairide.in/downloads/mairide-android-366.apk', 'build 366');
+      applyApkUrl(CANONICAL_APK, 'latest release');
     })();
     document.getElementById('cookieRejectButton').addEventListener('click', () => {
       applyConsent({ preferences: false, analytics: false, marketing: false });

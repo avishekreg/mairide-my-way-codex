@@ -3483,11 +3483,8 @@ const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
 const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
-const PUBLIC_ANDROID_DOWNLOAD_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
-const PUBLIC_ANDROID_DOWNLOAD_PATH = '/downloads/mairide-android-366.apk';
-const buildAndroidQrUrl = (apkUrl: string) =>
-  `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=12&format=svg&data=${encodeURIComponent(apkUrl)}`;
-const PUBLIC_ANDROID_DOWNLOAD_QR_URL = buildAndroidQrUrl(PUBLIC_ANDROID_DOWNLOAD_URL);
+const PUBLIC_ANDROID_DOWNLOAD_PATH = '/downloads/mairide-android.apk';
+const PUBLIC_ANDROID_DOWNLOAD_QR_URL = '/assets/mairide-android-download-qr.png';
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'V3.5.0';
@@ -7038,7 +7035,6 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
   const [androidUpdateMessage, setAndroidUpdateMessage] = useState('');
   const [isAndroidUpdateAvailable, setIsAndroidUpdateAvailable] = useState(false);
   const [isCheckingAndroidUpdate, setIsCheckingAndroidUpdate] = useState(false);
-  const [androidDownloadUrl, setAndroidDownloadUrl] = useState(LIVE_ANDROID_APK_URL);
   const [installedAndroidVersion, setInstalledAndroidVersion] = useState(APP_VERSION);
 
   const openAndroidDownload = () => {
@@ -7083,8 +7079,6 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
       if (!response.ok) return;
       const data = await response.json();
       const latestVersion = String(data?.appVersion || '').trim();
-      const nextApkUrl = String(data?.apkUrl || LIVE_ANDROID_APK_URL).trim() || LIVE_ANDROID_APK_URL;
-      setAndroidDownloadUrl(nextApkUrl);
       if (!latestVersion) return;
       const hasUpdate = normalizeVersionTag(latestVersion) !== normalizeVersionTag(installedAndroidVersion);
       if (hasUpdate) {
@@ -7138,7 +7132,7 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
           <div className="flex flex-row flex-wrap items-center justify-center gap-3 sm:gap-4">
             <a
               href={PUBLIC_ANDROID_DOWNLOAD_PATH}
-              download="mairide-android-366.apk"
+              download="mairide-android.apk"
               className="inline-flex h-11 min-w-[9.75rem] max-w-full items-center justify-center whitespace-nowrap rounded-xl bg-black px-4 text-center text-[13px] font-bold leading-none tracking-wide text-white shadow-sm transition hover:opacity-90 sm:h-12 sm:min-w-[10.5rem] sm:px-5 sm:text-sm"
             >
               Get it on Android
@@ -7153,27 +7147,19 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
             </a>
             <a
               href={PUBLIC_ANDROID_DOWNLOAD_PATH}
-              download="mairide-android-366.apk"
+              download="mairide-android.apk"
               className="inline-flex w-32 flex-col items-center justify-center rounded-2xl border border-mairide-secondary bg-white/90 p-2 shadow-sm transition hover:bg-white"
               aria-label="Scan QR code to download the mAIRide Android app"
             >
               <span className="relative flex h-24 w-24 items-center justify-center rounded-xl bg-white p-1 shadow-inner">
                 <img
-                  src={buildAndroidQrUrl(androidDownloadUrl || PUBLIC_ANDROID_DOWNLOAD_URL)}
+                  src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
                   alt="QR code to download the mAIRide Android app"
-                  className="h-24 w-24"
+                  className="h-24 w-24 [image-rendering:pixelated]"
                   width={96}
                   height={96}
                   loading="lazy"
                 />
-                <span
-                  className="absolute left-1/2 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-mairide-secondary/40 bg-white/95 text-mairide-primary shadow-sm"
-                  aria-hidden="true"
-                >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
-                    <path d="M7.2 8.2 5.7 5.6a.45.45 0 0 1 .78-.45l1.56 2.7a8.64 8.64 0 0 1 7.92 0l1.56-2.7a.45.45 0 0 1 .78.45l-1.5 2.6A6.43 6.43 0 0 1 20 13.5H4a6.43 6.43 0 0 1 3.2-5.3ZM8.5 11a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm7 0a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM4 14.5h16v3.25A2.25 2.25 0 0 1 17.75 20H6.25A2.25 2.25 0 0 1 4 17.75V14.5Z" />
-                  </svg>
-                </span>
               </span>
               <span className="mt-2 text-center text-[11px] font-black leading-4 text-mairide-primary">
                 Scan for Android
