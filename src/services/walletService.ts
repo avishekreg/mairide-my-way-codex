@@ -41,13 +41,49 @@ export const walletService = {
   /**
    * Initialize a new user's wallet and referral code
    */
-  async initializeUserWallet(userId: string, referrerCode?: string) {
-    const referralCode = await this.generateUniqueReferralCode();
-    
+  async initializeUserWallet(
+    userId: string,
+    referrerCode?: string,
+    welcomeSource: 'google_oauth' | 'standard' = 'standard'
+  ) {
     const userRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userRef);
     const userData = userSnap.exists() ? (userSnap.data() as UserProfile) : null;
+    if (!userData) throw new Error('Cannot initialize wallet before the user profile exists.');
+
     const joiningBonus = userData?.role === 'driver' ? DRIVER_JOINING_BONUS : TRAVELER_JOINING_BONUS;
+    const txId = `welcome_${userId}`;
+    const transactionRef = doc(db, 'transactions', txId);
+    const legacyTransactionRef = doc(db, 'transactions', `init_${userId}`);
+    const [transactionSnap, legacyTransactionSnap] = await Promise.all([
+      getDoc(transactionRef),
+      getDoc(legacyTransactionRef),
+    ]);
+    const currentBalance = Number(userData.wallet?.balance || 0);
+    const priorWelcomeTransaction = transactionSnap.exists()
+      ? transactionSnap
+      : legacyTransactionSnap.exists()
+        ? legacyTransactionSnap
+        : null;
+
+    if (userData.hasReceivedWelcomeCoins || priorWelcomeTransaction) {
+      if (!userData.hasReceivedWelcomeCoins && priorWelcomeTransaction) {
+        const recordedBalance = Number(priorWelcomeTransaction.data()?.metadata?.balanceAfter);
+        await updateDoc(userRef, {
+          ...(Number.isFinite(recordedBalance)
+            ? { 'wallet.balance': Math.max(currentBalance, recordedBalance) }
+            : {}),
+          'wallet.pendingBalance': Number(userData.wallet?.pendingBalance || 0),
+          hasReceivedWelcomeCoins: true,
+          welcomeCoinsAwardedAt: priorWelcomeTransaction.data()?.createdAt || new Date().toISOString(),
+          welcomeCoinsSource: priorWelcomeTransaction.data()?.metadata?.source || welcomeSource,
+        });
+      }
+      return;
+    }
+
+    const referralCodeValue = userData.referralCode || await this.generateUniqueReferralCode();
+    const balanceAfter = currentBalance + joiningBonus;
     
     let referredBy = null;
     let referralPath: string[] = [];
@@ -67,27 +103,34 @@ export const walletService = {
       }
     }
 
-    await updateDoc(userRef, {
-      referralCode,
-      referredBy,
-      referralPath,
-      wallet: {
-        balance: joiningBonus,
-        pendingBalance: 0
-      }
-    });
-
-    // Create initial top-up transaction
-    const txId = `init_${userId}`;
-    await setDoc(doc(db, 'transactions', txId), {
+    const awardedAt = new Date().toISOString();
+    await setDoc(transactionRef, {
       id: txId,
       userId,
       type: 'wallet_topup',
       amount: joiningBonus,
       currency: 'MAICOIN',
       status: 'completed',
-      description: userData?.role === 'driver' ? 'Driver joining bonus' : 'Traveler joining bonus',
-      createdAt: new Date().toISOString()
+      description: 'Welcome Bonus - New Signup',
+      createdAt: awardedAt,
+      metadata: {
+        source: welcomeSource,
+        role: userData.role,
+        balanceAfter,
+      },
+    });
+
+    await updateDoc(userRef, {
+      referralCode: referralCodeValue,
+      referredBy,
+      referralPath,
+      wallet: {
+        balance: balanceAfter,
+        pendingBalance: Number(userData.wallet?.pendingBalance || 0),
+      },
+      hasReceivedWelcomeCoins: true,
+      welcomeCoinsAwardedAt: awardedAt,
+      welcomeCoinsSource: welcomeSource,
     });
 
     if (referredBy) {

@@ -436,6 +436,11 @@ async function handleVerifyDriver(req: any, res: any) {
   }
 
   const existingData = (existingUser.data as Record<string, any>) || {};
+  const nextDriverDetails = {
+    ...(existingUser.driver_details || existingData.driverDetails || {}),
+    complianceReverificationPending: normalizedStatus === "approved" ? false : true,
+    isOnline: false,
+  };
   const nextData = {
     ...existingData,
     uid,
@@ -445,7 +450,7 @@ async function handleVerifyDriver(req: any, res: any) {
     rejectionReason: normalizedStatus === "rejected" ? (rejectionReason || "") : null,
     verifiedBy: auth.user.id,
     status: normalizedStatus === "approved" ? "active" : "inactive",
-    driverDetails: existingUser.driver_details || existingData.driverDetails || null,
+    driverDetails: nextDriverDetails,
   };
 
   const { error } = await auth.supabaseAdmin
@@ -457,7 +462,7 @@ async function handleVerifyDriver(req: any, res: any) {
       rejection_reason: normalizedStatus === "rejected" ? (rejectionReason || "") : null,
       verified_by: auth.user.id,
       status: normalizedStatus === "approved" ? "active" : "inactive",
-      driver_details: existingUser.driver_details || existingData.driverDetails || null,
+      driver_details: nextDriverDetails,
       data: nextData,
       updated_at: new Date().toISOString(),
     })

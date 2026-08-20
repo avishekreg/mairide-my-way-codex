@@ -927,12 +927,18 @@ export async function handleAdminVerifyDriver(req: ReqLike, res: ResLike) {
     }
 
     const existingData = (existingUser.data as Record<string, any>) || {};
+    const nextDriverDetails = {
+      ...(existingUser.driver_details || existingData.driverDetails || {}),
+      complianceReverificationPending: normalizedStatus === "approved" ? false : true,
+      isOnline: false,
+    };
     const nextData = {
       ...existingData,
       verificationStatus: normalizedStatus,
       rejectionReason: normalizedStatus === "rejected" ? (rejectionReason || "") : null,
       verifiedBy,
       status: normalizedStatus === "approved" ? "active" : "inactive",
+      driverDetails: nextDriverDetails,
     };
 
     const { error } = await getSupabaseAdmin()
@@ -942,6 +948,7 @@ export async function handleAdminVerifyDriver(req: ReqLike, res: ResLike) {
         rejection_reason: normalizedStatus === "rejected" ? (rejectionReason || "") : null,
         verified_by: verifiedBy,
         status: normalizedStatus === "approved" ? "active" : "inactive",
+        driver_details: nextDriverDetails,
         data: nextData,
         updated_at: new Date().toISOString(),
       })
@@ -2427,7 +2434,7 @@ export async function handleUserUploadDriverDoc(req: ReqLike, res: ResLike) {
 }
 
 export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResLike) {
-  const { driverId, driverDetails } = req.body || {};
+  const { driverId, driverDetails, isRenewal = false } = req.body || {};
 
   if (!driverId || !driverDetails) {
     return res.status(400).json({ error: "Missing driverId or driverDetails" });
@@ -2483,6 +2490,11 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
 
     const now = new Date().toISOString();
     const baseData = (existingProfile?.data as Record<string, any>) || {};
+    const resolvedDriverDetails = {
+      ...driverDetails,
+      complianceReverificationPending: Boolean(isRenewal),
+      isOnline: false,
+    };
     const referralCode =
       String(existingProfile?.referral_code || baseData.referralCode || "").trim().toUpperCase()
       || await generateUniqueReferralCode(supabaseAdmin);
@@ -2518,7 +2530,7 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
           ? existingProfile.force_password_change
           : Boolean(baseData.forcePasswordChange),
       wallet: resolvedWallet,
-      driver_details: driverDetails,
+      driver_details: resolvedDriverDetails,
       data: {
         ...baseData,
         uid: targetUserId,
@@ -2529,7 +2541,7 @@ export async function handleUserCompleteDriverOnboarding(req: ReqLike, res: ResL
         rejectionReason: null,
         verifiedBy: null,
         wallet: resolvedWallet,
-        driverDetails,
+        driverDetails: resolvedDriverDetails,
       },
       updated_at: now,
     };

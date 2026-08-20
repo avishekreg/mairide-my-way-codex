@@ -57,6 +57,7 @@ import { auth, db, storage } from './lib/firebase';
 import { supabase, supabaseAnonKey, supabaseUrl } from './lib/supabase';
 import { UserProfile, SupportTicket, ChatMessage, Transaction, Referral, AppConfig, Booking, Ride, TripSession, TravelerRideRequest, B2BPartner, BookingCommunicationMessage, RouteAlertReport } from './types';
 import { walletService, MAX_MAICOINS_PER_RIDE } from './services/walletService';
+import { checkDriverDocumentValidity } from './services/driverComplianceService';
 import { b2bPartnerService } from './services/b2bPartnerService';
 import { AdminB2BVerificationDesk, PartnerApplicationPage, PartnerPortal } from './b2b';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
@@ -9573,7 +9574,7 @@ const findUserProfileByPhone = async (value: string) => {
         }
         
         // Initialize wallet and referral
-        await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined);
+        await walletService.initializeUserWallet(user.uid, referralCodeInput || undefined, 'google_oauth');
       } else {
         const existingProfile = docSnap.data() as UserProfile;
         if (existingProfile.role === 'consumer' && !existingProfile.travelerAvatarSource) {
@@ -10505,41 +10506,48 @@ const DriverOnboarding = ({
   profile,
   onComplete,
   isLoaded,
+  isRenewal = false,
+  onCancel,
 }: {
   profile: UserProfile;
   onComplete: () => void;
   isLoaded: boolean;
+  isRenewal?: boolean;
+  onCancel?: () => void;
 }) => {
   const { config } = useAppConfig();
+  const existingDetails = profile.driverDetails;
   const [step, setStep] = useState(1);
   const [liveWalletOptIn, setLiveWalletOptIn] = useState(false);
   const [formData, setFormData] = useState({
-    selfiePhoto: '',
-    selfieGeoTag: null as any,
-    aadhaarNumber: '',
-    aadhaarFrontPhoto: '',
-    aadhaarFrontGeoTag: null as any,
-    aadhaarBackPhoto: '',
-    aadhaarBackGeoTag: null as any,
-    aadhaarGeoTag: null as any, // Legacy
-    dlNumber: '',
-    dlFrontPhoto: '',
-    dlFrontGeoTag: null as any,
-    dlBackPhoto: '',
-    dlBackGeoTag: null as any,
-    dlGeoTag: null as any, // Legacy
-    vehicleMake: '',
-    vehicleModel: '',
-    vehicleColor: '',
-    vehicleCapacity: 4,
-    vehicleRegNumber: '',
-    insuranceStatus: 'active' as 'active' | 'expired',
-    insuranceProvider: '',
-    insuranceExpiryDate: '',
-    vehiclePhoto: '',
-    vehicleGeoTag: null as any,
-    rcPhoto: '',
-    rcGeoTag: null as any,
+    selfiePhoto: existingDetails?.selfiePhoto || '',
+    selfieGeoTag: existingDetails?.selfieGeoTag || null as any,
+    aadhaarNumber: existingDetails?.aadhaarNumber || '',
+    aadhaarFrontPhoto: existingDetails?.aadhaarFrontPhoto || '',
+    aadhaarFrontGeoTag: existingDetails?.aadhaarFrontGeoTag || null as any,
+    aadhaarBackPhoto: existingDetails?.aadhaarBackPhoto || '',
+    aadhaarBackGeoTag: existingDetails?.aadhaarBackGeoTag || null as any,
+    aadhaarGeoTag: existingDetails?.aadhaarGeoTag || null as any, // Legacy
+    dlNumber: existingDetails?.dlNumber || '',
+    dlExpiryDate: existingDetails?.dlExpiryDate || '',
+    dlFrontPhoto: existingDetails?.dlFrontPhoto || '',
+    dlFrontGeoTag: existingDetails?.dlFrontGeoTag || null as any,
+    dlBackPhoto: existingDetails?.dlBackPhoto || '',
+    dlBackGeoTag: existingDetails?.dlBackGeoTag || null as any,
+    dlGeoTag: existingDetails?.dlGeoTag || null as any, // Legacy
+    vehicleMake: existingDetails?.vehicleMake || '',
+    vehicleModel: existingDetails?.vehicleModel || '',
+    vehicleColor: existingDetails?.vehicleColor || '',
+    vehicleCapacity: existingDetails?.vehicleCapacity || 4,
+    vehicleRegNumber: existingDetails?.vehicleRegNumber || '',
+    insuranceStatus: existingDetails?.insuranceStatus || 'active' as 'active' | 'expired',
+    insuranceProvider: existingDetails?.insuranceProvider || '',
+    insuranceExpiryDate: existingDetails?.insuranceExpiryDate || '',
+    vehiclePhoto: existingDetails?.vehiclePhoto || '',
+    vehicleGeoTag: existingDetails?.vehicleGeoTag || null as any,
+    rcPhoto: existingDetails?.rcPhoto || '',
+    rcExpiryDate: existingDetails?.rcExpiryDate || '',
+    rcGeoTag: existingDetails?.rcGeoTag || null as any,
     declarationAccepted: false,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -10697,6 +10705,7 @@ const DriverOnboarding = ({
 
   const uploadImage = async (base64: string, path: string) => {
     if (!base64) return '';
+    if (/^https?:\/\//i.test(base64)) return base64;
     let token = '';
     try {
       token = await getAccessToken();
@@ -10759,6 +10768,7 @@ const DriverOnboarding = ({
         dlBackPhoto: dlBackUrl,
         vehiclePhoto: vehicleUrl,
         rcPhoto: rcUrl,
+        complianceReverificationPending: isRenewal,
         isOnline: false,
         rating: 5.0,
         totalEarnings: profile.driverDetails?.totalEarnings || 0,
@@ -10817,6 +10827,7 @@ const DriverOnboarding = ({
           {
             driverId: activeUid,
             driverDetails,
+            isRenewal,
           },
           {
             headers: token
@@ -10880,10 +10891,10 @@ const DriverOnboarding = ({
 
         <div className="mb-6">
           <button
-            onClick={() => signOut(auth)}
+            onClick={() => isRenewal ? onCancel?.() : signOut(auth)}
             className="w-full bg-mairide-bg text-mairide-primary py-3 rounded-2xl font-bold hover:bg-mairide-secondary transition-colors"
           >
-            Logout and finish later
+            {isRenewal ? 'Back to dashboard' : 'Logout and finish later'}
           </button>
         </div>
 
@@ -11004,6 +11015,15 @@ const DriverOnboarding = ({
                 onChange={e => setFormData({ ...formData, dlNumber: sanitizeLicenseOrVehicleCode(e.target.value, 20) })}
               />
             </div>
+            <div>
+              <label className="block text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-2 ml-2">Driving License Expiry</label>
+              <input
+                type="date"
+                className="w-full p-5 bg-mairide-bg border-none rounded-3xl focus:ring-2 focus:ring-mairide-accent outline-none text-mairide-primary font-medium"
+                value={formData.dlExpiryDate}
+                onChange={e => setFormData({ ...formData, dlExpiryDate: e.target.value })}
+              />
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Front Side</p>
@@ -11035,7 +11055,7 @@ const DriverOnboarding = ({
             <div className="flex space-x-4">
               <button onClick={() => setStep(2)} className="flex-1 bg-mairide-bg text-mairide-primary py-5 rounded-3xl font-bold">Back</button>
               <button 
-                disabled={!formData.dlNumber || !formData.dlFrontPhoto || !formData.dlBackPhoto}
+                disabled={!formData.dlNumber || !formData.dlExpiryDate || !formData.dlFrontPhoto || !formData.dlBackPhoto}
                 onClick={() => setStep(4)}
                 className="flex-[2] bg-mairide-accent text-white py-5 rounded-3xl font-bold disabled:opacity-50"
               >
@@ -11068,6 +11088,15 @@ const DriverOnboarding = ({
                   onChange={e => setFormData({ ...formData, vehicleModel: sanitizeLicenseOrVehicleCode(e.target.value, 30) })}
                 />
               </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-2 ml-2">Vehicle Registration / RC Expiry</label>
+              <input
+                type="date"
+                className="w-full p-4 bg-mairide-bg border-none rounded-2xl focus:ring-2 focus:ring-mairide-accent outline-none text-mairide-primary text-sm"
+                value={formData.rcExpiryDate}
+                onChange={e => setFormData({ ...formData, rcExpiryDate: e.target.value })}
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -11238,13 +11267,14 @@ const DriverOnboarding = ({
                 disabled={
                   !formData.vehiclePhoto ||
                   !formData.rcPhoto ||
+                  !formData.rcExpiryDate ||
                   !formData.declarationAccepted ||
                   isSubmitting
                 }
                 onClick={handleSubmit}
                 className="flex-[2] bg-mairide-accent text-white py-5 rounded-3xl font-bold disabled:opacity-50 flex items-center justify-center"
               >
-                {isSubmitting ? <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Complete Setup'}
+                {isSubmitting ? <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" /> : isRenewal ? 'Submit Renewal Documents' : 'Complete Setup'}
               </button>
             </div>
           </div>
@@ -13303,6 +13333,7 @@ const DriverDashboardSummary = ({
   onStartRide,
   onEndRide,
   onOpenNegotiation,
+  rideOperationsLocked = false,
 }: {
   requests: Booking[];
   tripSessions: Record<string, TripSession>;
@@ -13319,6 +13350,7 @@ const DriverDashboardSummary = ({
   onStartRide: (request: Booking, otp: string) => void;
   onEndRide: (request: Booking, otp: string) => void;
   onOpenNegotiation: (request: Booking) => void;
+  rideOperationsLocked?: boolean;
 }) => {
   const liveRequests = useMemo(
     () =>
@@ -13400,9 +13432,13 @@ const DriverDashboardSummary = ({
               <div className="mt-4 space-y-4">
                 <button
                   onClick={() => onOpenNegotiation(request)}
-                  className={cn("w-full bg-mairide-primary text-white px-6 py-3", primaryActionButtonClass)}
+                  disabled={rideOperationsLocked}
+                  className={cn(
+                    "w-full bg-mairide-primary text-white px-6 py-3 disabled:cursor-not-allowed disabled:opacity-45",
+                    primaryActionButtonClass
+                  )}
                 >
-                  Open Negotiation
+                  {rideOperationsLocked ? 'Negotiation Locked - Update Documents' : 'Open Negotiation'}
                 </button>
                 <FareGuidanceHint guidance={fareGuidance} quotedFare={currentCounterValue} mode="compact" />
                 {showsDetour && (
@@ -19584,6 +19620,26 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const [isOnline, setIsOnline] = useState(profile.driverDetails?.isOnline || false);
   const [newRide, setNewRide] = useState({ origin: '', destination: '', price: '', seats: '4', departureDay: 'today', departureClock: '09:00' });
   const [showOfferForm, setShowOfferForm] = useState(false);
+  const [showComplianceUpdate, setShowComplianceUpdate] = useState(false);
+  const driverCompliance = useMemo(() => checkDriverDocumentValidity(profile), [profile.driverDetails]);
+  const primaryComplianceDocument = driverCompliance.expiredDocuments[0];
+  const complianceLockMessage = primaryComplianceDocument
+    ? `Ride Services Locked: Your ${primaryComplianceDocument.label} has expired. Upload valid renewal documents to resume taking rides.`
+    : 'Ride Services Locked: Your renewed documents are pending re-verification. Approval is required before taking rides.';
+  const guardRideOperations = useCallback(() => {
+    if (!driverCompliance.isRideLocked) return true;
+    showAppDialog(complianceLockMessage, 'warning', 'Driver compliance required');
+    return false;
+  }, [complianceLockMessage, driverCompliance.isRideLocked]);
+
+  useEffect(() => {
+    if (!driverCompliance.isRideLocked || !isOnline) return;
+    setIsOnline(false);
+    void updateDoc(doc(db, 'users', profile.uid), {
+      'driverDetails.isOnline': false,
+      updatedAt: new Date().toISOString(),
+    }).catch((error) => console.warn('Unable to persist compliance offline state:', error));
+  }, [driverCompliance.isRideLocked, isOnline, profile.uid]);
 
   useEffect(() => {
     const handleHomeNavigation = () => setActiveTab('dashboard');
@@ -20655,6 +20711,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   }, [driverNegotiationPreview, requests]);
 
   const toggleOnline = async () => {
+    if (!isOnline && !guardRideOperations()) return;
     const newState = !isOnline;
     setIsOnline(newState);
     try {
@@ -20703,6 +20760,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   };
 
   const openDriverSmartMatchFromTravelerRequest = (request: TravelerRideRequest, mode: 'full' | 'partial') => {
+    if (!guardRideOperations()) return;
     if (!isOnline) {
       alert('Please go online before entering negotiation.');
       return;
@@ -21347,6 +21405,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   const negotiateFromDriverSmartMatch = async (request: TravelerRideRequest) => {
     const prompt = driverSmartMatchPrompt;
     if (!prompt) return;
+    if (!guardRideOperations()) return;
     setIsPostingRide(true);
     try {
       await startDriverNegotiationFromTravelerRequest(request, prompt.draft);
@@ -21359,6 +21418,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
 
   const forcePostDriverOfferFromSmartMatch = async () => {
     if (!driverSmartMatchPrompt) return;
+    if (!guardRideOperations()) return;
     setIsPostingRide(true);
     try {
       await submitDriverRideDraft(driverSmartMatchPrompt.draft, null);
@@ -21370,6 +21430,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   };
 
   const handlePostRide = async () => {
+    if (!guardRideOperations()) return;
     setIsPostingRide(true);
     try {
       const draft = await buildDriverRideDraft();
@@ -21397,6 +21458,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   };
 
   const handleDriverAction = async (request: Booking, status: 'confirmed' | 'rejected') => {
+    if (status === 'confirmed' && !guardRideOperations()) return;
     try {
       const token = await getAccessToken();
       const { data } = await axios.post(
@@ -21538,6 +21600,7 @@ const DriverApp = ({ profile, isLoaded, loadError, authFailure }: { profile: Use
   };
 
   const handleDriverCounterOffer = async (request: Booking, fare: number) => {
+    if (!guardRideOperations()) return;
     if (!fare || fare <= 0) {
       showAppDialog('Please enter a valid fare.', 'warning');
       return;
@@ -22063,6 +22126,18 @@ const finalizeDriverDashboardRazorpayPayment = async (
         ? "min-h-[calc(100dvh-5.25rem)] w-full bg-mairide-bg"
         : "max-w-4xl mx-auto p-4 md:p-8"
     )}>
+      {showComplianceUpdate && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[90] overflow-y-auto bg-mairide-bg">
+          <DriverOnboarding
+            profile={profile}
+            isLoaded={isLoaded}
+            isRenewal
+            onCancel={() => setShowComplianceUpdate(false)}
+            onComplete={() => window.location.reload()}
+          />
+        </div>,
+        document.body
+      )}
       {activeTab === 'dashboard' && (
         <>
           <MapFirstDashboardShell
@@ -22072,6 +22147,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
             compactTopControls
             showBottomSheet={false}
             onSearchClick={() => {
+              if (!guardRideOperations()) return;
               if (!isOnline) {
                 void toggleOnline();
                 return;
@@ -22085,7 +22161,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 onClick={() => {
                   void toggleOnline();
                 }}
-                className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-full px-2.5 py-2 text-left transition-colors hover:bg-mairide-bg sm:flex-none sm:gap-2 sm:px-3 sm:py-2.5"
+                disabled={driverCompliance.isRideLocked && !isOnline}
+                className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-full px-2.5 py-2 text-left transition-colors hover:bg-mairide-bg disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none sm:gap-2 sm:px-3 sm:py-2.5"
               >
                 <span
                   className={cn(
@@ -22111,11 +22188,11 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 }}
                 className={cn(
                   "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-xs font-bold shadow-lg transition-all sm:gap-2 sm:px-4 sm:py-2.5 sm:text-sm",
-                  isOnline
+                  isOnline && !driverCompliance.isRideLocked
                     ? "bg-mairide-accent text-white shadow-mairide-accent/20 hover:bg-mairide-primary"
                     : "cursor-not-allowed bg-mairide-secondary text-mairide-primary opacity-80 shadow-none"
                 )}
-                disabled={!isOnline}
+                disabled={!isOnline || driverCompliance.isRideLocked}
               >
                 <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
                 <span className="truncate">Offer a Ride</span>
@@ -22163,6 +22240,44 @@ const finalizeDriverDashboardRazorpayPayment = async (
               <DashboardGoogleMapUnavailable isLoaded={isLoaded} loadError={loadError} authFailure={authFailure} />
             )}
           </MapFirstDashboardShell>
+
+          {driverCompliance.isRideLocked && (
+            <div className="mb-6 rounded-[28px] border border-red-200 bg-red-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
+                  <div>
+                    <p className="text-sm font-black text-red-800">Driver compliance action required</p>
+                    <p className="mt-1 text-sm leading-6 text-red-700">{complianceLockMessage}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowComplianceUpdate(true)}
+                  className="shrink-0 rounded-2xl bg-red-700 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-mairide-primary"
+                >
+                  Update Documents
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!driverCompliance.isRideLocked && driverCompliance.expiringDocuments.map((document) => (
+            <div key={document.key} className="mb-4 rounded-[24px] border border-orange-200 bg-orange-50 px-5 py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm leading-6 text-orange-900">
+                  <strong>Attention:</strong> Your {document.label} expires on {document.expiryDate}. Please renew and re-upload to avoid ride restrictions.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowComplianceUpdate(true)}
+                  className="shrink-0 rounded-xl border border-orange-300 bg-white px-4 py-2 text-xs font-bold text-orange-800"
+                >
+                  Update Documents
+                </button>
+              </div>
+            </div>
+          ))}
 
           {confirmedDriverSessionBooking && (
             <RouteAlertsTicker
@@ -22378,7 +22493,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
               </div>
               <button 
                 onClick={handlePostRide}
-                disabled={isPostingRide}
+                disabled={isPostingRide || driverCompliance.isRideLocked}
                 className="w-full bg-mairide-accent text-white py-4 rounded-2xl font-bold hover:bg-mairide-primary transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {isPostingRide ? 'Posting Offer...' : 'Post Ride Offer'}
@@ -22441,7 +22556,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                                 <p className="text-xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
                                 <button
                                   onClick={() => void negotiateFromDriverSmartMatch(request)}
-                                  disabled={isPostingRide}
+                                  disabled={isPostingRide || driverCompliance.isRideLocked}
                                   className={cn("rounded-xl bg-mairide-primary px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
                                 >
                                   {isPostingRide ? 'Opening...' : 'Accept & Negotiate Fare'}
@@ -22508,7 +22623,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                     </button>
                     <button
                       onClick={() => void forcePostDriverOfferFromSmartMatch()}
-                      disabled={isPostingRide}
+                      disabled={isPostingRide || driverCompliance.isRideLocked}
                       className={cn("rounded-2xl bg-mairide-accent px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60", primaryActionButtonClass)}
                     >
                       {isPostingRide ? 'Posting...' : 'Post New Independent Ride'}
@@ -22624,7 +22739,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                               placeholder="Enter your offer"
                               className="w-full rounded-2xl border border-mairide-secondary bg-white py-4 pl-12 pr-4 text-mairide-primary outline-none focus:ring-2 focus:ring-mairide-accent"
                               value={counterValue}
-                              disabled={isCounterSubmitting}
+                              disabled={isCounterSubmitting || driverCompliance.isRideLocked}
                               onChange={(e) => setCounterFares((prev) => ({ ...prev, [driverNegotiationPreview.id]: e.target.value }))}
                               onKeyDown={(event) => {
                                 if (event.key !== 'Enter' && event.key !== 'NumpadEnter') {
@@ -22639,7 +22754,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                           </div>
                           <button
                             onClick={() => void handleDriverCounterOffer(driverNegotiationPreview, Number(counterValue))}
-                            disabled={isCounterSubmitting || !counterValue || Number(counterValue) <= 0}
+                            disabled={driverCompliance.isRideLocked || isCounterSubmitting || !counterValue || Number(counterValue) <= 0}
                             className="rounded-2xl bg-mairide-primary px-6 py-4 font-bold text-white transition-all hover:bg-mairide-accent disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {isCounterSubmitting ? (
@@ -22675,7 +22790,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
                           void handleDriverAction(driverNegotiationPreview, 'confirmed');
                           setDriverNegotiationPreview(null);
                         }}
-                        className="flex-[2] rounded-3xl bg-mairide-accent py-5 text-lg font-bold text-white shadow-xl shadow-mairide-accent/20 transition-all hover:bg-mairide-primary"
+                        disabled={driverCompliance.isRideLocked}
+                        className="flex-[2] rounded-3xl bg-mairide-accent py-5 text-lg font-bold text-white shadow-xl shadow-mairide-accent/20 transition-all hover:bg-mairide-primary disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Accept Request
                       </button>
@@ -22715,7 +22831,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
                         <p className="text-2xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
                         <button
                           onClick={() => openDriverSmartMatchFromTravelerRequest(request, 'full')}
-                          className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white", primaryActionButtonClass)}
+                          disabled={driverCompliance.isRideLocked}
+                          className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50", primaryActionButtonClass)}
                         >
                           Match & Offer Ride
                         </button>
@@ -22768,7 +22885,8 @@ const finalizeDriverDashboardRazorpayPayment = async (
                         <p className="text-2xl font-black text-mairide-accent">{formatCurrency(request.fare)}</p>
                         <button
                           onClick={() => openDriverSmartMatchFromTravelerRequest(request, 'partial')}
-                          className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white", primaryActionButtonClass)}
+                          disabled={driverCompliance.isRideLocked}
+                          className={cn("rounded-2xl bg-mairide-primary px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50", primaryActionButtonClass)}
                         >
                           Explore & Offer
                         </button>
@@ -22798,6 +22916,7 @@ const finalizeDriverDashboardRazorpayPayment = async (
                 onStartRide={handleStartRide}
                 onEndRide={handleEndRide}
                 onOpenNegotiation={(request) => setDriverNegotiationPreview(request)}
+                rideOperationsLocked={driverCompliance.isRideLocked}
               />
             </div>
           )}
@@ -26710,6 +26829,13 @@ const AdminDashboard = ({
                 rejectionReason: status === 'rejected' ? rejectionReason : undefined,
                 status: status === 'approved' ? 'active' : 'inactive',
                 verifiedBy: profile.uid,
+                driverDetails: currentUser.driverDetails
+                  ? {
+                      ...currentUser.driverDetails,
+                      complianceReverificationPending: status === 'approved' ? false : true,
+                      isOnline: false,
+                    }
+                  : currentUser.driverDetails,
               }
             : currentUser
         )
@@ -29712,7 +29838,7 @@ const App = () => {
                     forcePasswordChange: false,
                   };
                   await setDoc(doc(db, 'users', u.uid), newProfile);
-                  await walletService.initializeUserWallet(u.uid);
+                  await walletService.initializeUserWallet(u.uid, undefined, 'google_oauth');
                   if (!active || generation !== authResolveGenerationRef.current) return;
                   resolvedAuthProfileRef.current = { authUid: u.uid, profile: newProfile, partnerProfile: null };
                   setProfile(newProfile);
@@ -30796,7 +30922,7 @@ const App = () => {
     if (!profile.onboardingComplete) {
       return withAppConfigProvider(<ErrorBoundary><DriverOnboarding profile={profile} onComplete={() => window.location.reload()} isLoaded={isLoaded} />{cookieConsentManager}</ErrorBoundary>);
     }
-    if (profile.verificationStatus === 'pending') {
+    if (profile.verificationStatus === 'pending' && !profile.driverDetails?.complianceReverificationPending) {
       return withAppConfigProvider(<ErrorBoundary><DriverPendingApproval profile={profile} />{cookieConsentManager}</ErrorBoundary>);
     }
     if (profile.verificationStatus === 'rejected') {

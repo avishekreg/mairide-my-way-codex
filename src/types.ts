@@ -14,6 +14,9 @@ export interface UserProfile {
   rejectionReason?: string;
   verifiedBy?: string;
   referralCode?: string;
+  hasReceivedWelcomeCoins?: boolean;
+  welcomeCoinsAwardedAt?: string;
+  welcomeCoinsSource?: 'google_oauth' | 'standard';
   forcePasswordChange?: boolean;
   temporaryPassword?: string;
   referredBy?: string;
@@ -76,6 +79,7 @@ export interface UserProfile {
     aadhaarBackGeoTag?: { lat: number; lng: number; timestamp: number };
     aadhaarGeoTag?: { lat: number; lng: number; timestamp: number };
     dlNumber: string;
+    dlExpiryDate?: string;
     dlFrontPhoto: string;
     dlFrontGeoTag?: { lat: number; lng: number; timestamp: number };
     dlBackPhoto: string;
@@ -94,7 +98,9 @@ export interface UserProfile {
     vehiclePhoto: string;
     vehicleGeoTag?: { lat: number; lng: number; timestamp: number };
     rcPhoto: string;
+    rcExpiryDate?: string;
     rcGeoTag?: { lat: number; lng: number; timestamp: number };
+    complianceReverificationPending?: boolean;
     declarationAccepted?: boolean;
     isOnline: boolean;
     rating: number;
