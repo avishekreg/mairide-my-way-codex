@@ -129,6 +129,7 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   Wallet,
+  Coins,
   Globe2,
   Download,
   Upload,
@@ -26676,6 +26677,11 @@ const AdminDashboard = ({
     0
   );
   const adminDriverWalletMarketLiability = adminWalletAvailableFloat + adminWalletPendingPayouts;
+  const adminActiveUsers = onlineDrivers.length + onlineTravelers.length;
+  const adminTotalCoinsCirculated = users.reduce(
+    (sum, user) => sum + Number(user.wallet?.balance || 0) + Number(user.wallet?.pendingBalance || 0),
+    0
+  );
   const userCards = [
     {
       id: 'drivers' as UsersInsightView,
@@ -27244,7 +27250,7 @@ const AdminDashboard = ({
 
             {activeTab === 'dashboard' && (
               <div className="space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   {[
                     {
                       label: 'Driver wallet float',
@@ -27291,12 +27297,39 @@ const AdminDashboard = ({
 	                      actionLabel: 'Inspect health',
 	                      onClick: () => selectAdminTab('capacity' as typeof activeTab),
 	                    },
+                    {
+                      label: 'Active users & travelers',
+                      value: adminActiveUsers,
+                      helper: 'active in booking · browsing',
+                      icon: Users,
+                      tone: 'bg-indigo-50 text-indigo-600',
+                      actionLabel: 'Open users desk',
+                      onClick: () => selectAdminTab('users' as typeof activeTab),
+                    },
+                    {
+                      label: 'Online driver fleet',
+                      value: onlineDrivers.length,
+                      helper: 'on active trip · idle ready',
+                      icon: Car,
+                      tone: 'bg-emerald-50 text-emerald-600',
+                      actionLabel: 'View fleet map',
+                      onClick: () => selectAdminTab('map' as typeof activeTab),
+                    },
+                    {
+                      label: 'MaiCoin circulation',
+                      value: adminTotalCoinsCirculated,
+                      helper: 'traveler ledger · driver rewards',
+                      icon: Coins,
+                      tone: 'bg-amber-50 text-amber-600',
+                      actionLabel: 'View coin ledger',
+                      onClick: () => selectAdminTab('analytics' as typeof activeTab),
+                    },
                   ].map((card) => (
                     <button
                       key={card.label}
                       type="button"
                       onClick={card.onClick}
-                      className="rounded-[32px] border border-mairide-secondary bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg"
+                      className="flex h-full min-h-[250px] flex-col rounded-[32px] border border-mairide-secondary bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg"
                     >
                       <div className={cn("mb-4 flex h-12 w-12 items-center justify-center rounded-2xl", card.tone)}>
                         <card.icon className="h-6 w-6" />
@@ -27304,7 +27337,7 @@ const AdminDashboard = ({
                       <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">{card.label}</p>
                       <p className="mt-2 text-3xl font-black tracking-tighter text-mairide-primary">{card.value}</p>
                       <p className="mt-2 text-sm text-mairide-secondary">{card.helper}</p>
-                      <p className="mt-4 text-xs font-bold uppercase tracking-widest text-mairide-accent">{card.actionLabel}</p>
+                      <p className="mt-auto pt-4 text-xs font-bold uppercase tracking-widest text-mairide-accent">{card.actionLabel}</p>
                     </button>
                   ))}
                 </div>
