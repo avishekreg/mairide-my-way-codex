@@ -18384,25 +18384,97 @@ const finalizeTravelerDashboardRazorpayPayment = async (
                     <span>{drivers.length} drivers active near this pickup zone.</span>
                   </div>
                   <div className="mt-5 space-y-3">
-                    <input
-                      value={search.from}
-                      onChange={(event) => {
-                        setSearch((prev) => ({ ...prev, from: event.target.value }));
-                        setSearchLocationFrom(null);
-                      }}
-                      placeholder="Pickup / origin"
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
-                    />
-                    <input
-                      ref={travelerSearchDestinationInputRef}
-                      value={search.to}
-                      onChange={(event) => {
-                        setSearch((prev) => ({ ...prev, to: event.target.value }));
-                        setSearchLocationTo(null);
-                      }}
-                      placeholder="Destination"
-                      className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
-                    />
+                    {isLoaded && window.google?.maps?.places ? (
+                      <Autocomplete
+                        onLoad={setAutocompleteFrom}
+                        onPlaceChanged={() => {
+                          if (!autocompleteFrom) return;
+                          const place = autocompleteFrom.getPlace();
+                          const placeLabel = place.formatted_address || place.name;
+                          if (placeLabel) {
+                            setSearch((prev) => ({ ...prev, from: placeLabel }));
+                          }
+                          if (place.geometry?.location) {
+                            setSearchLocationFrom({
+                              lat: place.geometry.location.lat(),
+                              lng: place.geometry.location.lng(),
+                            });
+                          }
+                        }}
+                        options={{ fields: ['formatted_address', 'geometry', 'name', 'place_id'] }}
+                      >
+                        <input
+                          value={search.from}
+                          onChange={(event) => {
+                            setSearch((prev) => ({ ...prev, from: event.target.value }));
+                            setSearchLocationFrom(null);
+                          }}
+                          placeholder="Pickup / origin"
+                          aria-label="Pickup location"
+                          autoComplete="off"
+                          className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
+                        />
+                      </Autocomplete>
+                    ) : (
+                      <input
+                        value={search.from}
+                        onChange={(event) => {
+                          setSearch((prev) => ({ ...prev, from: event.target.value }));
+                          setSearchLocationFrom(null);
+                        }}
+                        placeholder="Pickup / origin"
+                        aria-label="Pickup location"
+                        className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
+                      />
+                    )}
+                    {isLoaded && window.google?.maps?.places ? (
+                      <Autocomplete
+                        onLoad={setAutocompleteTo}
+                        onPlaceChanged={() => {
+                          if (!autocompleteTo) return;
+                          const place = autocompleteTo.getPlace();
+                          const placeLabel = place.formatted_address || place.name;
+                          if (placeLabel) {
+                            setSearch((prev) => ({ ...prev, to: placeLabel }));
+                          }
+                          if (place.geometry?.location) {
+                            setSearchLocationTo({
+                              lat: place.geometry.location.lat(),
+                              lng: place.geometry.location.lng(),
+                            });
+                          }
+                        }}
+                        options={{ fields: ['formatted_address', 'geometry', 'name', 'place_id'] }}
+                      >
+                        <input
+                          ref={travelerSearchDestinationInputRef}
+                          value={search.to}
+                          onChange={(event) => {
+                            setSearch((prev) => ({ ...prev, to: event.target.value }));
+                            setSearchLocationTo(null);
+                          }}
+                          placeholder="Destination"
+                          aria-label="Destination"
+                          autoComplete="off"
+                          className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
+                        />
+                      </Autocomplete>
+                    ) : (
+                      <input
+                        ref={travelerSearchDestinationInputRef}
+                        value={search.to}
+                        onChange={(event) => {
+                          setSearch((prev) => ({ ...prev, to: event.target.value }));
+                          setSearchLocationTo(null);
+                        }}
+                        placeholder="Destination"
+                        aria-label="Destination"
+                        className="w-full rounded-2xl border border-mairide-secondary bg-mairide-bg px-4 py-3 font-semibold text-mairide-primary outline-none focus:border-mairide-accent"
+                      />
+                    )}
+                    <p className="px-1 text-xs font-medium text-mairide-secondary">
+                      Select a Google Maps suggestion for precise route matching.
+                    </p>
                   </div>
                   <div className="mt-5 grid grid-cols-2 gap-3">
                     <button
