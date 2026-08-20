@@ -62,12 +62,23 @@
       color: #E65F2B;
     }
     .hero-photo {
+      isolation: isolate;
       background-image:
         linear-gradient(to right, rgba(10,17,23,0.96) 0%, rgba(10,17,23,0.88) 40%, rgba(10,17,23,0.62) 68%, rgba(10,17,23,0.38) 100%),
         linear-gradient(180deg, rgba(7,10,15,0.14) 0%, rgba(7,10,15,0.58) 100%),
         url("/hero/mairide-hero-car.png");
       background-position: 58% center;
       background-size: cover;
+    }
+    .hero-ambient {
+      background:
+        radial-gradient(ellipse at 18% 28%, rgba(233,122,46,.2), transparent 34%),
+        radial-gradient(ellipse at 78% 76%, rgba(56,189,248,.11), transparent 38%),
+        linear-gradient(125deg, rgba(255,255,255,.04), transparent 44%);
+      filter: blur(2px);
+      opacity: .75;
+      transform: scale(1.04);
+      animation: ambientShift 12s ease-in-out infinite alternate;
     }
     .hero-grid {
       background-image:
@@ -100,6 +111,26 @@
       color: #1F2D38;
       box-shadow: 0 18px 44px rgba(0,0,0,.16);
     }
+    .hero-stagger {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    .hero-copy.is-visible .hero-stagger {
+      animation: heroRise .72s cubic-bezier(.22,1,.36,1) forwards;
+    }
+    .hero-copy.is-visible .hero-stagger:nth-child(2) { animation-delay: .08s; }
+    .hero-copy.is-visible .hero-stagger:nth-child(3) { animation-delay: .16s; }
+    .hero-copy.is-visible .hero-stagger:nth-child(4) { animation-delay: .24s; }
+    .hero-copy.is-visible .hero-stagger:nth-child(5) { animation-delay: .32s; }
+    .hero-proof-badge {
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(15,23,42,.42);
+      box-shadow: 0 14px 36px rgba(0,0,0,.14);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      animation: badgeFloat 5.5s ease-in-out infinite;
+    }
+    .hero-proof-badge:nth-child(2) { animation-delay: -2.6s; }
     .hero-access-card {
       background: rgba(255,255,255,.92);
       border: 1px solid rgba(226,232,240,.82);
@@ -114,18 +145,71 @@
     }
     .hero-access-tab[aria-selected="false"] { color: #6F8090; }
     .conversion-card {
-      transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+      background: rgba(255,255,255,.9);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      transition: transform .3s ease, border-color .3s ease, box-shadow .3s ease;
     }
     .conversion-card:hover {
       transform: translateY(-4px);
       border-color: rgba(233,122,46,.48);
       box-shadow: 0 24px 54px rgba(31,45,56,.1);
     }
-    .download-dock {
+    .footer-shell {
       background:
-        linear-gradient(120deg, rgba(255,255,255,.06), transparent 42%),
+        linear-gradient(135deg, rgba(233,122,46,.08), transparent 30%),
+        linear-gradient(315deg, rgba(56,189,248,.05), transparent 28%),
         #182630;
-      box-shadow: 0 28px 80px rgba(31,45,56,.18);
+    }
+    .footer-platform {
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.055);
+      transition: transform .25s ease, border-color .25s ease, background-color .25s ease;
+    }
+    .footer-platform:hover {
+      transform: translateY(-2px);
+      border-color: rgba(233,122,46,.5);
+      background: rgba(255,255,255,.085);
+    }
+    .qr-scanner {
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 16px 38px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.12);
+    }
+    .qr-scanner::after {
+      content: "";
+      position: absolute;
+      inset: -30% 0 auto;
+      height: 34%;
+      background: linear-gradient(180deg, transparent, rgba(233,122,46,.24), rgba(233,122,46,.8), transparent);
+      box-shadow: 0 0 18px rgba(233,122,46,.5);
+      animation: qrScan 3.4s cubic-bezier(.4,0,.2,1) infinite;
+      pointer-events: none;
+    }
+    .footer-accordion summary {
+      list-style: none;
+      cursor: pointer;
+    }
+    .footer-accordion summary::-webkit-details-marker { display: none; }
+    .footer-accordion .footer-panel { display: none; }
+    .footer-accordion[open] .footer-panel { display: block; }
+    .footer-accordion[open] .footer-chevron { transform: rotate(180deg); }
+    @keyframes heroRise {
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes ambientShift {
+      from { transform: scale(1.04) translate3d(-1%, 0, 0); }
+      to { transform: scale(1.08) translate3d(1.5%, -1%, 0); }
+    }
+    @keyframes badgeFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+    @keyframes qrScan {
+      0% { transform: translateY(0); opacity: 0; }
+      14% { opacity: 1; }
+      72% { opacity: 1; }
+      100% { transform: translateY(390%); opacity: 0; }
     }
     .focus-ring:focus-visible {
       outline: 3px solid rgba(233,122,46,.55);
@@ -142,6 +226,10 @@
         background-position: 64% center;
       }
     }
+    @media (min-width: 768px) {
+      .footer-accordion summary { display: none; }
+      .footer-accordion .footer-panel { display: block !important; }
+    }
     .reveal {
       opacity: 0;
       transform: translateY(18px);
@@ -153,6 +241,11 @@
     }
     @media (prefers-reduced-motion: reduce) {
       .reveal { opacity: 1; transform: none; transition: none; }
+      .hero-stagger { opacity: 1; transform: none; animation: none !important; }
+      .hero-ambient,
+      .hero-proof-badge,
+      .qr-scanner::after,
+      .animate-ping { animation: none !important; }
       html { scroll-behavior: auto; }
     }
   </style>
@@ -196,20 +289,21 @@
   <main id="top">
     <div id="landingHome">
     <section class="hero-photo relative flex min-h-[calc(100svh-110px)] items-center overflow-hidden">
+      <div class="hero-ambient pointer-events-none absolute inset-0"></div>
       <div class="hero-grid pointer-events-none absolute inset-0 opacity-45"></div>
       <div class="mx-auto grid w-full max-w-7xl gap-10 px-5 py-14 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.65fr)] lg:items-center lg:px-8 lg:py-16">
         <div class="hero-copy reveal">
-          <div class="hero-pill mb-6 inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-xs font-black uppercase text-mairide-accent shadow-sm">
+          <div class="hero-stagger hero-pill mb-6 inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-xs font-black uppercase text-mairide-accent shadow-sm">
             <span class="h-2 w-2 rounded-full bg-mairide-accent"></span>
             <span data-i18n="heroBadge">Intelligent intercity mobility</span>
           </div>
-          <h1 class="max-w-[12ch] text-4xl font-black leading-[1.02] sm:text-6xl lg:text-7xl" data-i18n="heroTitle">
+          <h1 class="hero-stagger max-w-[12ch] text-4xl font-black leading-[1.02] sm:text-6xl lg:text-7xl" data-i18n="heroTitle">
             Smart Intercity &amp; Return Rides. Zero Surge.
           </h1>
-          <p class="mt-6 max-w-2xl text-lg leading-8 sm:text-xl" data-i18n="heroSub">
+          <p class="hero-stagger mt-6 max-w-2xl text-lg leading-8 sm:text-xl" data-i18n="heroSub">
             Fair fares for travelers, guaranteed return bookings for drivers, powered by intelligent mobility.
           </p>
-          <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+          <div class="hero-stagger mt-9 flex flex-col gap-3 sm:flex-row">
             <a
               href="https://rides.mairide.in"
               data-ride-cta
@@ -226,10 +320,9 @@
               Download Driver / Traveler App
             </a>
           </div>
-          <div class="mt-8 flex flex-wrap gap-x-7 gap-y-3 text-xs font-bold text-white/70">
-            <span class="inline-flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-mairide-accent"></span>Verified drivers</span>
-            <span class="inline-flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-mairide-accent"></span>Transparent fare guidance</span>
-            <span class="inline-flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-mairide-accent"></span>Secure ride handshakes</span>
+          <div class="hero-stagger mt-8 flex flex-wrap gap-3 text-xs font-black text-white/85">
+            <span class="hero-proof-badge inline-flex items-center gap-2 rounded-full px-4 py-2.5"><span class="h-2 w-2 rounded-full bg-mairide-accent"></span>No surge pricing</span>
+            <span class="hero-proof-badge inline-flex items-center gap-2 rounded-full px-4 py-2.5"><span class="h-2 w-2 rounded-full bg-emerald-400"></span>Return rides matched</span>
           </div>
         </div>
 
@@ -488,80 +581,116 @@
     </section>
   </main>
 
-  <section id="download" class="bg-white px-5 py-14 lg:px-8 lg:py-16" aria-labelledby="downloadTitle">
-    <div class="download-dock mx-auto grid max-w-7xl gap-8 rounded-3xl px-6 py-8 text-white sm:px-9 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:px-12 lg:py-10">
-      <div class="max-w-2xl">
-        <p class="text-xs font-black uppercase text-mairide-accent">MaiRide on Android</p>
-        <h2 id="downloadTitle" class="mt-3 text-3xl font-black sm:text-4xl">Get the MaiRide Android Experience</h2>
-        <p class="mt-4 max-w-xl text-sm leading-7 text-white/65 sm:text-base">Book intercity rides, publish return routes, negotiate transparently, and keep every trip update close at hand.</p>
-        <div class="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <a
-            id="android-app-download"
-            href="/downloads/mairide-android-366.apk"
-            download="mairide-android-366.apk"
-            class="focus-ring inline-flex min-h-14 items-center justify-center gap-3 rounded-2xl bg-mairide-accent px-7 text-sm font-black text-white transition hover:-translate-y-1 hover:bg-[#D96B27]"
-            aria-label="Download MaiRide Android APK Build 366"
-          >
-            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true"><path d="M7.55 5.55 5.9 2.68a.55.55 0 1 1 .95-.55L8.58 5h6.84l1.73-2.87a.55.55 0 1 1 .95.55l-1.65 2.87A4.62 4.62 0 0 1 19.5 9.6v8.65A1.75 1.75 0 0 1 17.75 20h-.9v2.1a1.1 1.1 0 1 1-2.2 0V20h-5.3v2.1a1.1 1.1 0 1 1-2.2 0V20h-.9A1.75 1.75 0 0 1 4.5 18.25V9.6a4.62 4.62 0 0 1 3.05-4.05ZM8.4 8.1a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Zm7.2 0a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Z"/></svg>
-            Download APK
-          </a>
-          <span class="text-xs leading-5 text-white/50">Build 366 · Direct, secure download</span>
-        </div>
-      </div>
-
-      <a
-        id="android-qr-link"
-        href="/downloads/mairide-android-366.apk"
-        download="mairide-android-366.apk"
-        aria-label="Scan QR code to download the MaiRide Android app"
-        class="focus-ring hidden items-center gap-4 rounded-2xl border border-white/15 bg-white/[0.06] p-4 transition hover:border-mairide-accent md:flex lg:justify-self-end"
-      >
-        <img
-          id="android-qr-image"
-          src="/assets/mairide-android-download-qr.png"
-          alt="QR code to download the MaiRide Android app"
-          class="h-28 w-28 shrink-0 rounded-xl bg-white p-2"
-          width="112"
-          height="112"
-          loading="eager"
-          style="image-rendering:pixelated"
-        />
-        <span id="android-qr-caption" class="max-w-[9rem] text-sm font-black leading-5 text-white">Scan to Install on Mobile</span>
-      </a>
-    </div>
-  </section>
-
-  <footer class="border-t border-white/10 bg-mairide-primary px-5 py-10 text-white lg:px-8">
+  <footer id="download" class="footer-shell border-t border-white/10 px-5 py-10 text-white lg:px-8 lg:py-14" aria-label="MaiRide downloads and company information">
     <div class="mx-auto max-w-7xl">
-      <div class="grid gap-8 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:gap-12">
-        <div>
+      <div class="grid gap-5 border-b border-white/10 pb-9 md:grid-cols-2 md:gap-8 xl:grid-cols-[1.15fr_1.15fr_.75fr_1fr] xl:gap-10">
+        <section class="rounded-3xl border border-white/10 bg-white/[0.035] p-6" aria-labelledby="footerMissionTitle">
           <div class="flex items-center gap-3">
-            <img src="./logo.png" alt="" class="h-10 w-10 rounded-2xl" width="40" height="40" />
-            <span class="brand-wordmark text-xl font-black"><span>m</span><span class="brand-ai">AI</span><span>Ride</span></span>
+            <img src="./logo.png" alt="" class="h-11 w-11 rounded-2xl" width="44" height="44" />
+            <span class="brand-wordmark text-2xl font-black"><span>m</span><span class="brand-ai">AI</span><span>Ride</span></span>
           </div>
-          <p class="mt-5 max-w-md text-sm leading-6 text-white/62" data-i18n="footerBody">A transparent empty-leg cab aggregator for smarter travelers, fairer drivers, and cleaner highways.</p>
-        </div>
-        <div>
-          <h4 class="text-sm font-black uppercase tracking-[0.2em]" data-i18n="footerCompany">Company</h4>
-          <div class="mt-5 grid gap-3 text-sm text-white/62">
-            <a href="#edge" class="hover:text-white" data-i18n="navEdge">The MaiRide Edge</a>
-            <a href="#sustainability" class="hover:text-white" data-i18n="navSustainability">Sustainability</a>
-            <a href="#partners" class="hover:text-white" data-i18n="navPartners">Partners</a>
+          <h2 id="footerMissionTitle" class="sr-only">MaiRide mission</h2>
+          <p class="mt-5 max-w-sm text-sm leading-6 text-white/65" data-i18n="footerBody">A transparent empty-leg cab aggregator for smarter travelers, fairer drivers, and cleaner highways.</p>
+          <div class="mt-6 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs font-black text-emerald-300">
+            <span class="relative flex h-2.5 w-2.5" aria-hidden="true"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50"></span><span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400"></span></span>
+            System Operational
           </div>
-        </div>
+        </section>
+
+        <details class="footer-accordion border-t border-white/10 py-1 md:border-0 md:py-0">
+          <summary class="focus-ring flex min-h-12 items-center justify-between rounded-xl px-2 text-sm font-black uppercase tracking-[0.16em]">
+            App Platforms
+            <svg class="footer-chevron h-5 w-5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </summary>
+          <div class="footer-panel pt-4 md:pt-0">
+            <h3 id="downloadTitle" class="hidden text-sm font-black uppercase tracking-[0.16em] text-white/90 md:block">App Platforms</h3>
+            <div class="grid gap-3 md:mt-5">
+              <a
+                id="android-app-download"
+                href="/downloads/mairide-android-366.apk"
+                download="mairide-android-366.apk"
+                class="footer-platform focus-ring flex min-h-[76px] items-center gap-4 rounded-2xl px-4 py-3"
+                aria-label="Download MaiRide Android APK Build 366"
+              >
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-mairide-accent text-white">
+                  <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true"><path d="M7.55 5.55 5.9 2.68a.55.55 0 1 1 .95-.55L8.58 5h6.84l1.73-2.87a.55.55 0 1 1 .95.55l-1.65 2.87A4.62 4.62 0 0 1 19.5 9.6v8.65A1.75 1.75 0 0 1 17.75 20h-.9v2.1a1.1 1.1 0 1 1-2.2 0V20h-5.3v2.1a1.1 1.1 0 1 1-2.2 0V20h-.9A1.75 1.75 0 0 1 4.5 18.25V9.6a4.62 4.62 0 0 1 3.05-4.05Z"/></svg>
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-black">Download for Android</span>
+                  <span class="mt-1 block text-xs text-white/50">Direct secure APK</span>
+                </span>
+                <span class="shrink-0 rounded-full bg-mairide-accent/15 px-2.5 py-1 text-[10px] font-black uppercase text-orange-300">Build 366</span>
+              </a>
+              <div class="footer-platform flex min-h-[76px] items-center gap-4 rounded-2xl px-4 py-3" aria-label="MaiRide for iOS coming soon" aria-disabled="true">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-mairide-primary">
+                  <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true"><path d="M17.05 12.54c-.02-2.27 1.85-3.37 1.93-3.42a4.15 4.15 0 0 0-3.26-1.77c-1.37-.14-2.7.82-3.4.82-.72 0-1.8-.81-2.97-.79a4.34 4.34 0 0 0-3.65 2.23c-1.58 2.74-.4 6.78 1.11 9 .76 1.08 1.64 2.28 2.81 2.24 1.14-.05 1.57-.72 2.94-.72 1.36 0 1.76.72 2.95.69 1.23-.02 2-1.09 2.73-2.18a8.9 8.9 0 0 0 1.25-2.54 3.93 3.93 0 0 1-2.44-3.56Zm-2.23-6.65A3.96 3.96 0 0 0 15.73 3a4.04 4.04 0 0 0-2.61 1.37 3.76 3.76 0 0 0-.94 2.79 3.35 3.35 0 0 0 2.64-1.27Z"/></svg>
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-black">Download for iOS</span>
+                  <span class="mt-1 block text-xs text-white/50">TestFlight release</span>
+                </span>
+                <span class="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-black uppercase text-white/65">Coming Soon</span>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details class="footer-accordion border-t border-white/10 py-1 md:border-0 md:py-0">
+          <summary class="focus-ring flex min-h-12 items-center justify-between rounded-xl px-2 text-sm font-black uppercase tracking-[0.16em]">
+            Scan to Install
+            <svg class="footer-chevron h-5 w-5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </summary>
+          <div class="footer-panel pt-4 md:pt-0">
+            <h3 class="hidden text-sm font-black uppercase tracking-[0.16em] text-white/90 md:block">Scan to Install</h3>
+            <a
+              id="android-qr-link"
+              href="/downloads/mairide-android-366.apk"
+              download="mairide-android-366.apk"
+              aria-label="Scan QR code to download the MaiRide Android app"
+              class="focus-ring mt-1 inline-flex flex-col items-start gap-3 rounded-2xl md:mt-5"
+            >
+              <span class="qr-scanner rounded-2xl bg-white p-2">
+                <img
+                  id="android-qr-image"
+                  src="/assets/mairide-android-download-qr.png"
+                  alt="QR code to download the MaiRide Android app"
+                  class="h-28 w-28 rounded-xl bg-white"
+                  width="112"
+                  height="112"
+                  loading="eager"
+                  style="image-rendering:pixelated"
+                />
+              </span>
+              <span id="android-qr-caption" class="text-xs font-bold leading-5 text-white/60">Scan to Install on Mobile</span>
+            </a>
+          </div>
+        </details>
+
+        <details class="footer-accordion border-t border-white/10 py-1 md:border-0 md:py-0">
+          <summary class="focus-ring flex min-h-12 items-center justify-between rounded-xl px-2 text-sm font-black uppercase tracking-[0.16em]">
+            Company &amp; Legal
+            <svg class="footer-chevron h-5 w-5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </summary>
+          <div class="footer-panel pt-4 md:pt-0">
+            <h3 class="hidden text-sm font-black uppercase tracking-[0.16em] text-white/90 md:block">Company &amp; Legal</h3>
+            <nav class="grid gap-3 text-sm text-white/60 md:mt-5" aria-label="Company and compliance links">
+              <a href="#edge" class="transition hover:text-white" data-i18n="navEdge">The MaiRide Edge</a>
+              <a href="#sustainability" class="transition hover:text-white" data-i18n="navSustainability">Sustainability</a>
+              <a href="#partners" class="transition hover:text-white" data-i18n="navPartners">Partners</a>
+              <a href="https://www.mairide.in/terms" class="transition hover:text-white" data-i18n="terms">Terms &amp; Conditions</a>
+              <a href="https://www.mairide.in/privacy" class="transition hover:text-white" data-i18n="privacy">Privacy Policy</a>
+              <a href="https://www.mairide.in/refund" class="transition hover:text-white" data-i18n="refund">Cancellation &amp; Refund Policy</a>
+            </nav>
+          </div>
+        </details>
       </div>
 
-      <div class="mt-8 border-t border-white/10 pt-6 text-xs text-slate-400">
-        <nav class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:justify-start" aria-label="Compliance">
-          <a href="https://www.mairide.in/terms" class="transition hover:text-white" data-i18n="terms">Terms & Conditions</a>
-          <a href="https://www.mairide.in/privacy" class="transition hover:text-white" data-i18n="privacy">Privacy Policy</a>
+      <div class="flex flex-col gap-4 pt-6 text-center text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:text-left">
+        <p>© <span id="footerYear">2026</span> MaiRide. All rights reserved. A digital mobility network owned and operated by Syncra Systems LLP.</p>
+        <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:justify-end">
           <a href="https://www.mairide.in/terms-of-use" class="transition hover:text-white" data-i18n="termsOfUse">Terms of Use</a>
-          <a href="https://www.mairide.in/refund" class="transition hover:text-white" data-i18n="refund">Cancellation & Refund Policy</a>
           <button type="button" id="cookiePreferencesButton" class="transition hover:text-white">Cookie Preferences</button>
-        </nav>
-        <div class="mt-4 flex flex-col gap-2 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
-          <p data-i18n="footerRightsLine">© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.</p>
-          <p class="shrink-0">mairide.in · rides.mairide.in</p>
+          <span class="shrink-0">mairide.in · rides.mairide.in</span>
         </div>
       </div>
     </div>
@@ -1713,6 +1842,17 @@
     }, { threshold: 0.12 });
 
     document.querySelectorAll('.reveal').forEach((node) => observer.observe(node));
+    const footerYear = document.getElementById('footerYear');
+    if (footerYear) footerYear.textContent = String(new Date().getFullYear());
+
+    const footerDesktopQuery = window.matchMedia('(min-width: 768px)');
+    const syncFooterAccordions = (desktopQuery) => {
+      document.querySelectorAll('.footer-accordion').forEach((section) => {
+        section.open = desktopQuery.matches;
+      });
+    };
+    syncFooterAccordions(footerDesktopQuery);
+    footerDesktopQuery.addEventListener?.('change', syncFooterAccordions);
     const existingConsent = getStoredCookieConsent();
     const hasExplicitLanguageSelection = getSharedPreference(langPromptSeenKey) === 'true';
     const hasCompletedLanguageDisclosure = getSharedPreference(languageDisclosureSeenKey) === 'true';
