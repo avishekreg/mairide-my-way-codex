@@ -420,86 +420,90 @@
     </section>
   </main>
 
-  <footer class="bg-mairide-primary px-5 py-14 text-white lg:px-8">
-    <div class="mx-auto grid max-w-7xl gap-10 md:grid-cols-[1.45fr_0.8fr_0.75fr_1fr] md:items-start">
-      <div>
-        <div class="flex items-center gap-3">
-          <img src="./logo.png" alt="" class="h-10 w-10 rounded-2xl" width="40" height="40" />
-          <span class="brand-wordmark text-xl font-black"><span>m</span><span class="brand-ai">AI</span><span>Ride</span></span>
+  <footer class="border-t border-white/10 bg-mairide-primary px-5 py-10 text-white lg:px-8">
+    <div class="mx-auto max-w-7xl">
+      <div class="grid gap-8 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:gap-12">
+        <div>
+          <div class="flex items-center gap-3">
+            <img src="./logo.png" alt="" class="h-10 w-10 rounded-2xl" width="40" height="40" />
+            <span class="brand-wordmark text-xl font-black"><span>m</span><span class="brand-ai">AI</span><span>Ride</span></span>
+          </div>
+          <p class="mt-5 max-w-md text-sm leading-6 text-white/62" data-i18n="footerBody">A transparent empty-leg cab aggregator for smarter travelers, fairer drivers, and cleaner highways.</p>
         </div>
-        <p class="mt-5 max-w-md text-sm leading-6 text-white/62" data-i18n="footerBody">A transparent empty-leg cab aggregator for smarter travelers, fairer drivers, and cleaner highways.</p>
-        <div class="mt-6 flex flex-wrap items-center gap-4">
+        <div>
+          <h4 class="text-sm font-black uppercase tracking-[0.2em]" data-i18n="footerCompany">Company</h4>
+          <div class="mt-5 grid gap-3 text-sm text-white/62">
+            <a href="#edge" class="hover:text-white" data-i18n="navEdge">The MaiRide Edge</a>
+            <a href="#sustainability" class="hover:text-white" data-i18n="navSustainability">Sustainability</a>
+            <a href="#partners" class="hover:text-white" data-i18n="navPartners">Partners</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-8 grid gap-4 border-y border-white/10 bg-white/[0.04] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:gap-7">
+        <div class="min-w-0 text-center sm:text-left">
+          <p class="text-base font-black text-white">Get the App</p>
+          <p class="mt-1 text-xs leading-5 text-white/55">Book, negotiate, and manage rides on the go.</p>
+        </div>
+
+        <div class="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row">
           <a
             id="android-app-download"
             href="/downloads/mairide-android.apk"
             download="mairide-android.apk"
-            class="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+            class="inline-flex min-h-11 w-full min-w-0 items-center justify-center gap-2.5 whitespace-nowrap rounded-xl bg-black px-5 text-[13px] font-bold leading-none text-white transition hover:bg-black/80 sm:w-auto sm:min-w-[10.25rem]"
             aria-label="Download MaiRide for Android"
           >
             <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true">
               <path d="M7.55 5.55 5.9 2.68a.55.55 0 1 1 .95-.55L8.58 5h6.84l1.73-2.87a.55.55 0 1 1 .95.55l-1.65 2.87A4.62 4.62 0 0 1 19.5 9.6v8.65A1.75 1.75 0 0 1 17.75 20h-.9v2.1a1.1 1.1 0 1 1-2.2 0V20h-5.3v2.1a1.1 1.1 0 1 1-2.2 0V20h-.9A1.75 1.75 0 0 1 4.5 18.25V9.6a4.62 4.62 0 0 1 3.05-4.05ZM8.4 8.1a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Zm7.2 0a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Z"/>
             </svg>
-            <span>Android App</span>
+            <span>Get it on Android</span>
           </a>
           <a
             href="./downloads/ios/"
-            class="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+            class="inline-flex min-h-11 w-full min-w-0 items-center justify-center gap-2.5 whitespace-nowrap rounded-xl bg-white px-5 text-[13px] font-bold leading-none text-mairide-primary transition hover:bg-white/90 sm:w-auto sm:min-w-[9.25rem]"
             aria-label="Download MaiRide for iPhone"
           >
             <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true">
               <path d="M15.62 1.1c.14 1.12-.28 2.24-.92 3-.7.83-1.85 1.47-2.95 1.38-.16-1.08.36-2.21 1-2.94.7-.8 1.92-1.4 2.87-1.44Zm3.95 16.77c-.55 1.24-.8 1.8-1.51 2.9-.98 1.52-2.36 3.42-4.08 3.43-1.53.02-1.92-1-4-1-2.08 0-2.52 1-4.05.98-1.73-.02-3.04-1.73-4.02-3.24C-.84 16.23-.9 10.55 1.63 6.65 3.43 3.9 6.27 2.3 8.94 2.3c1.58 0 3.08 1.1 4.02 1.1.92 0 2.66-1.35 4.49-1.15.77.03 2.94.31 4.34 2.35-3.9 2.13-3.27 7.72.78 9.37Z"/>
             </svg>
-            <span>iPhone App</span>
+            <span>Get it on iOS</span>
           </a>
         </div>
+
+        <a
+          id="android-qr-link"
+          href="https://rides.mairide.in/downloads/mairide-android.apk"
+          aria-label="Scan QR code to download the MaiRide Android app"
+          class="hidden items-center gap-3 text-left md:flex lg:justify-self-end"
+        >
+          <img
+            id="android-qr-image"
+            src="/assets/mairide-android-download-qr.png"
+            alt="QR code to download the MaiRide Android app"
+            class="h-16 w-16 shrink-0"
+            width="64"
+            height="64"
+            loading="eager"
+            style="image-rendering:pixelated"
+          />
+          <span id="android-qr-caption" class="whitespace-nowrap text-[11px] font-bold leading-4 text-white/65">Scan to Install</span>
+        </a>
       </div>
-      <div class="md:flex md:justify-center">
-        <div class="inline-flex flex-wrap items-center justify-center gap-4">
-          <a
-            id="android-qr-link"
-            href="https://rides.mairide.in/downloads/mairide-android.apk"
-            aria-label="Scan QR code to download the MaiRide Android app"
-            class="rounded-3xl bg-white p-3 shadow-sm"
-          >
-            <img
-              id="android-qr-image"
-              src="/assets/mairide-android-download-qr.png"
-              alt="QR code to download the MaiRide Android app"
-              class="h-28 w-28"
-              width="112"
-              height="112"
-              loading="lazy"
-              style="image-rendering:pixelated"
-            />
-          </a>
-          <div class="max-w-[170px] text-left">
-            <p class="text-sm font-black leading-5 text-white">Scan for Android</p>
-            <p id="android-qr-caption" class="mt-1 text-xs font-semibold leading-5 text-white/60">Direct APK download</p>
-          </div>
+
+      <div class="mt-6 border-t border-white/10 pt-6 text-xs text-white/45">
+        <nav class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:justify-start" aria-label="Compliance">
+          <a href="https://www.mairide.in/terms" class="transition hover:text-white" data-i18n="terms">Terms & Conditions</a>
+          <a href="https://www.mairide.in/privacy" class="transition hover:text-white" data-i18n="privacy">Privacy Policy</a>
+          <a href="https://www.mairide.in/terms-of-use" class="transition hover:text-white" data-i18n="termsOfUse">Terms of Use</a>
+          <a href="https://www.mairide.in/refund" class="transition hover:text-white" data-i18n="refund">Cancellation & Refund Policy</a>
+          <button type="button" id="cookiePreferencesButton" class="transition hover:text-white">Cookie Preferences</button>
+        </nav>
+        <div class="mt-4 flex flex-col gap-2 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
+          <p data-i18n="footerRightsLine">© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.</p>
+          <p class="shrink-0">mairide.in · rides.mairide.in</p>
         </div>
       </div>
-      <div>
-        <h4 class="text-sm font-black uppercase tracking-[0.2em]" data-i18n="footerCompany">Company</h4>
-        <div class="mt-5 grid gap-3 text-sm text-white/62">
-          <a href="#edge" class="hover:text-white" data-i18n="navEdge">The MaiRide Edge</a>
-          <a href="#sustainability" class="hover:text-white" data-i18n="navSustainability">Sustainability</a>
-          <a href="#partners" class="hover:text-white" data-i18n="navPartners">Partners</a>
-        </div>
-      </div>
-      <div>
-        <h4 class="text-sm font-black uppercase tracking-[0.2em]" data-i18n="footerCompliance">Compliance</h4>
-        <div class="mt-5 grid gap-3 text-sm text-white/62">
-          <a href="https://www.mairide.in/terms" class="hover:text-white" data-i18n="terms">Terms & Conditions</a>
-          <a href="https://www.mairide.in/privacy" class="hover:text-white" data-i18n="privacy">Privacy Policy</a>
-          <a href="https://www.mairide.in/terms-of-use" class="hover:text-white" data-i18n="termsOfUse">Terms of Use</a>
-          <a href="https://www.mairide.in/refund" class="hover:text-white" data-i18n="refund">Cancellation & Refund Policy</a>
-          <button type="button" id="cookiePreferencesButton" class="text-left hover:text-white">Cookie Preferences</button>
-        </div>
-      </div>
-    </div>
-    <div class="mx-auto mt-12 flex max-w-7xl flex-col gap-3 border-t border-white/10 pt-6 text-xs text-white/45 sm:flex-row sm:items-center sm:justify-between">
-      <p data-i18n="footerRightsLine">© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.</p>
-      <p>mairide.in · rides.mairide.in</p>
     </div>
   </footer>
 
@@ -1711,18 +1715,14 @@
       var qrLink = document.getElementById('android-qr-link');
       var caption = document.getElementById('android-qr-caption');
 
-      function applyApkUrl(url, versionLabel) {
+      function applyApkUrl(url) {
         if (!url) return;
         if (qrLink) qrLink.setAttribute('href', CANONICAL_APK);
-        if (caption) {
-          caption.textContent = versionLabel
-            ? ('Direct APK · ' + versionLabel)
-            : 'Direct APK download';
-        }
+        if (caption) caption.textContent = 'Scan to Install';
       }
 
       if (appLink) appLink.setAttribute('href', DEFAULT_APK);
-      applyApkUrl(CANONICAL_APK, 'latest release');
+      applyApkUrl(CANONICAL_APK);
     })();
     document.getElementById('cookieRejectButton').addEventListener('click', () => {
       applyConsent({ preferences: false, analytics: false, marketing: false });

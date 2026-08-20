@@ -7108,32 +7108,41 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
   const buildMeta = buildTime ? `${buildLabel} • ${buildTime}` : buildLabel;
 
   return (
-    <footer className="px-4 pb-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col items-center gap-3 mb-3">
-          {isAndroidDevice ? (
-            <div className="w-full max-w-md">
-              {isAndroidUpdateAvailable ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    openAndroidDownload();
-                  }}
-                  className={cn(
-                    'w-full rounded-2xl px-4 py-3 text-sm font-bold transition',
-                    'bg-mairide-accent text-white hover:opacity-90 shadow-lg shadow-mairide-accent/25 animate-pulse'
-                  )}
-                >
-                  Update App Now
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="flex flex-row flex-wrap items-center justify-center gap-3 sm:gap-4">
+    <footer className="border-t border-slate-200/80 bg-slate-50/80 px-4 py-5 backdrop-blur-sm">
+      <div className="mx-auto max-w-7xl">
+        {isAndroidDevice && isAndroidUpdateAvailable ? (
+          <div className="mx-auto mb-4 w-full max-w-md">
+            <button
+              type="button"
+              onClick={() => {
+                openAndroidDownload();
+              }}
+              className={cn(
+                'min-h-11 w-full rounded-xl px-4 py-2.5 text-sm font-bold transition',
+                'bg-mairide-accent text-white shadow-md shadow-mairide-accent/20 hover:opacity-90 animate-pulse'
+              )}
+            >
+              Update App Now
+            </button>
+            {androidUpdateMessage ? (
+              <p className="mt-2 text-center text-[11px] font-semibold text-mairide-accent">
+                {androidUpdateMessage}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:gap-7">
+          <div className="min-w-0 text-center sm:text-left">
+            <p className="text-base font-black text-slate-900">Get the App</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Book, negotiate, and manage rides on the go.</p>
+          </div>
+
+          <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row">
             <a
               href={PUBLIC_ANDROID_DOWNLOAD_PATH}
               download="mairide-android.apk"
-              className="inline-flex h-11 min-w-[9.75rem] max-w-full items-center justify-center whitespace-nowrap rounded-xl bg-black px-4 text-center text-[13px] font-bold leading-none tracking-wide text-white shadow-sm transition hover:opacity-90 sm:h-12 sm:min-w-[10.5rem] sm:px-5 sm:text-sm"
+              className="inline-flex min-h-11 w-full min-w-0 items-center justify-center whitespace-nowrap rounded-xl bg-black px-5 text-[13px] font-bold leading-none text-white transition hover:opacity-90 sm:w-auto sm:min-w-[10.25rem]"
             >
               Get it on Android
             </a>
@@ -7141,56 +7150,53 @@ const AppFooter = ({ releaseVersion, buildStamp }: { releaseVersion: string; bui
               href="/downloads/ios.html"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-11 min-w-[8.75rem] max-w-full items-center justify-center whitespace-nowrap rounded-xl bg-mairide-primary px-4 text-center text-[13px] font-bold leading-none tracking-wide text-white transition hover:opacity-90 sm:h-12 sm:min-w-[9.5rem] sm:px-5 sm:text-sm"
+              className="inline-flex min-h-11 w-full min-w-0 items-center justify-center whitespace-nowrap rounded-xl bg-mairide-primary px-5 text-[13px] font-bold leading-none text-white transition hover:opacity-90 sm:w-auto sm:min-w-[9.25rem]"
             >
               Get it on iOS
             </a>
-            <a
-              href={PUBLIC_ANDROID_DOWNLOAD_PATH}
-              download="mairide-android.apk"
-              className="inline-flex w-32 flex-col items-center justify-center rounded-2xl border border-mairide-secondary bg-white/90 p-2 shadow-sm transition hover:bg-white"
-              aria-label="Scan QR code to download the mAIRide Android app"
-            >
-              <span className="relative flex h-24 w-24 items-center justify-center rounded-xl bg-white p-1 shadow-inner">
-                <img
-                  src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
-                  alt="QR code to download the mAIRide Android app"
-                  className="h-24 w-24 [image-rendering:pixelated]"
-                  width={96}
-                  height={96}
-                  loading="lazy"
-                />
-              </span>
-              <span className="mt-2 text-center text-[11px] font-black leading-4 text-mairide-primary">
-                Scan for Android
-              </span>
-            </a>
           </div>
-          {isAndroidDevice && androidUpdateMessage && isAndroidUpdateAvailable ? (
-            <p className={cn('text-[11px] text-center', isAndroidUpdateAvailable ? 'text-mairide-accent font-semibold' : 'text-mairide-secondary')}>
-              {androidUpdateMessage}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-mairide-secondary">
-            <a href="/terms" onClick={(event) => handleFooterResourceNavigation(event, 'terms')} className="hover:text-mairide-primary transition">Terms &amp; Conditions</a>
-            <a href="/privacy" onClick={(event) => handleFooterResourceNavigation(event, 'privacy')} className="hover:text-mairide-primary transition">Privacy Policy</a>
-            <a href="/terms-of-use" onClick={(event) => handleFooterResourceNavigation(event, 'terms-of-use')} className="hover:text-mairide-primary transition">Terms of Use</a>
-            <a href="/refund" onClick={(event) => handleFooterResourceNavigation(event, 'refund')} className="hover:text-mairide-primary transition">Refund Policy</a>
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new Event(COOKIE_CONSENT_OPEN_EVENT))}
-              className="hover:text-mairide-primary transition"
-            >
-              Cookie Preferences
-            </button>
-          </div>
+
+          <a
+            href={PUBLIC_ANDROID_DOWNLOAD_PATH}
+            download="mairide-android.apk"
+            className="hidden items-center gap-3 text-left md:flex lg:justify-self-end"
+            aria-label="Scan QR code to download the mAIRide Android app"
+          >
+            <img
+              src={PUBLIC_ANDROID_DOWNLOAD_QR_URL}
+              alt="QR code to download the mAIRide Android app"
+              className="h-16 w-16 shrink-0 [image-rendering:pixelated]"
+              width={64}
+              height={64}
+              loading="eager"
+            />
+            <span className="whitespace-nowrap text-[11px] font-bold leading-4 text-slate-600">Scan to Install</span>
+          </a>
         </div>
-        <p className="text-[11px] text-mairide-secondary/80 tracking-wide text-center">
-          Release {releaseVersion} | Copyright 2026 Syncra Systems LLP · mAIRide. All rights reserved. | Powered by Razorpay.
-        </p>
-        <p className="text-[10px] text-mairide-secondary/70 tracking-wide text-center mt-1">
-          {buildMeta}
-        </p>
+
+        <div className="mt-4 border-t border-slate-200/80 pt-4">
+          <div className="flex flex-col items-center gap-3 lg:flex-row lg:justify-between">
+            <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-slate-500" aria-label="Legal">
+              <a href="/terms" onClick={(event) => handleFooterResourceNavigation(event, 'terms')} className="transition hover:text-slate-900">Terms &amp; Conditions</a>
+              <a href="/privacy" onClick={(event) => handleFooterResourceNavigation(event, 'privacy')} className="transition hover:text-slate-900">Privacy Policy</a>
+              <a href="/terms-of-use" onClick={(event) => handleFooterResourceNavigation(event, 'terms-of-use')} className="transition hover:text-slate-900">Terms of Use</a>
+              <a href="/refund" onClick={(event) => handleFooterResourceNavigation(event, 'refund')} className="transition hover:text-slate-900">Refund Policy</a>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new Event(COOKIE_CONSENT_OPEN_EVENT))}
+                className="transition hover:text-slate-900"
+              >
+                Cookie Preferences
+              </button>
+            </nav>
+            <p className="text-center text-xs leading-5 text-slate-500 lg:text-right">
+              Release {releaseVersion} · © 2026 Syncra Systems LLP · mAIRide. All rights reserved.
+            </p>
+          </div>
+          <p className="mt-2 text-center text-[10px] text-slate-400 lg:text-right">
+            Powered by Razorpay · {buildMeta}
+          </p>
+        </div>
       </div>
     </footer>
   );
