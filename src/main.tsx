@@ -20,5 +20,13 @@ if ('serviceWorker' in navigator) {
     }).catch(() => {
       // Ignore cleanup failures to avoid runtime disruption.
     });
+
+    if ('caches' in window) {
+      void caches.keys().then((keys) => Promise.all(
+        keys.filter((key) => key.startsWith('mairide-shell')).map((key) => caches.delete(key)),
+      )).catch(() => {
+        // Ignore cleanup failures to avoid runtime disruption.
+      });
+    }
   });
 }
