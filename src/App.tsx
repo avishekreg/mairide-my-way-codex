@@ -1808,10 +1808,14 @@ const AdminMaiPayControlDesk = ({
   users = [],
   transactions = [],
   config,
+  readOnly = false,
+  onReadOnlyAction,
 }: {
   users: UserProfile[];
   transactions: Transaction[];
   config?: AppConfig | null;
+  readOnly?: boolean;
+  onReadOnlyAction?: () => void;
 }) => {
   const safeConfig = config || {};
   const [maiPayMasterEnabled, setMaiPayMasterEnabled] = useState(isMaiPayMasterEnabled(safeConfig));
@@ -1872,6 +1876,10 @@ const AdminMaiPayControlDesk = ({
     nextCustomServices: MaiPayServiceDefinition[] = customServices,
     nextSandboxFeatures: SandboxFeatureCatalogState = sandboxFeatureCatalog
   ) => {
+    if (readOnly) {
+      onReadOnlyAction?.();
+      return;
+    }
     setIsSavingMaiPayConfig(true);
     try {
       const headers = await getAdminRequestHeaders(auth.currentUser?.email || null);
@@ -2081,10 +2089,12 @@ const AdminMaiPayControlDesk = ({
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-white/75">
               A separated payment, wallet, QR, settlement, and vendor-routing workspace. Internal capabilities control mAIRide-owned driver wallet and QR onboarding, while external API services support no-code provider priority and fallback routing.
             </p>
-            <div className="mt-5 inline-flex flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-white/80">
-              <span>Sandbox emails</span>
-              <span className="text-white">{STRICT_SANDBOX_EMAILS.join(' · ')}</span>
-            </div>
+            {!readOnly && (
+              <div className="mt-5 inline-flex flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-white/80">
+                <span>Sandbox emails</span>
+                <span className="text-white">{STRICT_SANDBOX_EMAILS.join(' · ')}</span>
+              </div>
+            )}
           </div>
           <div className="grid min-w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:min-w-[420px]">
             <div className={cn(
@@ -2103,7 +2113,7 @@ const AdminMaiPayControlDesk = ({
             </div>
             <button
               type="button"
-              onClick={handleMasterToggle}
+              onClick={readOnly ? onReadOnlyAction : handleMasterToggle}
               disabled={isSavingMaiPayConfig}
               className={cn(
                 "sm:col-span-2 rounded-3xl px-5 py-4 text-left text-sm font-black transition disabled:opacity-60",
@@ -2112,7 +2122,7 @@ const AdminMaiPayControlDesk = ({
                   : "bg-mairide-accent text-white hover:bg-mairide-accent/90"
               )}
             >
-              {isSavingMaiPayConfig ? 'Saving MaiPay controls...' : maiPayMasterEnabled ? 'Turn MaiPay Ecosystem Off' : 'Turn MaiPay Ecosystem On'}
+              {readOnly ? 'MaiPay monitoring only' : isSavingMaiPayConfig ? 'Saving MaiPay controls...' : maiPayMasterEnabled ? 'Turn MaiPay Ecosystem Off' : 'Turn MaiPay Ecosystem On'}
               <span className="mt-1 block text-[10px] font-bold uppercase tracking-widest opacity-70">
                 {activeServiceCount} active · {internalServiceCount} internal · {externalServiceCount} external
               </span>
@@ -2146,7 +2156,7 @@ const AdminMaiPayControlDesk = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleSandboxFeatureToggle(feature.id)}
+                    onClick={readOnly ? onReadOnlyAction : () => handleSandboxFeatureToggle(feature.id)}
                     disabled={isSavingMaiPayConfig}
                     aria-pressed={isEnabled}
                     className="group inline-flex items-center gap-2 rounded-2xl border border-mairide-secondary bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-mairide-primary transition hover:border-mairide-accent disabled:opacity-60"
@@ -2189,13 +2199,15 @@ const AdminMaiPayControlDesk = ({
             <p className="rounded-full bg-mairide-bg px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-mairide-accent">
               {activeServiceCount}/{maiPayServices.length} active
             </p>
-            <button
-              type="button"
-              onClick={() => setShowAddServiceModal(true)}
-              className="rounded-2xl bg-mairide-primary px-4 py-3 text-xs font-black text-white transition hover:bg-mairide-accent"
-            >
-              + Add New Service
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => setShowAddServiceModal(true)}
+                className="rounded-2xl bg-mairide-primary px-4 py-3 text-xs font-black text-white transition hover:bg-mairide-accent"
+              >
+                + Add New Service
+              </button>
+            )}
           </div>
         </div>
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -2220,7 +2232,7 @@ const AdminMaiPayControlDesk = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleServiceToggle(service.id)}
+                    onClick={readOnly ? onReadOnlyAction : () => handleServiceToggle(service.id)}
                     disabled={isSavingMaiPayConfig}
                     className={cn(
                       "rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest transition disabled:opacity-60",
@@ -2239,7 +2251,11 @@ const AdminMaiPayControlDesk = ({
                         ? `${primaryProvider.providerName} · P${primaryProvider.priority} · ${activeProviders.length} active route${activeProviders.length === 1 ? '' : 's'}`
                         : 'Provider routes not configured'}
                   </div>
-                  {service.kind === 'external' ? (
+                  {readOnly ? (
+                    <span className="rounded-2xl border border-mairide-secondary bg-white px-4 py-2 text-xs font-black text-mairide-secondary">
+                      View only
+                    </span>
+                  ) : service.kind === 'external' ? (
                     <button
                       type="button"
                       onClick={() => openServiceSettings(service.id)}
@@ -2280,7 +2296,7 @@ const AdminMaiPayControlDesk = ({
       </div>
 
       <AnimatePresence>
-        {showAddServiceModal ? (
+        {!readOnly && showAddServiceModal ? (
           <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
             <motion.div
               initial={{ opacity: 0, scale: 0.96 }}
@@ -2369,7 +2385,7 @@ const AdminMaiPayControlDesk = ({
       </AnimatePresence>
 
       <AnimatePresence>
-        {configuringService ? (
+        {!readOnly && configuringService ? (
           <div className="fixed inset-0 z-[80] flex items-center justify-end bg-black/50 p-4 backdrop-blur-sm">
             <motion.div
               initial={{ opacity: 0, x: 48 }}
@@ -2715,8 +2731,8 @@ const AdminMaiPayControlDesk = ({
               <div key={driver.uid} className="p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <p className="text-lg font-bold text-mairide-primary">{driver.displayName || driver.email}</p>
-                    <p className="text-sm text-mairide-secondary">{driver.email}</p>
+                    <p className="text-lg font-bold text-mairide-primary">{driver.displayName || (readOnly ? maskInvestorEmail(driver.email) : driver.email)}</p>
+                    <p className="text-sm text-mairide-secondary">{readOnly ? maskInvestorEmail(driver.email) : driver.email}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className="rounded-full bg-mairide-bg px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-mairide-primary">
                         {driver.liveMoneyWallet?.subscriptionStatus || 'inactive'}
@@ -2754,12 +2770,16 @@ const AdminMaiPayControlDesk = ({
             <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-mairide-secondary">Gateway configuration</p>
             <h3 className="mt-2 text-2xl font-black text-mairide-primary">Provider readiness</h3>
             <div className="mt-5 space-y-3">
-              {[
+              {(readOnly ? [
+                ['Provider credentials', 'Hidden in demo'],
+                ['Environment references', 'Hidden in demo'],
+                ['Wallet add-on public rollout', liveWalletPublicStatus ? 'Enabled' : 'Disabled'],
+              ] : [
                 ['Razorpay key', safeConfig.razorpayKeyId ? 'Configured' : 'Missing'],
                 ['Razorpay secret', safeConfig.razorpayKeySecret ? 'Configured' : 'Missing'],
                 ['RazorpayX payouts', safeConfig.razorpayXEnabled ? 'Enabled' : 'Staged'],
                 ['Wallet add-on public rollout', liveWalletPublicStatus ? 'Enabled' : 'Disabled'],
-              ].map(([label, value]) => (
+              ]).map(([label, value]) => (
                 <div key={label} className="flex items-center justify-between gap-4 rounded-2xl bg-mairide-bg px-4 py-3">
                   <span className="text-sm font-bold text-mairide-primary">{label}</span>
                   <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent">{value}</span>
@@ -4242,6 +4262,23 @@ const INVESTOR_DEMO_DATA_EMAILS = new Set([
   'demo.driver@mairide.in',
 ]);
 const normalizeDemoEmail = (value?: string | null) => String(value || '').trim().toLowerCase();
+const maskInvestorEmail = (value?: string | null) => {
+  const email = String(value || '').trim();
+  const separatorIndex = email.indexOf('@');
+  if (separatorIndex <= 0) return email ? 'Hidden in demo' : 'Not provided';
+  return `${email.slice(0, 1)}*****${email.slice(separatorIndex)}`;
+};
+const maskInvestorPhone = (value?: string | null) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return 'Not provided';
+  const localDigits = digits.length > 10 ? digits.slice(-10) : digits;
+  const countryCode = digits.length > 10 ? `+${digits.slice(0, -10)} ` : '';
+  return `${countryCode}${localDigits.slice(0, 5)}*****`;
+};
+const maskInvestorIdentifier = (value?: string | null) => {
+  const normalized = String(value || '').replace(/[^a-zA-Z0-9]/g, '');
+  return normalized ? `XXXX-XXXX-${normalized.slice(-4).toUpperCase()}` : 'Not provided';
+};
 const isInvestorDemoDataProfile = (profile?: Pick<UserProfile, 'email' | 'role'> | null) => {
   const email = normalizeDemoEmail(profile?.email);
   return INVESTOR_DEMO_DATA_EMAILS.has(email) && (profile?.role === 'consumer' || profile?.role === 'driver');
@@ -25848,12 +25885,28 @@ const AdminDashboard = ({
   type UsersInsightView = 'drivers' | 'travelers' | 'onlineDrivers' | 'onlineTravelers' | 'activeTrips' | 'openOffers' | null;
   type AdminTab = 'dashboard' | 'users' | 'support' | 'verification' | 'profile' | 'rides' | 'revenue' | 'transactions' | 'config' | 'analytics' | 'security' | 'map' | 'capacity' | 'mobile' | 'b2b' | 'maipay';
   const adminTabIds: AdminTab[] = ['dashboard', 'users', 'support', 'verification', 'profile', 'rides', 'revenue', 'transactions', 'config', 'analytics', 'security', 'map', 'capacity', 'mobile', 'b2b', 'maipay'];
-  const investorDemoAdminTabs: AdminTab[] = ['dashboard', 'map', 'capacity', 'analytics'];
+  const investorDemoAdminTabs: AdminTab[] = ['dashboard', 'map', 'rides', 'users', 'verification', 'capacity', 'analytics', 'revenue', 'maipay'];
   const resolveAdminTab = (value: unknown): AdminTab =>
     adminTabIds.includes(value as AdminTab) ? (value as AdminTab) : 'dashboard';
   const isInvestorDemoMode = useMemo(() => resolveInvestorDemoMode(), []);
+  const investorDemoRole = useMemo(() => resolveInvestorDemoRole(), []);
   const isPermanentDemoAdmin = String(profile.email || '').trim().toLowerCase() === 'demo.admin@mairide.in';
-  const isAdminDemoReadOnly = isPermanentDemoAdmin || (isInvestorDemoMode && effectiveAdminRole === 'super_admin');
+  const isAdminDemoReadOnly = isPermanentDemoAdmin || (isInvestorDemoMode && investorDemoRole === 'admin');
+  const [demoReadOnlyToast, setDemoReadOnlyToast] = useState(false);
+  const demoReadOnlyToastTimerRef = useRef<number | null>(null);
+  const notifyDemoReadOnly = useCallback(() => {
+    if (!isAdminDemoReadOnly) return;
+    setDemoReadOnlyToast(true);
+    if (demoReadOnlyToastTimerRef.current !== null) {
+      window.clearTimeout(demoReadOnlyToastTimerRef.current);
+    }
+    demoReadOnlyToastTimerRef.current = window.setTimeout(() => setDemoReadOnlyToast(false), 2600);
+  }, [isAdminDemoReadOnly]);
+  const guardDemoAdminMutation = useCallback(() => {
+    if (!isAdminDemoReadOnly) return false;
+    notifyDemoReadOnly();
+    return true;
+  }, [isAdminDemoReadOnly, notifyDemoReadOnly]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [rides, setRides] = useState<Ride[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
@@ -25863,9 +25916,12 @@ const AdminDashboard = ({
     return !isAdminDemoReadOnly || investorDemoAdminTabs.includes(tab);
   }, [isAdminDemoReadOnly]);
   const selectAdminTab = useCallback((tab: AdminTab) => {
-    if (!canOpenAdminTab(tab)) return;
+    if (!canOpenAdminTab(tab)) {
+      notifyDemoReadOnly();
+      return;
+    }
     setActiveTab(tab);
-  }, [canOpenAdminTab]);
+  }, [canOpenAdminTab, notifyDemoReadOnly]);
   const adminHistoryInitializedRef = useRef(false);
   const adminHistoryPopRef = useRef(false);
   const [adminLocation, setAdminLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -25882,6 +25938,7 @@ const AdminDashboard = ({
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (guardDemoAdminMutation()) return;
     if (!resetPasswordUser || !newAdminPassword) return;
 
     setIsResetting(true);
@@ -25913,6 +25970,7 @@ const AdminDashboard = ({
   };
 
   const handleGenerateResetLink = async (targetUser: UserProfile) => {
+    if (guardDemoAdminMutation()) return;
     setIsGeneratingResetLink(targetUser.uid);
     try {
       const headers = await getAdminRequestHeaders(profile.email);
@@ -25980,6 +26038,18 @@ const AdminDashboard = ({
   const adminTransactionsCacheKey = `mairide_admin_transactions_cache_${profile.uid}`;
   const lastAdminLocationWriteRef = useRef(0);
   const isPageVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
+
+  useEffect(() => () => {
+    if (demoReadOnlyToastTimerRef.current !== null) {
+      window.clearTimeout(demoReadOnlyToastTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAdminDemoReadOnly && !investorDemoAdminTabs.includes(activeTab)) {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, isAdminDemoReadOnly]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -26192,6 +26262,7 @@ const AdminDashboard = ({
   }, []);
 
   const handleAdminForceCancelRide = async (booking: any) => {
+    if (guardDemoAdminMutation()) return;
     const rideId = booking.rideId || booking.ride_id || booking.data?.rideId || '';
     const actionId = rideId || booking.id;
 
@@ -26280,6 +26351,7 @@ const AdminDashboard = ({
       if (!isMounted) return;
       const nextLocation = { lat: latitude, lng: longitude };
       setAdminLocation(nextLocation);
+      if (isAdminDemoReadOnly) return;
 
       const now = Date.now();
       if (now - lastAdminLocationWriteRef.current < LOCATION_DB_UPDATE_INTERVAL_MS) return;
@@ -26310,7 +26382,7 @@ const AdminDashboard = ({
     return () => {
       isMounted = false;
     };
-  }, [profile.uid]);
+  }, [isAdminDemoReadOnly, profile.uid]);
 
   const filteredUsers = users.filter(user => {
     if (user.uid === profile.uid) return false;
@@ -26617,6 +26689,7 @@ const AdminDashboard = ({
       : `Manage and monitor platform ${activeTab} details.`;
 
   const handleVerifyDriver = async (userId: string, status: 'approved' | 'rejected') => {
+    if (guardDemoAdminMutation()) return;
     if (!selectedDriver || selectedDriver.verificationStatus !== 'pending') {
       alert('Only pending driver applications can be reviewed here.');
       return;
@@ -26653,6 +26726,7 @@ const AdminDashboard = ({
   };
 
   const handleUpdateRole = async (userId: string, newRole: 'consumer' | 'driver' | 'admin') => {
+    if (guardDemoAdminMutation()) return;
     try {
       await updateDoc(doc(db, 'users', userId), { role: newRole });
     } catch (error) {
@@ -26661,6 +26735,7 @@ const AdminDashboard = ({
   };
 
   const handleDeleteUser = async (userId: string) => {
+    if (guardDemoAdminMutation()) return;
     try {
       const headers = await getAdminRequestHeaders(profile.email);
       await axios.post(adminApiPath('delete-user'), { uid: userId }, { headers });
@@ -26682,6 +26757,7 @@ const AdminDashboard = ({
 
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (guardDemoAdminMutation()) return;
     if (!editingUser) return;
     const normalizedPhone = editingUser.phoneNumber ? toIndianPhoneStorage(editingUser.phoneNumber) : '';
     if (editingUser.phoneNumber && !normalizedPhone) {
@@ -26706,6 +26782,7 @@ const AdminDashboard = ({
   };
 
   const handleUpdateStatus = async (userId: string, newStatus: 'active' | 'inactive') => {
+    if (guardDemoAdminMutation()) return;
     try {
       await updateDoc(doc(db, 'users', userId), { status: newStatus });
     } catch (error) {
@@ -26715,6 +26792,7 @@ const AdminDashboard = ({
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (guardDemoAdminMutation()) return;
     const normalizedEmail = normalizeEmailValue(newUser.email);
     const normalizedPhone = newUser.phoneNumber ? toIndianPhoneStorage(newUser.phoneNumber) : '';
     if (!normalizedEmail || !newUser.displayName || !newUser.password) {
@@ -26806,6 +26884,19 @@ const AdminDashboard = ({
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-mairide-bg">
+      <AnimatePresence>
+        {demoReadOnlyToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            role="status"
+            className="pointer-events-none fixed left-1/2 top-5 z-[120] -translate-x-1/2 rounded-2xl border border-orange-200 bg-white px-5 py-3 text-sm font-bold text-mairide-primary shadow-xl"
+          >
+            Action disabled in Investor Read-Only Demo
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Sidebar Overlay for Mobile */}
       <AnimatePresence>
         {isSidebarOpen && (
@@ -26840,7 +26931,17 @@ const AdminDashboard = ({
         </div>
 
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {[
+          {(isAdminDemoReadOnly ? [
+            { id: 'dashboard', label: 'Dashboard', icon: LineChartIcon, roles: ['super_admin'] },
+            { id: 'map', label: 'Live Map', icon: MapPin, roles: ['super_admin'] },
+            { id: 'rides', label: 'Rides Desk / Trips', icon: Car, roles: ['super_admin'] },
+            { id: 'users', label: 'Users / Drivers & Customers', icon: Users, roles: ['super_admin'] },
+            { id: 'verification', label: 'Verification & Approvals', icon: ShieldCheck, roles: ['super_admin'] },
+            { id: 'capacity', label: 'Capacity & Fleet', icon: TrendingUp, roles: ['super_admin'] },
+            { id: 'analytics', label: 'Analytics', icon: LineChartIcon, roles: ['super_admin'] },
+            { id: 'revenue', label: 'Revenue', icon: IndianRupee, roles: ['super_admin'] },
+            { id: 'maipay', label: 'MaiPay Desk', icon: Wallet, roles: ['super_admin'] },
+          ] : [
             { id: 'dashboard', label: 'Dashboard', icon: LineChartIcon, roles: ['super_admin', 'support', 'compliance', 'finance'] },
             { id: 'verification', label: 'Verifications', icon: ShieldCheck, roles: ['super_admin', 'support', 'compliance'] },
             { id: 'map', label: 'Live Map', icon: MapPin, roles: ['super_admin', 'support'] },
@@ -26857,8 +26958,8 @@ const AdminDashboard = ({
             { id: 'support', label: 'Support', icon: LifeBuoy, roles: ['super_admin', 'support'] },
             { id: 'security', label: 'Security', icon: Lock, roles: ['super_admin'] },
             { id: 'profile', label: 'Profile', icon: UserIcon, roles: ['super_admin', 'support', 'finance', 'compliance'] },
-          ]
-            .filter(item => item.roles.includes(effectiveAdminRole))
+          ])
+            .filter(item => isAdminDemoReadOnly || item.roles.includes(effectiveAdminRole))
             .filter(item => canOpenAdminTab(item.id as AdminTab))
             .map(item => {
             if (item.id === 'b2b') {
@@ -27006,16 +27107,17 @@ const AdminDashboard = ({
               </div>
             </div>
 
+            {isAdminDemoReadOnly && (
+              <div className="mb-8 rounded-[28px] border border-orange-200 bg-orange-50 px-6 py-5 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-orange-700">Investor Demo Mode</p>
+                <p className="mt-2 text-sm leading-6 text-orange-900">
+                  Investor Demo Mode: Read-only access enabled across platform monitoring, verifications, rides, and revenue desks. System configuration and live modifications are locked.
+                </p>
+              </div>
+            )}
+
             {activeTab === 'dashboard' && (
               <div className="space-y-8">
-                {isAdminDemoReadOnly && (
-                  <div className="rounded-[28px] border border-orange-200 bg-orange-50 px-6 py-5 shadow-sm">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-orange-700">Investor Demo Mode</p>
-                    <p className="mt-2 text-sm leading-6 text-orange-900">
-                      This admin session is read-only. Monitoring dashboards remain visible, while approvals, user edits, financial controls, and system configuration panels are hidden from this preview.
-                    </p>
-                  </div>
-                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                   {[
                     {
@@ -27179,7 +27281,7 @@ const AdminDashboard = ({
                 >
                   <div className="flex items-center space-x-4 mb-4">
                     <div className="w-16 h-16 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary">
-                      {driver.driverDetails?.selfiePhoto ? (
+                      {!isAdminDemoReadOnly && driver.driverDetails?.selfiePhoto ? (
                         <img src={driver.driverDetails.selfiePhoto} className="w-full h-full object-cover" alt="Selfie" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center"><UserIcon className="w-8 h-8 text-mairide-secondary" /></div>
@@ -27187,7 +27289,7 @@ const AdminDashboard = ({
                     </div>
                     <div>
                       <h3 className="font-bold text-mairide-primary">{driver.displayName}</h3>
-                      <p className="text-xs text-mairide-secondary">{driver.email}</p>
+                      <p className="text-xs text-mairide-secondary">{isAdminDemoReadOnly ? maskInvestorEmail(driver.email) : driver.email}</p>
                       <span className={cn(
                         "inline-block px-2 py-0.5 rounded-full text-[8px] font-bold uppercase mt-1",
                         driver.verificationStatus === 'pending' ? "bg-orange-100 text-orange-600" :
@@ -27204,7 +27306,7 @@ const AdminDashboard = ({
                     </div>
                     <div className="bg-mairide-bg p-2 rounded-xl">
                       <p className="opacity-60 mb-0.5">Reg No</p>
-                      <p className="text-mairide-primary truncate">{driver.driverDetails?.vehicleRegNumber}</p>
+                      <p className="text-mairide-primary truncate">{isAdminDemoReadOnly ? maskInvestorIdentifier(driver.driverDetails?.vehicleRegNumber) : driver.driverDetails?.vehicleRegNumber}</p>
                     </div>
                   </div>
                 </div>
@@ -27255,7 +27357,7 @@ const AdminDashboard = ({
                         : 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
                       scaledSize: (isLoaded && window.google) ? new window.google.maps.Size(user.role === 'driver' ? 32 : 24, user.role === 'driver' ? 32 : 24) : undefined
                     }}
-                    title={`${user.displayName} (${user.role})`}
+                    title={isAdminDemoReadOnly ? `${user.role === 'driver' ? 'Driver' : 'Traveler'} location` : `${user.displayName} (${user.role})`}
                   />
                 ))}
               </GoogleMap>
@@ -27339,7 +27441,7 @@ const AdminDashboard = ({
                       >
                         <div className="flex items-center gap-4">
                           <div className="w-14 h-14 rounded-2xl bg-white border border-mairide-secondary overflow-hidden flex items-center justify-center">
-                            {getResolvedUserPhoto(user) ? (
+                            {!isAdminDemoReadOnly && getResolvedUserPhoto(user) ? (
                               <img src={getResolvedUserPhoto(user)} alt={user.displayName} className="w-full h-full object-cover" />
                             ) : (
                               <UserIcon className="w-6 h-6 text-mairide-secondary" />
@@ -27347,7 +27449,7 @@ const AdminDashboard = ({
                           </div>
                           <div className="min-w-0">
                             <p className="font-bold text-mairide-primary truncate">{user.displayName}</p>
-                            <p className="text-xs text-mairide-secondary truncate">{user.email}</p>
+                            <p className="text-xs text-mairide-secondary truncate">{isAdminDemoReadOnly ? maskInvestorEmail(user.email) : user.email}</p>
                             <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent mt-1">
                               {user.role === 'driver' ? `${getActiveRideOffers(user.uid).length} open offers` : `${getActiveUserTrips(user.uid, user.role).length} active trips`}
                             </p>
@@ -27446,13 +27548,15 @@ const AdminDashboard = ({
                       </p>
                     )}
                   </div>
-                  <button 
-                    onClick={() => setShowAddUser(true)}
-                    className="flex items-center space-x-2 bg-mairide-primary text-white px-6 py-3 rounded-2xl font-bold hover:scale-105 transition-transform shadow-lg shadow-mairide-primary/20"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>Add User</span>
-                  </button>
+                  {!isAdminDemoReadOnly && (
+                    <button
+                      onClick={() => setShowAddUser(true)}
+                      className="flex items-center space-x-2 bg-mairide-primary text-white px-6 py-3 rounded-2xl font-bold hover:scale-105 transition-transform shadow-lg shadow-mairide-primary/20"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>Add User</span>
+                    </button>
+                  )}
                 </div>
                 
                 <div className="flex flex-col md:flex-row gap-4">
@@ -27510,7 +27614,7 @@ const AdminDashboard = ({
                           className="flex items-center space-x-3 text-left group min-w-0"
                         >
                           <div className="w-14 h-14 rounded-2xl bg-mairide-bg flex items-center justify-center overflow-hidden border border-mairide-secondary shrink-0">
-                            {getResolvedUserPhoto(user) ? (
+                            {!isAdminDemoReadOnly && getResolvedUserPhoto(user) ? (
                               <img src={getResolvedUserPhoto(user)} className="w-full h-full object-cover" alt="" />
                             ) : (
                               <UserIcon className="w-6 h-6 text-mairide-secondary" />
@@ -27518,7 +27622,7 @@ const AdminDashboard = ({
                           </div>
                           <div className="min-w-0">
                             <p className="font-bold text-lg text-mairide-primary group-hover:text-mairide-accent transition-colors truncate">{user.displayName}</p>
-                            <p className="text-sm text-mairide-secondary truncate">{user.email}</p>
+                            <p className="text-sm text-mairide-secondary truncate">{isAdminDemoReadOnly ? maskInvestorEmail(user.email) : user.email}</p>
                             <p className="text-[10px] font-bold uppercase tracking-widest text-mairide-accent mt-1">View details</p>
                             {effectiveAdminRole === 'super_admin' && user.forcePasswordChange && (
                               <p className="text-[10px] font-mono text-mairide-accent mt-1 bg-mairide-accent/5 px-2 py-0.5 rounded inline-block">
@@ -27530,15 +27634,19 @@ const AdminDashboard = ({
 
                         <div className="space-y-2">
                           <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">Role</p>
-                          <select style={SAFARI_SELECT_STYLE} 
-                            value={user.role}
-                            onChange={(e) => handleUpdateRole(user.uid, e.target.value as any)}
-                            className="appearance-none w-full bg-mairide-bg border-none rounded-xl text-xs font-bold p-3 outline-none"
-                          >
-                            <option value="consumer">Consumer</option>
-                            <option value="driver">Driver</option>
-                            <option value="admin">Admin</option>
-                          </select>
+                          {isAdminDemoReadOnly ? (
+                            <p className="rounded-xl bg-mairide-bg p-3 text-xs font-bold capitalize text-mairide-primary">{user.role}</p>
+                          ) : (
+                            <select style={SAFARI_SELECT_STYLE}
+                              value={user.role}
+                              onChange={(e) => handleUpdateRole(user.uid, e.target.value as any)}
+                              className="appearance-none w-full bg-mairide-bg border-none rounded-xl text-xs font-bold p-3 outline-none"
+                            >
+                              <option value="consumer">Consumer</option>
+                              <option value="driver">Driver</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                          )}
                         </div>
 
                         <div className="space-y-2">
@@ -27577,7 +27685,7 @@ const AdminDashboard = ({
                         <div className="space-y-2">
                           <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">Status</p>
                           <button 
-                            onClick={() => handleUpdateStatus(user.uid, user.status === 'active' ? 'inactive' : 'active')}
+                            onClick={isAdminDemoReadOnly ? notifyDemoReadOnly : () => handleUpdateStatus(user.uid, user.status === 'active' ? 'inactive' : 'active')}
                             className={cn(
                               "px-3 py-1 rounded-full text-[10px] font-bold uppercase",
                               user.status === 'active' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
@@ -27589,7 +27697,9 @@ const AdminDashboard = ({
 
                         <div className="space-y-2">
                           <p className="xl:hidden text-[10px] font-bold text-mairide-secondary uppercase tracking-widest">Actions</p>
-                          <div className="flex items-center flex-wrap gap-2">
+                          {isAdminDemoReadOnly ? (
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">View only</span>
+                          ) : <div className="flex items-center flex-wrap gap-2">
                             <button 
                               onClick={() => setShowDeleteConfirm(user.uid)}
                               className="p-2 hover:bg-red-50 text-red-600 rounded-xl transition-colors"
@@ -27624,7 +27734,7 @@ const AdminDashboard = ({
                                 </button>
                               </>
                             )}
-                          </div>
+                          </div>}
                         </div>
                       </div>
                     </div>
@@ -27738,7 +27848,11 @@ const AdminDashboard = ({
                         <p className="text-xs text-mairide-secondary">{new Date(booking.createdAt).toLocaleDateString()}</p>
                       </td>
                       <td className="px-8 py-6">
-                        {booking.status !== 'cancelled' && booking.rideLifecycleStatus !== 'completed' ? (
+                        {isAdminDemoReadOnly ? (
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-mairide-secondary">
+                            View only
+                          </span>
+                        ) : booking.status !== 'cancelled' && booking.rideLifecycleStatus !== 'completed' ? (
                           <button
                             type="button"
                             onClick={() => handleAdminForceCancelRide(booking)}
@@ -27863,6 +27977,8 @@ const AdminDashboard = ({
             users={users}
             transactions={transactions}
             config={adminAppConfig}
+            readOnly={isAdminDemoReadOnly}
+            onReadOnlyAction={notifyDemoReadOnly}
           />
         )}
 
@@ -28296,7 +28412,7 @@ const AdminDashboard = ({
               <div className="p-8 border-b border-mairide-secondary flex justify-between items-center bg-white sticky top-0 z-10">
                 <div className="flex items-center space-x-4">
                   <div className="w-12 h-12 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary">
-                    {selectedDriver.driverDetails?.selfiePhoto ? (
+                    {!isAdminDemoReadOnly && selectedDriver.driverDetails?.selfiePhoto ? (
                       <img src={selectedDriver.driverDetails.selfiePhoto} className="w-full h-full object-cover" alt="Selfie" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center"><UserIcon className="w-6 h-6 text-mairide-secondary" /></div>
@@ -28316,12 +28432,19 @@ const AdminDashboard = ({
 
               <div className="flex-1 overflow-y-auto p-8 space-y-12">
                 <section>
-                  <VerificationMap
-                    markers={selectedDriverMarkers}
-                    isLoaded={isLoaded}
-                    title="Signup Verification Map"
-                    subtitle="This map shows where each verification asset was captured, helping the review team spot inconsistencies quickly."
-                  />
+                  {isAdminDemoReadOnly ? (
+                    <div className="rounded-[28px] border border-mairide-secondary bg-mairide-bg p-6">
+                      <p className="text-sm font-bold text-mairide-primary">Verification location confirmed</p>
+                      <p className="mt-2 text-sm text-mairide-secondary">Exact document capture coordinates are hidden in Investor Read-Only Demo.</p>
+                    </div>
+                  ) : (
+                    <VerificationMap
+                      markers={selectedDriverMarkers}
+                      isLoaded={isLoaded}
+                      title="Signup Verification Map"
+                      subtitle="This map shows where each verification asset was captured, helping the review team spot inconsistencies quickly."
+                    />
+                  )}
                 </section>
 
                 {/* Selfie & Identity */}
@@ -28333,7 +28456,7 @@ const AdminDashboard = ({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div className="space-y-4">
                       <div className="aspect-square bg-mairide-bg rounded-[32px] overflow-hidden border border-mairide-secondary relative group">
-                        {selectedDriver.driverDetails?.selfiePhoto ? (
+                        {!isAdminDemoReadOnly && selectedDriver.driverDetails?.selfiePhoto ? (
                           <img 
                             src={selectedDriver.driverDetails.selfiePhoto} 
                             className="w-full h-full object-cover" 
@@ -28347,8 +28470,8 @@ const AdminDashboard = ({
                             <UserIcon className="w-12 h-12 text-gray-300" />
                           </div>
                         )}
-                        <GeoTagMeta geoTag={selectedDriver.driverDetails?.selfieGeoTag} />
-                        <a href={selectedDriver.driverDetails?.selfiePhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>
+                        {!isAdminDemoReadOnly && <GeoTagMeta geoTag={selectedDriver.driverDetails?.selfieGeoTag} />}
+                        {!isAdminDemoReadOnly && <a href={selectedDriver.driverDetails?.selfiePhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>}
                       </div>
                     </div>
                     <div className="space-y-6">
@@ -28358,11 +28481,11 @@ const AdminDashboard = ({
                       </div>
                       <div className="bg-mairide-bg p-6 rounded-3xl">
                         <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Email Address</p>
-                        <p className="text-lg font-bold text-mairide-primary">{selectedDriver.email}</p>
+                        <p className="text-lg font-bold text-mairide-primary">{isAdminDemoReadOnly ? maskInvestorEmail(selectedDriver.email) : selectedDriver.email}</p>
                       </div>
                       <div className="bg-mairide-bg p-6 rounded-3xl">
                         <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Phone Number</p>
-                        <p className="text-lg font-bold text-mairide-primary">{formatPhoneForDisplay(selectedDriver.phoneNumber)}</p>
+                        <p className="text-lg font-bold text-mairide-primary">{isAdminDemoReadOnly ? maskInvestorPhone(selectedDriver.phoneNumber) : formatPhoneForDisplay(selectedDriver.phoneNumber)}</p>
                       </div>
                     </div>
                   </div>
@@ -28376,13 +28499,13 @@ const AdminDashboard = ({
                   </h3>
                   <div className="bg-mairide-bg p-6 rounded-3xl mb-6">
                     <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">Aadhaar Number</p>
-                    <p className="text-xl font-bold text-mairide-primary tracking-widest">{formatAadhaarForDisplay(selectedDriver.driverDetails?.aadhaarNumber)}</p>
+                    <p className="text-xl font-bold text-mairide-primary tracking-widest">{isAdminDemoReadOnly ? maskInvestorIdentifier(selectedDriver.driverDetails?.aadhaarNumber) : formatAadhaarForDisplay(selectedDriver.driverDetails?.aadhaarNumber)}</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Front View</p>
                       <div className="aspect-[3/2] bg-mairide-bg rounded-2xl overflow-hidden border border-mairide-secondary relative group">
-                        {selectedDriver.driverDetails?.aadhaarFrontPhoto ? (
+                        {!isAdminDemoReadOnly && selectedDriver.driverDetails?.aadhaarFrontPhoto ? (
                           <img 
                             src={selectedDriver.driverDetails.aadhaarFrontPhoto} 
                             className="w-full h-full object-cover" 
@@ -28396,14 +28519,14 @@ const AdminDashboard = ({
                             <ShieldCheck className="w-8 h-8 text-gray-300" />
                           </div>
                         )}
-                        <GeoTagMeta geoTag={selectedDriver.driverDetails?.aadhaarFrontGeoTag} />
-                        <a href={selectedDriver.driverDetails?.aadhaarFrontPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>
+                        {!isAdminDemoReadOnly && <GeoTagMeta geoTag={selectedDriver.driverDetails?.aadhaarFrontGeoTag} />}
+                        {!isAdminDemoReadOnly && <a href={selectedDriver.driverDetails?.aadhaarFrontPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>}
                       </div>
                     </div>
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Back View</p>
                       <div className="aspect-[3/2] bg-mairide-bg rounded-2xl overflow-hidden border border-mairide-secondary relative group">
-                        {selectedDriver.driverDetails?.aadhaarBackPhoto ? (
+                        {!isAdminDemoReadOnly && selectedDriver.driverDetails?.aadhaarBackPhoto ? (
                           <img 
                             src={selectedDriver.driverDetails.aadhaarBackPhoto} 
                             className="w-full h-full object-cover" 
@@ -28417,8 +28540,8 @@ const AdminDashboard = ({
                             <ShieldCheck className="w-8 h-8 text-gray-300" />
                           </div>
                         )}
-                        <GeoTagMeta geoTag={selectedDriver.driverDetails?.aadhaarBackGeoTag} />
-                        <a href={selectedDriver.driverDetails?.aadhaarBackPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>
+                        {!isAdminDemoReadOnly && <GeoTagMeta geoTag={selectedDriver.driverDetails?.aadhaarBackGeoTag} />}
+                        {!isAdminDemoReadOnly && <a href={selectedDriver.driverDetails?.aadhaarBackPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>}
                       </div>
                     </div>
                   </div>
@@ -28437,13 +28560,13 @@ const AdminDashboard = ({
                   </h3>
                   <div className="bg-mairide-bg p-6 rounded-3xl mb-6">
                     <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-1">DL Number</p>
-                    <p className="text-xl font-bold text-mairide-primary tracking-widest">{selectedDriver.driverDetails?.dlNumber}</p>
+                    <p className="text-xl font-bold text-mairide-primary tracking-widest">{isAdminDemoReadOnly ? maskInvestorIdentifier(selectedDriver.driverDetails?.dlNumber) : selectedDriver.driverDetails?.dlNumber}</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Front View</p>
                       <div className="aspect-[3/2] bg-mairide-bg rounded-2xl overflow-hidden border border-mairide-secondary relative group">
-                        {selectedDriver.driverDetails?.dlFrontPhoto ? (
+                        {!isAdminDemoReadOnly && selectedDriver.driverDetails?.dlFrontPhoto ? (
                           <img 
                             src={selectedDriver.driverDetails.dlFrontPhoto} 
                             className="w-full h-full object-cover" 
@@ -28457,14 +28580,14 @@ const AdminDashboard = ({
                             <Car className="w-8 h-8 text-gray-300" />
                           </div>
                         )}
-                        <GeoTagMeta geoTag={selectedDriver.driverDetails?.dlFrontGeoTag} />
-                        <a href={selectedDriver.driverDetails?.dlFrontPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>
+                        {!isAdminDemoReadOnly && <GeoTagMeta geoTag={selectedDriver.driverDetails?.dlFrontGeoTag} />}
+                        {!isAdminDemoReadOnly && <a href={selectedDriver.driverDetails?.dlFrontPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>}
                       </div>
                     </div>
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Back View</p>
                       <div className="aspect-[3/2] bg-mairide-bg rounded-2xl overflow-hidden border border-mairide-secondary relative group">
-                        {selectedDriver.driverDetails?.dlBackPhoto ? (
+                        {!isAdminDemoReadOnly && selectedDriver.driverDetails?.dlBackPhoto ? (
                           <img 
                             src={selectedDriver.driverDetails.dlBackPhoto} 
                             className="w-full h-full object-cover" 
@@ -28478,8 +28601,8 @@ const AdminDashboard = ({
                             <Car className="w-8 h-8 text-gray-300" />
                           </div>
                         )}
-                        <GeoTagMeta geoTag={selectedDriver.driverDetails?.dlBackGeoTag} />
-                        <a href={selectedDriver.driverDetails?.dlBackPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>
+                        {!isAdminDemoReadOnly && <GeoTagMeta geoTag={selectedDriver.driverDetails?.dlBackGeoTag} />}
+                        {!isAdminDemoReadOnly && <a href={selectedDriver.driverDetails?.dlBackPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>}
                       </div>
                     </div>
                   </div>
@@ -28506,7 +28629,7 @@ const AdminDashboard = ({
                     </div>
                     <div className="bg-mairide-bg p-4 rounded-2xl col-span-2 md:col-span-1">
                       <p className="text-[8px] font-bold text-mairide-secondary uppercase mb-1">Reg Number</p>
-                      <p className="text-sm font-bold text-mairide-primary tracking-widest">{selectedDriver.driverDetails?.vehicleRegNumber}</p>
+                      <p className="text-sm font-bold text-mairide-primary tracking-widest">{isAdminDemoReadOnly ? maskInvestorIdentifier(selectedDriver.driverDetails?.vehicleRegNumber) : selectedDriver.driverDetails?.vehicleRegNumber}</p>
                     </div>
                     <div className="bg-mairide-bg p-4 rounded-2xl">
                       <p className="text-[8px] font-bold text-mairide-secondary uppercase mb-1">Insurance Status</p>
@@ -28531,7 +28654,7 @@ const AdminDashboard = ({
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">Vehicle Photo</p>
                       <div className="aspect-[4/3] bg-mairide-bg rounded-2xl overflow-hidden border border-mairide-secondary relative group">
-                        {selectedDriver.driverDetails?.vehiclePhoto ? (
+                        {!isAdminDemoReadOnly && selectedDriver.driverDetails?.vehiclePhoto ? (
                           <img 
                             src={selectedDriver.driverDetails.vehiclePhoto} 
                             className="w-full h-full object-cover" 
@@ -28545,14 +28668,14 @@ const AdminDashboard = ({
                             <Car className="w-8 h-8 text-gray-300" />
                           </div>
                         )}
-                        <GeoTagMeta geoTag={selectedDriver.driverDetails?.vehicleGeoTag} />
-                        <a href={selectedDriver.driverDetails?.vehiclePhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>
+                        {!isAdminDemoReadOnly && <GeoTagMeta geoTag={selectedDriver.driverDetails?.vehicleGeoTag} />}
+                        {!isAdminDemoReadOnly && <a href={selectedDriver.driverDetails?.vehiclePhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>}
                       </div>
                     </div>
                     <div className="space-y-2">
                       <p className="text-[10px] font-bold text-mairide-secondary uppercase text-center">RC Photo</p>
                       <div className="aspect-[4/3] bg-mairide-bg rounded-2xl overflow-hidden border border-mairide-secondary relative group">
-                        {selectedDriver.driverDetails?.rcPhoto ? (
+                        {!isAdminDemoReadOnly && selectedDriver.driverDetails?.rcPhoto ? (
                           <img 
                             src={selectedDriver.driverDetails.rcPhoto} 
                             className="w-full h-full object-cover" 
@@ -28566,8 +28689,8 @@ const AdminDashboard = ({
                             <ShieldCheck className="w-8 h-8 text-gray-300" />
                           </div>
                         )}
-                        <GeoTagMeta geoTag={selectedDriver.driverDetails?.rcGeoTag} />
-                        <a href={selectedDriver.driverDetails?.rcPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>
+                        {!isAdminDemoReadOnly && <GeoTagMeta geoTag={selectedDriver.driverDetails?.rcGeoTag} />}
+                        {!isAdminDemoReadOnly && <a href={selectedDriver.driverDetails?.rcPhoto} target="_blank" className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white font-bold">View Full Size</a>}
                       </div>
                     </div>
                   </div>
@@ -28656,7 +28779,11 @@ const AdminDashboard = ({
                 {/* Final Decision */}
                 <section className="bg-mairide-bg p-8 rounded-[32px] border border-mairide-secondary">
                   <h3 className="text-lg font-bold text-mairide-primary mb-6">Verification Decision</h3>
-                  <div className="space-y-6">
+                  {isAdminDemoReadOnly ? (
+                    <div className="rounded-2xl border border-orange-200 bg-orange-50 px-5 py-4 text-sm font-bold text-orange-900">
+                      Verification evidence is available for monitoring only. Approve and reject actions are locked in Investor Read-Only Demo.
+                    </div>
+                  ) : <div className="space-y-6">
                     <div>
                       <label className="block text-xs font-bold text-mairide-secondary uppercase mb-2 ml-2">Rejection Reason (if applicable)</label>
                       <textarea 
@@ -28687,7 +28814,7 @@ const AdminDashboard = ({
                         Approve Driver
                       </button>
                     </div>
-                  </div>
+                  </div>}
                 </section>
               </div>
             </motion.div>
@@ -28705,7 +28832,7 @@ const AdminDashboard = ({
               <div className="p-8 border-b border-mairide-secondary flex justify-between items-center bg-white sticky top-0 z-10">
                 <div className="flex items-center space-x-4">
                   <div className="w-12 h-12 rounded-2xl bg-mairide-bg overflow-hidden border border-mairide-secondary flex items-center justify-center">
-                    {getResolvedUserPhoto(selectedUser) ? (
+                    {!isAdminDemoReadOnly && getResolvedUserPhoto(selectedUser) ? (
                       <img src={getResolvedUserPhoto(selectedUser)} className="w-full h-full object-cover" alt={selectedUser.displayName} />
                     ) : (
                       <UserIcon className="w-6 h-6 text-mairide-secondary" />
@@ -28725,11 +28852,11 @@ const AdminDashboard = ({
                 <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="bg-mairide-bg p-6 rounded-3xl">
                     <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Email</p>
-                    <p className="text-lg font-bold text-mairide-primary break-all">{selectedUser.email}</p>
+                    <p className="text-lg font-bold text-mairide-primary break-all">{isAdminDemoReadOnly ? maskInvestorEmail(selectedUser.email) : selectedUser.email}</p>
                   </div>
                   <div className="bg-mairide-bg p-6 rounded-3xl">
                     <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Phone</p>
-                    <p className="text-lg font-bold text-mairide-primary">{formatPhoneForDisplay(selectedUser.phoneNumber)}</p>
+                    <p className="text-lg font-bold text-mairide-primary">{isAdminDemoReadOnly ? maskInvestorPhone(selectedUser.phoneNumber) : formatPhoneForDisplay(selectedUser.phoneNumber)}</p>
                   </div>
                   <div className="bg-mairide-bg p-6 rounded-3xl">
                     <p className="text-[10px] font-bold text-mairide-secondary uppercase mb-2">Status</p>
@@ -28781,7 +28908,7 @@ const AdminDashboard = ({
                   <section className="bg-mairide-bg p-6 rounded-3xl">
                     <h3 className="text-xs font-bold text-mairide-secondary uppercase tracking-widest mb-4">Latest Known Location</h3>
                     <p className="text-sm font-bold text-mairide-primary">
-                      {selectedUser.location.lat.toFixed(5)}, {selectedUser.location.lng.toFixed(5)}
+                      {isAdminDemoReadOnly ? 'Location available · exact coordinates hidden' : `${selectedUser.location.lat.toFixed(5)}, ${selectedUser.location.lng.toFixed(5)}`}
                     </p>
                     <p className="text-xs text-mairide-secondary mt-2">Updated {new Date(selectedUser.location.lastUpdated).toLocaleString()}</p>
                   </section>
