@@ -63,10 +63,10 @@
     }
     .hero-photo {
       background-image:
-        linear-gradient(to right, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.82) 38%, rgba(0,0,0,0.52) 68%, rgba(0,0,0,0.18) 100%),
-        linear-gradient(180deg, rgba(7,10,15,0.22) 0%, rgba(7,10,15,0.44) 100%),
+        linear-gradient(to right, rgba(10,17,23,0.96) 0%, rgba(10,17,23,0.88) 40%, rgba(10,17,23,0.62) 68%, rgba(10,17,23,0.38) 100%),
+        linear-gradient(180deg, rgba(7,10,15,0.14) 0%, rgba(7,10,15,0.58) 100%),
         url("/hero/mairide-hero-car.png");
-      background-position: center;
+      background-position: 58% center;
       background-size: cover;
     }
     .hero-grid {
@@ -99,6 +99,48 @@
       background: rgba(255,255,255,.92);
       color: #1F2D38;
       box-shadow: 0 18px 44px rgba(0,0,0,.16);
+    }
+    .hero-access-card {
+      background: rgba(255,255,255,.92);
+      border: 1px solid rgba(226,232,240,.82);
+      box-shadow: 0 32px 80px rgba(2,8,23,.28);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+    .hero-access-tab[aria-selected="true"] {
+      background: #FFFFFF;
+      color: #1F2D38;
+      box-shadow: 0 5px 18px rgba(31,45,56,.1);
+    }
+    .hero-access-tab[aria-selected="false"] { color: #6F8090; }
+    .conversion-card {
+      transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+    }
+    .conversion-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(233,122,46,.48);
+      box-shadow: 0 24px 54px rgba(31,45,56,.1);
+    }
+    .download-dock {
+      background:
+        linear-gradient(120deg, rgba(255,255,255,.06), transparent 42%),
+        #182630;
+      box-shadow: 0 28px 80px rgba(31,45,56,.18);
+    }
+    .focus-ring:focus-visible {
+      outline: 3px solid rgba(233,122,46,.55);
+      outline-offset: 3px;
+    }
+    @media (max-width: 1023px) {
+      .hero-photo { background-position: 66% center; }
+    }
+    @media (max-width: 639px) {
+      .hero-photo {
+        background-image:
+          linear-gradient(180deg, rgba(10,17,23,0.86) 0%, rgba(10,17,23,0.9) 52%, rgba(10,17,23,0.98) 100%),
+          url("/hero/mairide-hero-car.png");
+        background-position: 64% center;
+      }
     }
     .reveal {
       opacity: 0;
@@ -153,55 +195,75 @@
 
   <main id="top">
     <div id="landingHome">
-    <section class="hero-photo relative flex min-h-[calc(100svh-77px)] items-center overflow-hidden">
-      <div class="hero-grid pointer-events-none absolute inset-0 opacity-70"></div>
-      <div class="pointer-events-none absolute inset-y-0 right-0 hidden w-[42%] bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.14),transparent_58%)] lg:block"></div>
-      <div class="mx-auto w-full max-w-7xl px-5 py-16 lg:px-8 lg:py-20">
-        <div class="hero-copy max-w-3xl reveal">
-          <div class="hero-pill mb-5 inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-mairide-accent shadow-sm">
+    <section class="hero-photo relative flex min-h-[calc(100svh-110px)] items-center overflow-hidden">
+      <div class="hero-grid pointer-events-none absolute inset-0 opacity-45"></div>
+      <div class="mx-auto grid w-full max-w-7xl gap-10 px-5 py-14 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.65fr)] lg:items-center lg:px-8 lg:py-16">
+        <div class="hero-copy reveal">
+          <div class="hero-pill mb-6 inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-xs font-black uppercase text-mairide-accent shadow-sm">
             <span class="h-2 w-2 rounded-full bg-mairide-accent"></span>
-            <span data-i18n="heroBadge">Empty-Leg Mobility Network</span>
+            <span data-i18n="heroBadge">Intelligent intercity mobility</span>
           </div>
-          <h1 class="max-w-[13ch] text-4xl font-black leading-[0.98] tracking-tight sm:text-6xl lg:text-7xl" data-i18n="heroTitle">
-            MaiRide
+          <h1 class="max-w-[12ch] text-4xl font-black leading-[1.02] sm:text-6xl lg:text-7xl" data-i18n="heroTitle">
+            Smart Intercity &amp; Return Rides. Zero Surge.
           </h1>
-          <p class="mt-7 max-w-2xl text-lg leading-8 sm:text-xl" data-i18n="heroSub">
-            MaiRide is a smart ride-hailing and travel mobility platform connecting travelers and drivers for instant and scheduled rides.
+          <p class="mt-6 max-w-2xl text-lg leading-8 sm:text-xl" data-i18n="heroSub">
+            Fair fares for travelers, guaranteed return bookings for drivers, powered by intelligent mobility.
           </p>
-          <div class="mt-10 flex flex-col gap-4 sm:flex-row">
+          <div class="mt-9 flex flex-col gap-3 sm:flex-row">
             <a
               href="https://rides.mairide.in"
               data-ride-cta
-              class="inline-flex min-h-14 items-center justify-center rounded-2xl bg-mairide-accent px-8 text-base font-black text-white shadow-mairide transition hover:-translate-y-1 hover:bg-mairide-primary"
+              class="focus-ring inline-flex min-h-14 items-center justify-center gap-3 rounded-2xl bg-mairide-accent px-7 text-base font-black text-white shadow-mairide transition hover:-translate-y-1 hover:bg-[#D96B27]"
               data-i18n="heroPrimary"
             >
-              Book Now / Ride With Us
+              Book a Ride (Web)
             </a>
             <a
-              href="#partners"
-              class="hero-secondary-cta inline-flex min-h-14 items-center justify-center rounded-2xl border px-8 text-base font-black transition hover:-translate-y-1 hover:border-mairide-accent hover:text-mairide-accent"
-              data-i18n="heroSecondary"
+              href="/downloads/mairide-android-366.apk"
+              download="mairide-android-366.apk"
+              class="focus-ring hero-secondary-cta inline-flex min-h-14 items-center justify-center gap-3 rounded-2xl border px-7 text-base font-black transition hover:-translate-y-1 hover:border-mairide-accent hover:text-mairide-accent"
             >
-              Partner With Us
+              Download Driver / Traveler App
             </a>
           </div>
+          <div class="mt-8 flex flex-wrap gap-x-7 gap-y-3 text-xs font-bold text-white/70">
+            <span class="inline-flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-mairide-accent"></span>Verified drivers</span>
+            <span class="inline-flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-mairide-accent"></span>Transparent fare guidance</span>
+            <span class="inline-flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full bg-mairide-accent"></span>Secure ride handshakes</span>
+          </div>
         </div>
-      </div>
-      <div class="pointer-events-none absolute bottom-6 left-5 right-5 mx-auto flex max-w-7xl items-end justify-between text-[10px] font-black uppercase tracking-[0.25em] text-mairide-secondary lg:px-8">
-        <span data-i18n="heroProofA">Verified Drivers</span>
-        <span class="hidden sm:inline" data-i18n="heroProofB">Fixed Fee Ecosystem</span>
-      </div>
-    </section>
 
-    <section class="px-5 py-10 lg:px-8">
-      <div class="mx-auto max-w-7xl rounded-[32px] border border-mairide-secondary/15 bg-white px-6 py-8 shadow-sm sm:px-8">
-        <p class="text-sm font-black uppercase tracking-[0.24em] text-mairide-accent">Platform Purpose</p>
-        <h2 class="mt-3 text-3xl font-black tracking-tight text-mairide-primary sm:text-4xl">
-          MaiRide: A smart ride-hailing platform for travelers and drivers.
-        </h2>
-        <p class="mt-4 max-w-3xl text-base leading-7 text-mairide-secondary">
-          MaiRide connects travelers, verified drivers, and fleet partners through a secure empty-leg mobility network built for transparent intercity ride discovery, route matching, and digital trip coordination.
-        </p>
+        <aside class="hero-access-card reveal relative z-10 rounded-3xl p-5 sm:p-6" aria-labelledby="heroAccessTitle">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-xs font-black uppercase text-mairide-accent">Secure access</p>
+              <h2 id="heroAccessTitle" class="mt-2 text-2xl font-black text-mairide-primary">Start with MaiRide</h2>
+              <p class="mt-2 text-sm leading-6 text-mairide-secondary">Continue to the secure web app to book, drive, or manage your account.</p>
+            </div>
+            <img src="./logo.png" alt="" class="h-11 w-11 rounded-2xl" width="44" height="44" />
+          </div>
+
+          <div class="mt-6 grid grid-cols-2 rounded-2xl bg-slate-100 p-1" role="tablist" aria-label="Account access mode">
+            <button id="landingLoginTab" type="button" class="hero-access-tab focus-ring min-h-11 rounded-xl px-4 text-sm font-black transition" role="tab" aria-selected="true">Log in</button>
+            <button id="landingSignupTab" type="button" class="hero-access-tab focus-ring min-h-11 rounded-xl px-4 text-sm font-black transition" role="tab" aria-selected="false">Sign up</button>
+          </div>
+
+          <div class="mt-5 grid gap-3">
+            <a id="landingGoogleAccess" href="https://rides.mairide.in/?mode=login" class="focus-ring inline-flex min-h-[52px] items-center justify-center gap-3 rounded-2xl border border-slate-300 bg-white px-5 text-sm font-black text-mairide-primary transition hover:border-mairide-accent hover:bg-orange-50">
+              <span class="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white font-black text-[#4285F4]">G</span>
+              <span>Continue with Google</span>
+            </a>
+            <a id="landingEmailAccess" href="https://rides.mairide.in/?mode=login" class="focus-ring inline-flex min-h-[52px] items-center justify-center gap-3 rounded-2xl bg-mairide-primary px-5 text-sm font-black text-white transition hover:bg-mairide-accent">
+              <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="m4 7 8 6 8-6"/></svg>
+              <span>Continue with Email</span>
+            </a>
+          </div>
+
+          <div class="mt-5 flex items-center justify-between gap-4 border-t border-slate-200 pt-4 text-xs text-mairide-secondary">
+            <span>Traveler and driver access</span>
+            <span class="font-black text-green-700">Secure sign-in</span>
+          </div>
+        </aside>
       </div>
     </section>
 
@@ -210,25 +272,31 @@
         <div class="reveal flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div class="max-w-2xl">
             <p class="text-sm font-black uppercase tracking-[0.24em] text-mairide-accent" data-i18n="howEyebrow">How It Works</p>
-            <h2 class="mt-4 text-4xl font-black tracking-tight text-mairide-primary sm:text-5xl" data-i18n="howTitle">A faster conversion path from intent to confirmed ride.</h2>
+            <h2 class="mt-4 text-4xl font-black text-mairide-primary sm:text-5xl" data-i18n="howTitle">A fairer ride network for both sides of every journey.</h2>
           </div>
-          <p class="max-w-md text-base leading-7 text-mairide-secondary" data-i18n="howBody">MaiRide uses AI-led routing, verified supply, and direct digital handshakes to compress intercity booking friction into one clean flow.</p>
+          <p class="max-w-md text-base leading-7 text-mairide-secondary" data-i18n="howBody">MaiRide turns intercity demand and empty return routes into clear, bookable opportunities with pricing transparency built in.</p>
         </div>
         <div class="mt-10 grid gap-5 lg:grid-cols-3">
-          <article class="reveal rounded-[32px] border border-mairide-secondary/20 bg-white px-7 py-8 shadow-sm">
-            <p class="text-xs font-black uppercase tracking-[0.2em] text-mairide-accent">01</p>
-            <h3 class="mt-5 text-2xl font-black text-mairide-primary" data-i18n="howCardOneTitle">Smart AI Route Mapping</h3>
-            <p class="mt-4 text-sm leading-7 text-mairide-secondary" data-i18n="howCardOneBody">Every request is evaluated against live corridor intelligence so nearby empty-leg inventory surfaces instantly with cleaner route logic.</p>
+          <article class="conversion-card reveal rounded-3xl border border-mairide-secondary/20 bg-white px-7 py-8 shadow-sm">
+            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-50 text-mairide-accent">
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 14-4-4 4-4"/><path d="M5 10h10a4 4 0 0 1 4 4v4"/></svg>
+            </div>
+            <h3 class="mt-6 text-2xl font-black text-mairide-primary" data-i18n="howCardOneTitle">Return Trip Guarantee</h3>
+            <p class="mt-4 text-sm leading-7 text-mairide-secondary" data-i18n="howCardOneBody">No empty return miles for drivers. MaiRide helps turn planned return corridors into confirmed earning opportunities.</p>
           </article>
-          <article class="reveal rounded-[32px] border border-mairide-secondary/20 bg-white px-7 py-8 shadow-sm">
-            <p class="text-xs font-black uppercase tracking-[0.2em] text-mairide-accent">02</p>
-            <h3 class="mt-5 text-2xl font-black text-mairide-primary" data-i18n="howCardTwoTitle">Empty-Leg Price Match (Up to 50% Off)</h3>
-            <p class="mt-4 text-sm leading-7 text-mairide-secondary" data-i18n="howCardTwoBody">Travelers only pay for the useful leg of the journey, unlocking deeply reduced one-way fares without messy offline negotiation.</p>
+          <article class="conversion-card reveal rounded-3xl border border-mairide-secondary/20 bg-white px-7 py-8 shadow-sm">
+            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50 text-sky-700">
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <h3 class="mt-6 text-2xl font-black text-mairide-primary" data-i18n="howCardTwoTitle">Transparent Pricing</h3>
+            <p class="mt-4 text-sm leading-7 text-mairide-secondary" data-i18n="howCardTwoBody">Zero surge and fair, visible margins. AI suggests a sensible corridor while drivers retain final pricing freedom.</p>
           </article>
-          <article class="reveal rounded-[32px] border border-mairide-secondary/20 bg-white px-7 py-8 shadow-sm">
-            <p class="text-xs font-black uppercase tracking-[0.2em] text-mairide-accent">03</p>
-            <h3 class="mt-5 text-2xl font-black text-mairide-primary" data-i18n="howCardThreeTitle">Secure One-Click Ride Handshake</h3>
-            <p class="mt-4 text-sm leading-7 text-mairide-secondary" data-i18n="howCardThreeBody">Verified identities, fixed platform rules, and secure payment handshakes turn interest into confirmed bookings with minimal lag.</p>
+          <article class="conversion-card reveal rounded-3xl border border-mairide-secondary/20 bg-white px-7 py-8 shadow-sm">
+            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="5"/><path d="M4.8 11.5 3 21l6-3 6 3-1.1-5.8"/><path d="M14 3.4A5 5 0 1 1 15.8 13"/></svg>
+            </div>
+            <h3 class="mt-6 text-2xl font-black text-mairide-primary" data-i18n="howCardThreeTitle">mAiCoins Rewards</h3>
+            <p class="mt-4 text-sm leading-7 text-mairide-secondary" data-i18n="howCardThreeBody">Instant signup bonuses and trip rewards give travelers and drivers more value from every completed journey.</p>
           </article>
         </div>
       </div>
@@ -420,6 +488,49 @@
     </section>
   </main>
 
+  <section id="download" class="bg-white px-5 py-14 lg:px-8 lg:py-16" aria-labelledby="downloadTitle">
+    <div class="download-dock mx-auto grid max-w-7xl gap-8 rounded-3xl px-6 py-8 text-white sm:px-9 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:px-12 lg:py-10">
+      <div class="max-w-2xl">
+        <p class="text-xs font-black uppercase text-mairide-accent">MaiRide on Android</p>
+        <h2 id="downloadTitle" class="mt-3 text-3xl font-black sm:text-4xl">Get the MaiRide Android Experience</h2>
+        <p class="mt-4 max-w-xl text-sm leading-7 text-white/65 sm:text-base">Book intercity rides, publish return routes, negotiate transparently, and keep every trip update close at hand.</p>
+        <div class="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <a
+            id="android-app-download"
+            href="/downloads/mairide-android-366.apk"
+            download="mairide-android-366.apk"
+            class="focus-ring inline-flex min-h-14 items-center justify-center gap-3 rounded-2xl bg-mairide-accent px-7 text-sm font-black text-white transition hover:-translate-y-1 hover:bg-[#D96B27]"
+            aria-label="Download MaiRide Android APK Build 366"
+          >
+            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true"><path d="M7.55 5.55 5.9 2.68a.55.55 0 1 1 .95-.55L8.58 5h6.84l1.73-2.87a.55.55 0 1 1 .95.55l-1.65 2.87A4.62 4.62 0 0 1 19.5 9.6v8.65A1.75 1.75 0 0 1 17.75 20h-.9v2.1a1.1 1.1 0 1 1-2.2 0V20h-5.3v2.1a1.1 1.1 0 1 1-2.2 0V20h-.9A1.75 1.75 0 0 1 4.5 18.25V9.6a4.62 4.62 0 0 1 3.05-4.05ZM8.4 8.1a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Zm7.2 0a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Z"/></svg>
+            Download APK
+          </a>
+          <span class="text-xs leading-5 text-white/50">Build 366 · Direct, secure download</span>
+        </div>
+      </div>
+
+      <a
+        id="android-qr-link"
+        href="/downloads/mairide-android-366.apk"
+        download="mairide-android-366.apk"
+        aria-label="Scan QR code to download the MaiRide Android app"
+        class="focus-ring hidden items-center gap-4 rounded-2xl border border-white/15 bg-white/[0.06] p-4 transition hover:border-mairide-accent md:flex lg:justify-self-end"
+      >
+        <img
+          id="android-qr-image"
+          src="/assets/mairide-android-download-qr.png"
+          alt="QR code to download the MaiRide Android app"
+          class="h-28 w-28 shrink-0 rounded-xl bg-white p-2"
+          width="112"
+          height="112"
+          loading="eager"
+          style="image-rendering:pixelated"
+        />
+        <span id="android-qr-caption" class="max-w-[9rem] text-sm font-black leading-5 text-white">Scan to Install on Mobile</span>
+      </a>
+    </div>
+  </section>
+
   <footer class="border-t border-white/10 bg-mairide-primary px-5 py-10 text-white lg:px-8">
     <div class="mx-auto max-w-7xl">
       <div class="grid gap-8 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:gap-12">
@@ -440,58 +551,7 @@
         </div>
       </div>
 
-      <div class="mt-8 grid gap-4 border-y border-white/10 bg-white/[0.04] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:gap-7">
-        <div class="min-w-0 text-center sm:text-left">
-          <p class="text-base font-black text-white">Get the App</p>
-          <p class="mt-1 text-xs leading-5 text-white/55">Book, negotiate, and manage rides on the go.</p>
-        </div>
-
-        <div class="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row">
-          <a
-            id="android-app-download"
-            href="/downloads/mairide-android.apk"
-            download="mairide-android.apk"
-            class="inline-flex min-h-11 w-full min-w-0 items-center justify-center gap-2.5 whitespace-nowrap rounded-xl bg-black px-5 text-[13px] font-bold leading-none text-white transition hover:bg-black/80 sm:w-auto sm:min-w-[10.25rem]"
-            aria-label="Download MaiRide for Android"
-          >
-            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true">
-              <path d="M7.55 5.55 5.9 2.68a.55.55 0 1 1 .95-.55L8.58 5h6.84l1.73-2.87a.55.55 0 1 1 .95.55l-1.65 2.87A4.62 4.62 0 0 1 19.5 9.6v8.65A1.75 1.75 0 0 1 17.75 20h-.9v2.1a1.1 1.1 0 1 1-2.2 0V20h-5.3v2.1a1.1 1.1 0 1 1-2.2 0V20h-.9A1.75 1.75 0 0 1 4.5 18.25V9.6a4.62 4.62 0 0 1 3.05-4.05ZM8.4 8.1a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Zm7.2 0a.7.7 0 1 0 .7.7.7.7 0 0 0-.7-.7Z"/>
-            </svg>
-            <span>Get it on Android</span>
-          </a>
-          <a
-            href="./downloads/ios/"
-            class="inline-flex min-h-11 w-full min-w-0 items-center justify-center gap-2.5 whitespace-nowrap rounded-xl bg-white px-5 text-[13px] font-bold leading-none text-mairide-primary transition hover:bg-white/90 sm:w-auto sm:min-w-[9.25rem]"
-            aria-label="Download MaiRide for iPhone"
-          >
-            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true">
-              <path d="M15.62 1.1c.14 1.12-.28 2.24-.92 3-.7.83-1.85 1.47-2.95 1.38-.16-1.08.36-2.21 1-2.94.7-.8 1.92-1.4 2.87-1.44Zm3.95 16.77c-.55 1.24-.8 1.8-1.51 2.9-.98 1.52-2.36 3.42-4.08 3.43-1.53.02-1.92-1-4-1-2.08 0-2.52 1-4.05.98-1.73-.02-3.04-1.73-4.02-3.24C-.84 16.23-.9 10.55 1.63 6.65 3.43 3.9 6.27 2.3 8.94 2.3c1.58 0 3.08 1.1 4.02 1.1.92 0 2.66-1.35 4.49-1.15.77.03 2.94.31 4.34 2.35-3.9 2.13-3.27 7.72.78 9.37Z"/>
-            </svg>
-            <span>Get it on iOS</span>
-          </a>
-        </div>
-
-        <a
-          id="android-qr-link"
-          href="https://rides.mairide.in/downloads/mairide-android.apk"
-          aria-label="Scan QR code to download the MaiRide Android app"
-          class="hidden items-center gap-3 text-left md:flex lg:justify-self-end"
-        >
-          <img
-            id="android-qr-image"
-            src="/assets/mairide-android-download-qr.png"
-            alt="QR code to download the MaiRide Android app"
-            class="h-16 w-16 shrink-0"
-            width="64"
-            height="64"
-            loading="eager"
-            style="image-rendering:pixelated"
-          />
-          <span id="android-qr-caption" class="whitespace-nowrap text-[11px] font-bold leading-4 text-white/65">Scan to Install</span>
-        </a>
-      </div>
-
-      <div class="mt-6 border-t border-white/10 pt-6 text-xs text-white/45">
+      <div class="mt-8 border-t border-white/10 pt-6 text-xs text-slate-400">
         <nav class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:justify-start" aria-label="Compliance">
           <a href="https://www.mairide.in/terms" class="transition hover:text-white" data-i18n="terms">Terms & Conditions</a>
           <a href="https://www.mairide.in/privacy" class="transition hover:text-white" data-i18n="privacy">Privacy Policy</a>
@@ -806,17 +866,18 @@
 
     const translations = {
       en: {
-        heroTitle: 'MaiRide',
-        heroSub: 'MaiRide is a smart ride-hailing and travel mobility platform connecting travelers and drivers for instant and scheduled rides.',
+        heroTitle: 'Smart Intercity & Return Rides. Zero Surge.',
+        heroSub: 'Fair fares for travelers, guaranteed return bookings for drivers, powered by intelligent mobility.',
+        heroPrimary: 'Book a Ride (Web)',
         howEyebrow: 'How It Works',
-        howTitle: 'A faster conversion path from intent to confirmed ride.',
-        howBody: 'MaiRide uses AI-led routing, verified supply, and direct digital handshakes to compress intercity booking friction into one clean flow.',
-        howCardOneTitle: 'Smart AI Route Mapping',
-        howCardOneBody: 'Every request is evaluated against live corridor intelligence so nearby empty-leg inventory surfaces instantly with cleaner route logic.',
-        howCardTwoTitle: 'Empty-Leg Price Match (Up to 50% Off)',
-        howCardTwoBody: 'Travelers only pay for the useful leg of the journey, unlocking deeply reduced one-way fares without messy offline negotiation.',
-        howCardThreeTitle: 'Secure One-Click Ride Handshake',
-        howCardThreeBody: 'Verified identities, fixed platform rules, and secure payment handshakes turn interest into confirmed bookings with minimal lag.',
+        howTitle: 'A fairer ride network for both sides of every journey.',
+        howBody: 'MaiRide turns intercity demand and empty return routes into clear, bookable opportunities with pricing transparency built in.',
+        howCardOneTitle: 'Return Trip Guarantee',
+        howCardOneBody: 'No empty return miles for drivers. MaiRide helps turn planned return corridors into confirmed earning opportunities.',
+        howCardTwoTitle: 'Transparent Pricing',
+        howCardTwoBody: 'Zero surge and fair, visible margins. AI suggests a sensible corridor while drivers retain final pricing freedom.',
+        howCardThreeTitle: 'mAiCoins Rewards',
+        howCardThreeBody: 'Instant signup bonuses and trip rewards give travelers and drivers more value from every completed journey.',
         termsOfUse: 'Terms of Use',
         refund: 'Cancellation & Refund Policy',
         footerRightsLine: '© 2026 MaiRide. All rights reserved. MaiRide is a digital mobility network platform wholly owned and operated by Syncra Systems LLP.'
@@ -1613,6 +1674,21 @@
       });
     });
 
+    const accessTabs = {
+      login: document.getElementById('landingLoginTab'),
+      signup: document.getElementById('landingSignupTab'),
+    };
+    const googleAccessLink = document.getElementById('landingGoogleAccess');
+    const emailAccessLink = document.getElementById('landingEmailAccess');
+    const setLandingAccessMode = (mode) => {
+      Object.entries(accessTabs).forEach(([key, tab]) => tab?.setAttribute('aria-selected', String(key === mode)));
+      const destination = `https://rides.mairide.in/?mode=${mode}`;
+      googleAccessLink?.setAttribute('href', destination);
+      emailAccessLink?.setAttribute('href', destination);
+    };
+    accessTabs.login?.addEventListener('click', () => setLandingAccessMode('login'));
+    accessTabs.signup?.addEventListener('click', () => setLandingAccessMode('signup'));
+
     document.querySelectorAll('a[href^="#"]').forEach((link) => {
       link.addEventListener('click', (event) => {
         const targetId = link.getAttribute('href');
@@ -1709,20 +1785,19 @@
     document.getElementById('cookiePreferencesButton').addEventListener('click', () => showCookiePrompt(true));
 
     (function syncAndroidDownloadLinks() {
-      var DEFAULT_APK = '/downloads/mairide-android.apk';
-      var CANONICAL_APK = 'https://rides.mairide.in/downloads/mairide-android.apk';
+      var DEFAULT_APK = '/downloads/mairide-android-366.apk';
       var appLink = document.getElementById('android-app-download');
       var qrLink = document.getElementById('android-qr-link');
       var caption = document.getElementById('android-qr-caption');
 
       function applyApkUrl(url) {
         if (!url) return;
-        if (qrLink) qrLink.setAttribute('href', CANONICAL_APK);
-        if (caption) caption.textContent = 'Scan to Install';
+        if (qrLink) qrLink.setAttribute('href', DEFAULT_APK);
+        if (caption) caption.textContent = 'Scan to Install on Mobile';
       }
 
       if (appLink) appLink.setAttribute('href', DEFAULT_APK);
-      applyApkUrl(CANONICAL_APK);
+      applyApkUrl(DEFAULT_APK);
     })();
     document.getElementById('cookieRejectButton').addEventListener('click', () => {
       applyConsent({ preferences: false, analytics: false, marketing: false });
