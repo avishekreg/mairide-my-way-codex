@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Capacitor discovers plugins through their native bridge classes. Keep the
+# Google credential bridge and its Play Services auth models intact in release builds.
+-keep class io.capawesome.capacitorjs.plugins.googlesignin.** { *; }
+-keep class com.google.android.gms.auth.** { *; }
+-keep class com.google.android.libraries.identity.googleid.** { *; }

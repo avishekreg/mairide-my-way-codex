@@ -572,32 +572,7 @@ export async function signInWithPopup(
   const oauthMode = sessionStorage.getItem('mairide_oauth_mode') || '';
   const context = oauthMode === 'signup' ? 'signup' : 'signin';
 
-  if (isNativeGoogleRuntime()) {
-    return await signInWithNativeGoogleOAuth(authInstance);
-  }
-
-  let idToken = '';
-
-  try {
-    idToken = await requestGoogleIdToken(context);
-  } catch (error: any) {
-    if (isNativeGoogleRuntime() && error?.code !== 'auth/popup-closed-by-user') {
-      const { error: redirectError } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: getGoogleOAuthRedirectTo(),
-        },
-      });
-
-      if (redirectError) throw mapAuthError(redirectError);
-
-      throw Object.assign(new Error('Redirecting to Google sign-in...'), {
-        code: 'auth/redirect-in-progress',
-      });
-    }
-
-    throw error;
-  }
+  const idToken = await requestGoogleIdToken(context);
 
   const { data, error } = await supabase.auth.signInWithIdToken({
     provider: 'google',
