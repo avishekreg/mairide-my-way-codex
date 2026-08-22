@@ -1,7 +1,9 @@
 package in.mairide.app;
 
 import android.os.Bundle;
+import android.content.SharedPreferences;
 import android.webkit.WebSettings;
+import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 
 /**
@@ -9,15 +11,20 @@ import com.getcapacitor.BridgeActivity;
  * when the shell points at https://rides.mairide.in.
  */
 public class MainActivity extends BridgeActivity {
+  private static final String NATIVE_STATE = "mairide_native_state";
+  private static final String WEB_CACHE_VERSION = "web_cache_version";
+
   @Override
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     try {
       if (getBridge() != null && getBridge().getWebView() != null) {
-        WebSettings settings = getBridge().getWebView().getSettings();
+        WebView webView = getBridge().getWebView();
+        WebSettings settings = webView.getSettings();
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setDomStorageEnabled(true);
         settings.setJavaScriptEnabled(true);
+        clearStaleWebAssetsAfterUpgrade(webView);
       }
     } catch (Exception ignored) {
       // Bridge may not be ready on some Capacitor versions during onCreate.
@@ -35,5 +42,21 @@ public class MainActivity extends BridgeActivity {
     } catch (Exception ignored) {
       // Ignore — capacitor.config android.allowMixedContent remains the primary switch.
     }
+  }
+
+  private void clearStaleWebAssetsAfterUpgrade(WebView webView) {
+    SharedPreferences state = getSharedPreferences(NATIVE_STATE, MODE_PRIVATE);
+    int currentVersion;
+    try {
+      currentVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+    } catch (Exception ignored) {
+      return;
+    }
+    int cachedVersion = state.getInt(WEB_CACHE_VERSION, -1);
+    if (cachedVersion == currentVersion) return;
+
+    webView.clearCache(true);
+    webView.clearHistory();
+    state.edit().putInt(WEB_CACHE_VERSION, currentVersion).apply();
   }
 }

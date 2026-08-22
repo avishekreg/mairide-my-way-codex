@@ -61,6 +61,36 @@
     .brand-wordmark .brand-ai {
       color: #E65F2B;
     }
+    @media (max-width: 639px) {
+      header nav {
+        gap: .5rem;
+        padding-inline: .75rem;
+      }
+      header nav > a[aria-label="MaiRide home"] {
+        min-width: 0;
+        flex-shrink: 1;
+        gap: .5rem;
+      }
+      header nav > a[aria-label="MaiRide home"] img {
+        width: 2.5rem;
+        height: 2.5rem;
+        flex: none;
+      }
+      header nav .brand-wordmark {
+        font-size: 1.05rem;
+        line-height: 1;
+      }
+      #languageSelect {
+        width: 3.75rem;
+        min-width: 3.75rem;
+        max-width: 3.75rem;
+        padding-left: .5rem;
+        padding-right: 1.25rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        letter-spacing: 0;
+      }
+    }
     .hero-photo {
       --hero-pan-x: 0px;
       --hero-pan-y: 0px;
@@ -633,8 +663,8 @@
               Book a Ride (Web)
             </a>
             <a
-              href="/downloads/mairide-android-366.apk"
-              download="mairide-android-366.apk"
+              href="/downloads/mairide-android-367.apk"
+              download="mairide-android-367.apk"
               class="motion-cta focus-ring hero-secondary-cta inline-flex min-h-14 items-center justify-center gap-3 rounded-2xl border px-7 text-base font-black hover:border-mairide-accent hover:text-mairide-accent"
               data-magnetic
             >
@@ -718,7 +748,7 @@
             <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
               <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="5"/><path d="M4.8 11.5 3 21l6-3 6 3-1.1-5.8"/><path d="M14 3.4A5 5 0 1 1 15.8 13"/></svg>
             </div>
-            <h3 class="mt-6 text-2xl font-black text-mairide-primary" data-i18n="howCardThreeTitle">mAiCoins Rewards</h3>
+            <h3 class="mt-6 text-2xl font-black text-mairide-primary" data-i18n="howCardThreeTitle">mAICoin Rewards</h3>
             <p class="mt-4 text-sm leading-7 text-mairide-secondary" data-i18n="howCardThreeBody">Instant signup bonuses and trip rewards give travelers and drivers more value from every completed journey.</p>
           </article>
         </div>
@@ -937,8 +967,8 @@
             <div class="grid gap-3 md:mt-5">
               <a
                 id="android-app-download"
-                href="/downloads/mairide-android-366.apk"
-                download="mairide-android-366.apk"
+                href="/downloads/mairide-android-367.apk"
+                download="mairide-android-367.apk"
                 class="footer-platform focus-ring flex min-h-[76px] items-center gap-4 rounded-2xl px-4 py-3"
                 aria-label="Download MaiRide Android APK Build 366"
               >
@@ -974,8 +1004,8 @@
             <h3 class="hidden text-sm font-black uppercase tracking-[0.16em] text-white/90 md:block">Scan to Install</h3>
             <a
               id="android-qr-link"
-              href="/downloads/mairide-android-366.apk"
-              download="mairide-android-366.apk"
+              href="/downloads/mairide-android-367.apk"
+              download="mairide-android-367.apk"
               aria-label="Scan QR code to download the MaiRide Android app"
               class="focus-ring mt-1 inline-flex flex-col items-start gap-3 rounded-2xl md:mt-5"
             >
@@ -1335,7 +1365,7 @@
         howCardOneBody: 'No empty return miles for drivers. MaiRide helps turn planned return corridors into confirmed earning opportunities.',
         howCardTwoTitle: 'Transparent Pricing',
         howCardTwoBody: 'Zero surge and fair, visible margins. AI suggests a sensible corridor while drivers retain final pricing freedom.',
-        howCardThreeTitle: 'mAiCoins Rewards',
+        howCardThreeTitle: 'mAICoin Rewards',
         howCardThreeBody: 'Instant signup bonuses and trip rewards give travelers and drivers more value from every completed journey.',
         termsOfUse: 'Terms of Use',
         refund: 'Cancellation & Refund Policy',
@@ -2338,7 +2368,7 @@
     document.getElementById('cookiePreferencesButton').addEventListener('click', () => showCookiePrompt(true));
 
     (function syncAndroidDownloadLinks() {
-      var DEFAULT_APK = '/downloads/mairide-android-366.apk';
+      var DEFAULT_APK = '/downloads/mairide-android-367.apk';
       var appLink = document.getElementById('android-app-download');
       var qrLink = document.getElementById('android-qr-link');
       var caption = document.getElementById('android-qr-caption');

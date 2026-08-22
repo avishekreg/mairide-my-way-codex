@@ -3504,7 +3504,7 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
-const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-366.apk?v=366';
+const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-367.apk?v=367';
 const PUBLIC_ANDROID_DOWNLOAD_PATH = '/downloads/mairide-android.apk';
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = '/assets/mairide-android-download-qr.png';
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
@@ -4584,9 +4584,9 @@ const LanguageSwitcher = ({
 }) => (
   <div
     className={cn(
-      'notranslate flex items-center gap-2 rounded-xl',
+      'notranslate flex min-w-0 items-center gap-2 rounded-xl',
       variant === 'auth'
-        ? 'border border-white/30 bg-mairide-primary/75 px-3 py-1.5 shadow-lg backdrop-blur-md'
+        ? 'max-w-[104px] border border-white/30 bg-mairide-primary/75 px-2.5 py-1.5 shadow-lg backdrop-blur-md sm:max-w-none sm:px-3'
         : variant === 'nav'
           ? 'border border-mairide-secondary bg-white px-2.5 py-1.5'
         : 'border border-mairide-secondary bg-white',
@@ -4597,6 +4597,7 @@ const LanguageSwitcher = ({
     <Globe2
       className={cn(
         variant === 'auth' ? 'text-white/90' : 'text-mairide-secondary',
+        variant === 'auth' && 'hidden sm:block',
         compact ? 'w-4 h-4' : 'w-5 h-5'
       )}
     />
@@ -4612,6 +4613,8 @@ const LanguageSwitcher = ({
           ? isAppWebViewRuntime()
             ? 'w-[94px] md:w-[112px] truncate'
             : 'w-[106px] md:w-[132px] truncate'
+          : variant === 'auth'
+            ? 'w-[52px] truncate sm:w-[128px]'
           : compact
             ? 'w-[128px] md:w-[152px] truncate'
             : 'w-[172px]'
@@ -30763,7 +30766,7 @@ const App = () => {
             </main>
             <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
             {!user || !profile ? (
-              <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
+              <div className="fixed right-3 top-3 z-[70] md:right-4 md:top-4">
                 <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
               </div>
             ) : null}
@@ -30814,7 +30817,7 @@ const App = () => {
             </Routes>
           </div>
           <AppFooter releaseVersion={releaseVersion} buildStamp={buildStamp} />
-          <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0">
+          <div className="fixed right-3 top-3 z-[70] md:right-4 md:top-4">
             <LanguageSwitcher value={uiLanguage} onChange={commitUiLanguage} compact variant="auth" />
           </div>
           <div id="google_translate_element" className="hidden" />
