@@ -3504,7 +3504,7 @@ class ErrorBoundary extends Component<any, any> {
 const LOGO_URL = "/logo.svg";
 const BRAND_NAME = "mAIRide";
 const BRAND_TAGLINE = "";
-const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-368.apk?v=368';
+const LIVE_ANDROID_APK_URL = 'https://rides.mairide.in/downloads/mairide-android-369.apk?v=369';
 const PUBLIC_ANDROID_DOWNLOAD_PATH = '/downloads/mairide-android.apk';
 const PUBLIC_ANDROID_DOWNLOAD_QR_URL = '/assets/mairide-android-download-qr.png';
 const SUPER_ADMIN_EMAIL = (import.meta.env.VITE_SUPER_ADMIN_EMAIL || '').trim().toLowerCase();
@@ -23120,13 +23120,6 @@ const ChatbotCore = ({
 
   const getLanguageLabel = (language: string) =>
     languageOptions.find((item) => item.value === language)?.label || 'English';
-
-  useEffect(() => {
-    if (!canOpenAdminTab(activeTab)) {
-      setActiveTab('dashboard');
-      setIsB2BNavOpen(false);
-    }
-  }, [activeTab, canOpenAdminTab]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
