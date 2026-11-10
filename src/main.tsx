@@ -1,7 +1,9 @@
-import {Component, StrictMode, type ErrorInfo, type ReactNode} from 'react';
+import {Component, lazy, Suspense, StrictMode, type ErrorInfo, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
 import './index.css';
+
+// Module evaluation failures must reach the boundary too, before App renders.
+const App = lazy(() => import('./App.tsx'));
 
 class RootErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean}> {
   state = {hasError: false};
@@ -37,7 +39,9 @@ const mountApp = () => {
   createRoot(rootElement).render(
     <StrictMode>
       <RootErrorBoundary>
-        <App />
+        <Suspense fallback={<main role="status">Starting MaiRide…</main>}>
+          <App />
+        </Suspense>
       </RootErrorBoundary>
     </StrictMode>,
   );

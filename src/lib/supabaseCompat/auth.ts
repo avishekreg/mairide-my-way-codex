@@ -137,7 +137,9 @@ class SupabaseAuthCompat {
 }
 
 export const auth = new SupabaseAuthCompat();
-void auth.hydrate();
+void auth.hydrate().catch((error) => {
+  console.warn('Initial auth hydration failed; login remains available.', error);
+});
 
 export class GoogleAuthProvider {}
 
@@ -226,12 +228,18 @@ async function signInWithNativeGoogleOAuth(authInstance: SupabaseAuthCompat) {
 
     try {
       listener = await App.addListener('appUrlOpen', (event) => {
-        void finish(String(event?.url || ''));
+        void finish(String(event?.url || '')).catch(reject);
       });
       if (!Capacitor.isPluginAvailable('Browser')) {
-        throw new Error('Google sign-in requires the native Browser plugin. Please install the latest mAIRide app build.');
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+        return;
       }
-      await Browser.open({ url: data.url, presentationStyle: 'fullscreen' });
+      try {
+        await Browser.open({ url: data.url, presentationStyle: 'fullscreen' });
+      } catch (error: any) {
+        if (error?.code !== 'UNIMPLEMENTED' && error?.code !== 'UNAVAILABLE') throw error;
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+      }
     } catch (openError: any) {
       if (!settled) {
         settled = true;

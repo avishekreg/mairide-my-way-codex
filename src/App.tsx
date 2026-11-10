@@ -29573,11 +29573,22 @@ const App = () => {
       await refreshLiveBundle();
     };
 
-    const listenerPromise = CapacitorApp.addListener('appStateChange', handleAppStateChange);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void refreshLiveBundle();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const listenerPromise = Promise.resolve().then(() => {
+      if (!Capacitor.isPluginAvailable('App')) return null;
+      return CapacitorApp.addListener('appStateChange', handleAppStateChange);
+    }).catch((error) => {
+      console.warn('Native app-state listener unavailable; using page visibility.', error);
+      return null;
+    });
     void refreshLiveBundle();
 
     return () => {
-      void listenerPromise.then((listener) => listener.remove()).catch(() => undefined);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      void listenerPromise.then((listener) => listener?.remove()).catch(() => undefined);
     };
   }, []);
 
@@ -29594,33 +29605,43 @@ const App = () => {
       try {
         await CapacitorApp.minimizeApp();
       } catch {
-        await CapacitorApp.exitApp();
+        try {
+          await CapacitorApp.exitApp();
+        } catch (error) {
+          console.warn('Native app close unavailable.', error);
+        }
       }
     };
 
-    const listenerPromise = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-      if (!canGoBack && isRootShellPath()) {
-        const now = Date.now();
-        if (now - lastAndroidBackPressAtRef.current <= 1600) {
-          lastAndroidBackPressAtRef.current = 0;
-          void minimizeAppToBackground();
+    const listenerPromise = Promise.resolve().then(() => {
+      if (!Capacitor.isPluginAvailable('App')) return null;
+      return CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+        if (!canGoBack && isRootShellPath()) {
+          const now = Date.now();
+          if (now - lastAndroidBackPressAtRef.current <= 1600) {
+            lastAndroidBackPressAtRef.current = 0;
+            void minimizeAppToBackground();
+            return;
+          }
+          lastAndroidBackPressAtRef.current = now;
           return;
         }
-        lastAndroidBackPressAtRef.current = now;
-        return;
-      }
 
-      if (canGoBack && !isRootShellPath()) {
+        if (canGoBack && !isRootShellPath()) {
+          lastAndroidBackPressAtRef.current = 0;
+          window.history.back();
+          return;
+        }
+
         lastAndroidBackPressAtRef.current = 0;
-        window.history.back();
-        return;
-      }
-
-      lastAndroidBackPressAtRef.current = 0;
+      });
+    }).catch((error) => {
+      console.warn('Native back listener unavailable; using browser navigation.', error);
+      return null;
     });
 
     return () => {
-      void listenerPromise.then((listener) => listener.remove()).catch(() => undefined);
+      void listenerPromise.then((listener) => listener?.remove()).catch(() => undefined);
     };
   }, []);
 
