@@ -1,6 +1,6 @@
 {
   "appVersion": "V3.5.4",
   "apkUrl": "https://rides.mairide.in/downloads/mairide-android-370.apk?v=370",
-  "buildSha": "build-370-release",
-  "builtAt": "2026-09-02T14:51:56Z"
+  "buildSha": "build-370-debug-signed",
+  "builtAt": "2026-11-10T20:50:41.605851Z"
 }
